@@ -32,6 +32,7 @@ export function petCarouselMarkup(icon, pets = loadPetProfiles()) {
 export function homePage() {
   const profile = JSON.parse(sessionStorage.getItem('furgo-demo-user-profile') || '{}');
   const userName = profile.name || 'Pet Parent';
+  const creditBalance = Number(localStorage.getItem('furgo-demo-credit-balance') || 0) || 0;
   const serviceArtwork = [
     ['Marketplace', 'MVP Icon-01.png'], ['Grooming', 'MVP Icon-02.png'],
     ['Pet Hotel', 'MVP Icon-04.png'], ['Pet Daycare', 'MVP Icon-03.png'],
@@ -50,7 +51,7 @@ export function homePage() {
     <section class="home-orange" aria-label="Furgo dashboard">
       <div class="home-topline"><div><span class="home-kicker">Better Care For Every Pet</span><h1>Hey, ${escapeHTML(userName)}</h1></div><button class="notification-button" type="button" aria-label="Notifications" data-toast="You’re all caught up."><img src="${icon('Icon-10.png')}" alt="" /></button></div>
       <form class="home-search" role="search" data-search-form><span class="search-symbol" aria-hidden="true"></span><input type="search" name="service" placeholder="Search pet services" aria-label="Search pet services" /><span class="search-hint">Try “grooming”</span></form>
-      <div class="credit-row"><!-- Animated home artwork falls back to the PNG if the GIF cannot load. --><img class="home-pet-art" src="Image/Home Image/Home Pet.webp" onerror="this.onerror=null;this.src='Image/Home Image/Home Pet.png'" alt="Furgo’s illustrated pets" /><!-- Furgo Credit balance card opens My Furgo Credit and records Home as its return destination. --><a class="credit-card" href="#credit?from=home"><span class="credit-label">Total Furgo Credit</span><strong>MYR 0.00</strong><img class="wallet-mark" src="${icon('Icon-11.png')}" alt="" /></a></div>
+      <div class="credit-row"><img class="home-pet-art" src="Image/Icon/FurgoMascot.png" alt="Furgo mascot" /><!-- Furgo Credit balance card opens My Furgo Credit and records Home as its return destination. --><a class="credit-card" href="#credit?from=home"><span class="credit-label">Total Furgo Credit</span><span class="credit-balance-row"><strong>MYR ${creditBalance.toFixed(2)}</strong><img class="wallet-mark" src="${icon('Icon-11.png')}" alt="" /></span></a></div>
       <nav class="service-shortcuts" id="services" aria-label="Pet services">${serviceArtwork.map(([name, file]) => `<a class="shortcut" href="${name === 'Marketplace' ? '#marketplace' : name === 'Grooming' ? '#grooming' : name === 'Pet Hotel' ? '#hotel' : '#daycare'}" data-service="${name.toLowerCase()}"><img src="${icon(file)}" alt="" /><span>${name}</span></a>`).join('')}</nav>
     </section>
     <div class="home-content">
