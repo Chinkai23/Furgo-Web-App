@@ -1,0 +1,13 @@
+import { bottomNavigation, escapeHTML } from '../shared.js';
+
+// My Furgo Credit page: displays the local demo balance and simulates top-ups for layout review.
+export function creditPage(returnTo = 'profile') {
+  const icon = (file) => `Image/Icon/${encodeURIComponent(file)}`;
+  const backTarget = returnTo === 'home' ? '#home' : returnTo === 'checkout' ? '#checkout' : '#profile';
+  const backLabel = returnTo === 'home' ? 'Back to Home' : returnTo === 'checkout' ? 'Back to Checkout' : 'Back to My Profile';
+  const balance = Number(localStorage.getItem('furgo-demo-credit-balance') || 0);
+  let transactions = [];
+  try { transactions = JSON.parse(localStorage.getItem('furgo-demo-credit-transactions') || '[]'); } catch { transactions = []; }
+  const rows = transactions.map((transaction) => `<li><span><strong>${escapeHTML(transaction.label)}</strong><small>${escapeHTML(transaction.date)}</small></span><b class="${Number(transaction.amount) < 0 ? 'credit-debit' : ''}">${Number(transaction.amount) < 0 ? '−' : '+'} MYR ${Math.abs(Number(transaction.amount)).toFixed(2)}</b></li>`).join('');
+  return `<main class="profile-page account-page"><header class="profile-heading"><a class="profile-back" href="${backTarget}" aria-label="${backLabel}">‹</a><h1>My Furgo Credit</h1></header><section class="credit-balance-card"><span>Total Furgo Credit</span><strong data-credit-balance>MYR ${balance.toFixed(2)}</strong><small>Use your Furgo Credit for eligible Furgo services.</small></section><section class="profile-card account-card"><h2>Top Up Furgo Credit</h2><p class="account-help-text">Choose an amount to add to your Furgo Credit.</p><form class="credit-topup" data-credit-form><label><input type="radio" name="amount" value="20" checked /><span>MYR 20</span></label><label><input type="radio" name="amount" value="50" /><span>MYR 50</span></label><label><input type="radio" name="amount" value="100" /><span>MYR 100</span></label><div class="form-feedback" role="status" aria-live="polite"></div><button class="button button-primary account-submit" type="submit">Continue to Payment</button></form><p class="demo-note">Prototype only: no payment is processed. Demo top-ups update your Furgo Credit balance in this browser.</p></section><section class="profile-card account-card credit-history"><h2>Furgo Credit History</h2><ul data-credit-history>${rows || '<li class="account-empty-row">Your Furgo Credit transactions will appear here.</li>'}</ul></section>${bottomNavigation(returnTo === 'home' ? 'home' : 'profile', icon)}<div class="home-toast" role="status" aria-live="polite"></div></main>`;
+}
