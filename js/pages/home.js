@@ -21,7 +21,7 @@ export function petCarouselMarkup(icon, pets = loadPetProfiles()) {
     const remarks = Array.isArray(pet.remarks) ? pet.remarks : [...(pet.tags || []), ...(pet.redFlagRemark ? [pet.redFlagRemark] : [])];
     const profileUrl = `#pet-profile?id=${encodeURIComponent(pet.id)}`;
     const hasVaccinationCards = (pet.vaccinationCards || []).length > 0;
-    return `<article class="pet-card"><div class="pet-card-side"><label class="pet-photo-trigger" aria-label="Upload a photo for ${escapeHTML(pet.name)}"><img class="pet-avatar" src="${escapeHTML(avatar)}" alt="${pet.photo ? `${escapeHTML(pet.name)}'s uploaded profile photo` : 'Default pet profile picture'}" /><input type="file" accept="image/*" data-pet-photo="${escapeHTML(pet.id)}" aria-label="Choose ${escapeHTML(pet.name)}'s profile photo" /></label><div class="pet-tags">${remarks.map((remark) => `<span data-pet-remark title="${escapeHTML(remark)}">${escapeHTML(remark)}</span>`).join('')}<a class="pet-view-more" data-pet-view-more href="${profileUrl}" hidden>View more</a></div></div><div class="pet-info"><h3>${escapeHTML(pet.name)}</h3><p class="pet-description"><span>${escapeHTML(pet.breed || 'Breed not added')}${pet.sex ? ` • ${escapeHTML(pet.sex)}` : ''}</span></p><p class="pet-vaccination-status ${hasVaccinationCards ? 'has-vaccination-cards' : 'no-vaccination-cards'}">Vaccination Cards: ${hasVaccinationCards ? 'Yes' : 'No'}</p><p class="pet-weight">${pet.weight ? `${escapeHTML(pet.weight)}kg` : 'Weight not added'}</p></div><a class="pet-profile-button" href="${profileUrl}">Check Profile</a></article>`;
+    return `<article class="pet-card"><label class="pet-photo-trigger" aria-label="Upload a photo for ${escapeHTML(pet.name)}"><img class="pet-avatar" src="${escapeHTML(avatar)}" alt="${pet.photo ? `${escapeHTML(pet.name)}'s uploaded profile photo` : 'Default pet profile picture'}" /><input type="file" accept="image/*" data-pet-photo="${escapeHTML(pet.id)}" aria-label="Choose ${escapeHTML(pet.name)}'s profile photo" /></label><div class="pet-info"><h3>${escapeHTML(pet.name)}</h3><p class="pet-description"><span>${escapeHTML(pet.breed || 'Breed not added')}${pet.sex ? ` • ${escapeHTML(pet.sex)}` : ''}</span></p><p class="pet-vaccination-status ${hasVaccinationCards ? 'has-vaccination-cards' : 'no-vaccination-cards'}">Vaccination Cards: ${hasVaccinationCards ? 'Yes' : 'No'}</p><p class="pet-weight">${pet.weight ? `${escapeHTML(pet.weight)}kg` : 'Weight not added'}</p></div><div class="pet-tags">${remarks.map((remark) => `<span data-pet-remark title="${escapeHTML(remark)}">${escapeHTML(remark)}</span>`).join('')}<a class="pet-view-more" data-pet-view-more href="${profileUrl}" hidden>View more</a></div><a class="pet-profile-button" href="${profileUrl}">Check Profile</a></article>`;
   }).join('');
   return `${cards}<a class="add-pet-card" href="#pet-profile?mode=add" aria-label="Add a new pet"><img class="add-pet-plus" src="${icon('Icon-12.png')}" alt="" /><small>Add New Pet</small></a>`;
 }
@@ -37,11 +37,13 @@ export function fitPetCardRemarks(root = document) {
     moreLink.hidden = true;
     container.classList.remove('has-more-remarks');
 
-    if (container.scrollWidth <= container.clientWidth) return;
+    const remarksOverflow = () => container.scrollWidth > container.clientWidth
+      || remarks.some((remark) => !remark.hidden && remark.scrollWidth > remark.clientWidth);
+    if (!remarksOverflow()) return;
 
     moreLink.hidden = false;
     container.classList.add('has-more-remarks');
-    for (let index = remarks.length - 1; index >= 0 && container.scrollWidth > container.clientWidth; index -= 1) {
+    for (let index = remarks.length - 1; index >= 0 && remarksOverflow(); index -= 1) {
       remarks[index].hidden = true;
     }
   });

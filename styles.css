@@ -396,13 +396,12 @@ h1, h2, h3, p { margin-top: 0; }
 .pet-carousel { display: flex; gap: 12px; overflow-x: auto; margin: 0 -20px 0 -12px; padding: 12px 20px 18px 12px; scrollbar-width: none; scroll-snap-type: x mandatory; }
 .pet-carousel::-webkit-scrollbar { display: none; }
 .pet-card, .add-pet-card { width: 340px; min-width: 340px; height: 214px; flex: 0 0 340px; scroll-snap-align: start; }
-.pet-card { position: relative; display: grid; grid-template-columns: 112px minmax(0, 1fr); align-content: center; align-items: center; justify-content: center; column-gap: 12px; padding: 18px 26px 54px; border: 0; border-radius: 22px; color: var(--ink); text-align: left; background: url("Image/Other%20Image/Pet%20Profile%20Background.png") center / 100% 100% no-repeat; box-shadow: 0px 4px 4px rgba(206, 88, 0, 0.55); }
+.pet-card { position: relative; display: grid; grid-template-columns: 112px minmax(0, 1fr); grid-template-rows: auto auto; align-content: center; align-items: center; justify-content: center; column-gap: 12px; row-gap: 7px; padding: 18px 26px 54px; border: 0; border-radius: 22px; color: var(--ink); text-align: left; background: url("Image/Other%20Image/Pet%20Profile%20Background.png") center / 100% 100% no-repeat; box-shadow: 0px 4px 4px rgba(206, 88, 0, 0.55); }
 .add-pet-card:focus-visible { outline: 3px solid #ff780066; outline-offset: 3px; }
-.pet-card-side { width: 112px; min-width: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 7px; }
-.pet-photo-trigger { width: 92px; height: 92px; position: relative; flex: 0 0 auto; margin: 0; border-radius: 50%; cursor: pointer; }
+.pet-photo-trigger { width: 92px; height: 92px; position: relative; grid-column: 1; grid-row: 1; justify-self: center; align-self: center; margin: 0; border-radius: 50%; cursor: pointer; }
 .pet-avatar { width: 100%; height: 100%; display: block; border-radius: 50%; object-fit: cover; background: #fff8f0; }
 .pet-photo-trigger input { width: 100%; height: 100%; position: absolute; inset: 0; opacity: 0; cursor: pointer; }
-.pet-info { width: 100%; min-width: 0; align-self: start; padding: 0; text-align: left; }
+.pet-info { width: 100%; min-width: 0; grid-column: 2; grid-row: 1; align-self: start; padding: 0; text-align: left; }
 .pet-info h3 { overflow: hidden; margin: 0 0 2px; font: 700 21px/1.1 'Avenir Next'; text-overflow: ellipsis; text-transform: uppercase; white-space: nowrap; }
 .pet-info p { display: grid; grid-template-columns: 55px 1fr; gap: 4px; margin: 0 0 2px; font-size: 15px; line-height: 1.2; }
 .pet-info .pet-description { display: block; overflow: hidden; padding-right: 0; font-size: 14px; text-overflow: ellipsis; white-space: nowrap; }
@@ -411,9 +410,8 @@ h1, h2, h3, p { margin-top: 0; }
 .pet-info .pet-vaccination-status.no-vaccination-cards { color: #9a9a9a; }
 .pet-info .pet-vaccination-status.has-vaccination-cards { color: var(--ink); }
 .pet-info p span { color: #70615a; }.pet-info p b { font-weight: 600; }
-.pet-tags { width: 100%; min-width: 0; display: flex; flex-wrap: nowrap; align-items: center; justify-content: center; overflow: hidden; gap: 4px; margin: 0; white-space: nowrap; }
+.pet-tags { width: 100%; min-width: 0; grid-column: 1 / -1; grid-row: 2; display: flex; flex-wrap: nowrap; align-items: center; justify-content: flex-start; overflow: hidden; gap: 4px; margin: 0; white-space: nowrap; }
 .pet-tags span { min-width: 0; max-width: 100%; flex: 0 0 auto; overflow: hidden; padding: 5px 8px; border-radius: 20px; color: #c75b19; background: #ffcfaa; font-size: 11px; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
-.pet-tags.has-more-remarks span { max-width: calc(100% - 54px); }
 .pet-profile-button { min-height: 36px; max-width: calc(100% - 56px); position: absolute; bottom: 24px; left: 50%; display: flex; align-items: center; justify-content: center; transform: translateX(-50%); padding: 0 20px; border: 0; border-radius: 20px; color: #fff; background: var(--orange); box-shadow: 0 4px 9px #dc63012f; font-size: 14px; font-weight: 700; white-space: nowrap; }
 .pet-profile-button:focus-visible { outline: 3px solid #ff780066; outline-offset: 3px; }
 .add-pet-card { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; border: 0; border-radius: 22px; color: var(--ink); background: #f3f3f3; box-shadow: 0px 4px 4px rgba(56, 56, 56, 0.45); cursor: pointer; }
