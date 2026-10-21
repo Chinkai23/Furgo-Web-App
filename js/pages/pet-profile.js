@@ -35,6 +35,19 @@ export function petProfilePage({ petId = '', mode = '', returnTo = 'home' } = {}
   const remarks = Array.isArray(pet.remarks) ? pet.remarks : [...(pet.tags || []), ...(pet.redFlagRemark ? [pet.redFlagRemark] : [])];
   const icon = (file) => `Image/Icon/${encodeURIComponent(file)}`;
   const avatar = pet.photo || icon('Icon-17.png');
+  const [birthYear = '', birthMonth = '', birthDay = ''] = (pet.birthDate || '').split('-');
+  const currentYear = new Date().getFullYear();
+  const birthYearOptions = Array.from({ length: Math.max(0, currentYear - 1899) }, (_, index) => {
+    const year = String(currentYear - index);
+    return `<option value="${year}" ${birthYear === year ? 'selected' : ''}>${year}</option>`;
+  }).join('');
+  const birthMonthOptions = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+    .map((month, index) => `<option value="${String(index + 1).padStart(2, '0')}" ${birthMonth === String(index + 1).padStart(2, '0') ? 'selected' : ''}>${month}</option>`).join('');
+  const birthDayCount = birthMonth ? new Date(Number(birthYear || currentYear), Number(birthMonth), 0).getDate() : 31;
+  const birthDayOptions = Array.from({ length: birthDayCount }, (_, index) => {
+    const day = String(index + 1).padStart(2, '0');
+    return `<option value="${day}" ${birthDay === day ? 'selected' : ''}>${day}</option>`;
+  }).join('');
   const breedOptions = dogBreeds.map((breed) => `<option value="${escapeHTML(breed)}"></option>`).join('');
   const remarkChips = remarks.map((remark, index) => `<span class="pet-remark-chip" data-remark-value="${escapeHTML(remark)}">${escapeHTML(remark)}<button type="button" data-remove-remark="${index}" aria-label="Delete remark: ${escapeHTML(remark)}">×</button></span>`).join('');
   const vaccinationCards = Array.isArray(pet.vaccinationCards) ? pet.vaccinationCards : [];
@@ -56,7 +69,8 @@ export function petProfilePage({ petId = '', mode = '', returnTo = 'home' } = {}
         <label class="pet-form-field pet-name-field">Pet Name<input name="name" required maxlength="60" value="${escapeHTML(pet.name || '')}" /></label>
         <label class="pet-form-field">Breed<input name="breed" list="dog-breed-suggestions" autocomplete="off" maxlength="80" placeholder="Type or choose a breed" value="${escapeHTML(pet.breed || '')}" /><datalist id="dog-breed-suggestions">${breedOptions}</datalist></label>
         <label class="pet-form-field">Gender<select name="sex"><option value="">Select gender</option><option value="Male" ${pet.sex === 'Male' ? 'selected' : ''}>Male</option><option value="Female" ${pet.sex === 'Female' ? 'selected' : ''}>Female</option></select></label>
-        <label class="pet-form-field">Birth Date<input name="birthDate" type="date" value="${escapeHTML(pet.birthDate || '')}" /></label>
+        <div class="pet-form-field pet-birth-date-field"><span>Birth Date</span><div class="pet-birth-date-selects"><select data-birth-day aria-label="Birth day"><option value="">Day</option>${birthDayOptions}</select><select data-birth-month aria-label="Birth month"><option value="">Mon</option>${birthMonthOptions}</select><select data-birth-year aria-label="Birth year"><option value="">Year</option>${birthYearOptions}</select></div></div>
+        <input type="hidden" name="birthDate" value="${escapeHTML(pet.birthDate || '')}" data-birth-date-value />
         <label class="pet-form-field">Neutered / Spayed<select name="neutered"><option value="">Select</option><option value="yes" ${pet.neutered === 'yes' ? 'selected' : ''}>Yes</option><option value="no" ${pet.neutered === 'no' ? 'selected' : ''}>No</option></select></label>
         <label class="pet-form-field">Weight (kg)<input name="weight" type="number" min="0" max="200" step="0.1" value="${escapeHTML(pet.weight || '')}" /></label>
         <label class="pet-form-field">Colour<input name="colour" maxlength="60" placeholder="e.g. White and grey" value="${escapeHTML(pet.colour || '')}" /></label>

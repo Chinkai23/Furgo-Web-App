@@ -631,6 +631,32 @@ function setupPetProfileForm() {
       return Array.isArray(existingPet?.vaccinationCards) ? existingPet.vaccinationCards : [];
     } catch { return []; }
   })();
+  const birthMonth = form.querySelector('[data-birth-month]');
+  const birthDay = form.querySelector('[data-birth-day]');
+  const birthYear = form.querySelector('[data-birth-year]');
+  const birthDateValue = form.querySelector('[data-birth-date-value]');
+  const syncBirthDate = () => {
+    const month = birthMonth.value;
+    const day = birthDay.value;
+    const year = birthYear.value;
+    birthDateValue.value = month && day && year ? `${year}-${month}-${day}` : '';
+  };
+  const updateBirthDays = () => {
+    const previousDay = Number(birthDay.value);
+    const month = Number(birthMonth.value);
+    const year = Number(birthYear.value) || 2000;
+    const dayCount = month ? new Date(year, month, 0).getDate() : 31;
+    const selectedDay = previousDay ? Math.min(previousDay, dayCount) : 0;
+    birthDay.replaceChildren(new Option('Day', ''));
+    for (let day = 1; day <= dayCount; day += 1) {
+      const value = String(day).padStart(2, '0');
+      birthDay.add(new Option(value, value, false, Number(value) === selectedDay));
+    }
+    syncBirthDate();
+  };
+  birthMonth.addEventListener('change', updateBirthDays);
+  birthYear.addEventListener('change', updateBirthDays);
+  birthDay.addEventListener('change', syncBirthDate);
 
   // Keeps the vaccination document list current and lets an owner remove an uploaded card.
   const renderVaccinationCards = () => {
@@ -884,6 +910,13 @@ function setupPetProfileForm() {
   form.addEventListener('submit', async (event) => {
     event.preventDefault();
     if (!form.reportValidity()) return;
+    const birthParts = [birthMonth.value, birthDay.value, birthYear.value];
+    if (birthParts.some(Boolean) && !birthParts.every(Boolean)) {
+      feedback.textContent = 'Choose the month, day, and year, or leave Birth Date blank.';
+      feedback.classList.add('visible');
+      [birthMonth, birthDay, birthYear].find((field) => !field.value)?.focus();
+      return;
+    }
     const savedPets = loadPetProfiles();
     const currentId = form.dataset.petId;
     const petId = currentId && /^[0-9a-f]{8}-[0-9a-f-]{27}$/i.test(currentId) ? currentId : crypto.randomUUID();
