@@ -89,14 +89,12 @@ export function setupHotelBooking() {
   const updateHealthGate = () => {
     const pet = selectedPet();
     const hasCard = Boolean(pet?.vaccinationCards?.length);
-    const expiry = pet?.vaccinationValidUntil || '';
-    const expiryOkay = Boolean(expiry && (!form.elements.checkOut.value || expiry >= form.elements.checkOut.value));
     const gate = form.querySelector('[data-hotel-health-gate]');
-    gate.innerHTML = !pet ? '<strong>Add a pet profile and current vaccination card to book Pet Hotel.</strong>' : !hasCard ? '<strong>Vaccination record required.</strong> Add a current card in your pet profile to book Pet Hotel.' : !expiry ? '<strong>Vaccination expiry date required.</strong> Add the date from the vaccination card before booking.' : !expiryOkay ? `<strong>Vaccination expires before check-out.</strong> The saved record is valid through ${escapeHTML(expiry)}.` : `<strong>Vaccination record is valid through ${escapeHTML(expiry)}.</strong> Confirm it is current before booking.`;
+    gate.innerHTML = !pet ? '<strong>Add a pet profile and current vaccination card to book Pet Hotel.</strong>' : !hasCard ? '<strong>Vaccination card required.</strong> Add a current card in your pet profile to book Pet Hotel.' : '<strong>Vaccination card uploaded.</strong> Confirm it remains current for the full stay. Staff will review the card.';
     const confirm = form.querySelector('[data-hotel-vaccination-confirm]');
-    confirm.hidden = !hasCard || !expiryOkay;
-    form.elements.vaccinationCurrent.required = hasCard && expiryOkay;
-    if (!hasCard || !expiryOkay) form.elements.vaccinationCurrent.checked = false;
+    confirm.hidden = !hasCard;
+    form.elements.vaccinationCurrent.required = hasCard;
+    if (!hasCard) form.elements.vaccinationCurrent.checked = false;
     const profileLink = form.querySelector('[data-hotel-pet-profile]');
     profileLink.href = pet ? `#pet-profile?id=${encodeURIComponent(pet.id)}&from=hotel` : '#pet-profile?mode=add&from=hotel';
   };
@@ -281,7 +279,7 @@ export function setupHotelBooking() {
     if (!form.reportValidity()) return;
     const quote = refreshQuote();
     const pet = quote.pet;
-    if (!pet || !pet.vaccinationCards?.length || !pet.vaccinationValidUntil || pet.vaccinationValidUntil < form.elements.checkOut.value || !form.elements.vaccinationCurrent.checked) { message.textContent = 'A vaccination card with an expiry date on or after check-out, plus your confirmation, is required to book Pet Hotel.'; message.classList.add('visible'); return; }
+    if (!pet || !pet.vaccinationCards?.length || !form.elements.vaccinationCurrent.checked) { message.textContent = 'Upload a vaccination card and confirm that it remains current for the full stay to book Pet Hotel.'; message.classList.add('visible'); return; }
     if (!quote.room || !quote.nightCount) { message.textContent = 'Choose a room type and a valid check-in and check-out date.'; message.classList.add('visible'); return; }
     const selectedUnit = availableHotelUnits(quote.room, form.elements.outlet.value, form.elements.checkIn.value, form.elements.checkOut.value).find((unit) => unit.unit === form.elements.roomUnit.value);
     if (!selectedUnit?.available) { message.textContent = 'That room was just booked for part of your stay. Choose another available unit or date.'; message.classList.add('visible'); refreshRooms(); return; }
@@ -310,7 +308,7 @@ export function setupHotelBooking() {
     const booking = {
       id: `hotel-${Date.now()}`, userId: profile.id || '', reference: `HT-${Date.now().toString().slice(-7)}`, createdAt: new Date().toISOString(),
       customerName: profile.name || 'Furgo Customer', customerEmail: profile.email || '', customerPhone: profile.phone || '', emergencyName: form.elements.emergencyName.value.trim(), emergencyPhone: form.elements.emergencyPhone.value.trim(),
-      petId: pet.id, petName: pet.name, petSpecies: pet.species || 'Dog', petBreed: pet.breed || 'Not provided', petWeight: pet.weight || '0', redFlags: (pet.remarks || []).join(' · ') || pet.redFlagRemark || '', vaccinationCards: pet.vaccinationCards, vaccinationValidUntil: pet.vaccinationValidUntil, vaccinationStatus: 'Owner confirmed · pending staff review',
+      petId: pet.id, petName: pet.name, petSpecies: pet.species || 'Dog', petBreed: pet.breed || 'Not provided', petWeight: pet.weight || '0', redFlags: (pet.remarks || []).join(' · ') || pet.redFlagRemark || '', vaccinationCards: pet.vaccinationCards, vaccinationStatus: 'Owner confirmed · pending staff review',
       outlet: form.elements.outlet.value, roomId: quote.room.id, roomName: quote.room.name, assignedUnit: form.elements.roomUnit.value, checkIn: form.elements.checkIn.value, checkOut: form.elements.checkOut.value, nights: quote.nightCount, nightlyRate: Number(quote.room.nightlyRate), roomTotal: quote.roomTotal,
       addOns, grooming: form.elements.includeGrooming.checked && quote.groomingItem ? { packageId: quote.groomingItem.id, packageName: quote.groomingItem.name, price: quote.groomingPrice, date: form.elements.groomingDate.value, time: form.elements.groomingTime.value } : null,
       taxi: form.elements.includeTaxi.checked ? { pickup: form.elements.taxiPickup.checked, dropoff: form.elements.taxiDropoff.checked, address: [taxiAddress.street, taxiAddress.city, taxiAddress.state].filter(Boolean).join(', '), city: taxiAddress.city || '', schedule: form.elements.taxiSchedule.value, distanceKm: quote.taxiFare ? (quote.taxiFare - Number(settings.taxiBaseFare)) / Number(settings.taxiPerKm) : 0, fare: quote.taxiFare * quote.taxiTrips } : null,

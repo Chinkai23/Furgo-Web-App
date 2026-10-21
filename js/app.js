@@ -933,11 +933,11 @@ function setupPetProfileForm() {
       birthDate: form.elements.birthDate.value,
       neutered: form.elements.neutered.value,
       weight: form.elements.weight.value,
-      colour: form.elements.colour.value.trim(),
+      colour: existingPet.colour || '',
       photo: uploadedPhoto || existingPet.photo || '',
       photoPath: existingPet.photoPath || '',
       vaccinationCards,
-      vaccinationValidUntil: form.elements.vaccinationValidUntil.value,
+      vaccinationValidUntil: existingPet.vaccinationValidUntil || '',
       remarks,
     };
     const { data: authData } = await supabase.auth.getUser();
