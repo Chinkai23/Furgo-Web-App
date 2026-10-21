@@ -48,7 +48,7 @@ export function petProfilePage({ petId = '', mode = '', returnTo = 'home' } = {}
     const day = String(index + 1).padStart(2, '0');
     return `<option value="${day}" ${birthDay === day ? 'selected' : ''}>${day}</option>`;
   }).join('');
-  const breedOptions = dogBreeds.map((breed) => `<option value="${escapeHTML(breed)}"></option>`).join('');
+  const breedOptions = dogBreeds.map((breed, index) => `<button type="button" role="option" aria-selected="false" id="dog-breed-option-${index}" data-breed-option="${escapeHTML(breed)}">${escapeHTML(breed)}</button>`).join('');
   const remarkChips = remarks.map((remark, index) => `<span class="pet-remark-chip" data-remark-value="${escapeHTML(remark)}">${escapeHTML(remark)}<button type="button" data-remove-remark="${index}" aria-label="Delete remark: ${escapeHTML(remark)}">×</button></span>`).join('');
   const vaccinationCards = Array.isArray(pet.vaccinationCards) ? pet.vaccinationCards : [];
   const vaccinationCardRows = vaccinationCards.map((card, index) => `<li><a href="${escapeHTML(card.data)}" target="_blank" rel="noopener">${escapeHTML(card.name)}</a><button type="button" data-remove-vaccination-card="${index}" aria-label="Remove ${escapeHTML(card.name)}">×</button></li>`).join('');
@@ -67,7 +67,7 @@ export function petProfilePage({ petId = '', mode = '', returnTo = 'home' } = {}
       <!-- Pet details section: owners edit identity, breed, age, gender, and care measurements. -->
       <div class="pet-profile-fields">
         <label class="pet-form-field pet-name-field">Pet Name<input name="name" required maxlength="60" value="${escapeHTML(pet.name || '')}" /></label>
-        <label class="pet-form-field">Breed<input name="breed" list="dog-breed-suggestions" autocomplete="off" maxlength="80" placeholder="Type or choose a breed" value="${escapeHTML(pet.breed || '')}" /><datalist id="dog-breed-suggestions">${breedOptions}</datalist></label>
+        <div class="pet-form-field pet-breed-field"><label for="pet-breed-input">Breed</label><div class="pet-breed-control"><input id="pet-breed-input" name="breed" role="combobox" aria-autocomplete="list" aria-controls="dog-breed-listbox" aria-expanded="false" autocomplete="off" maxlength="80" placeholder="Type or choose a breed" value="${escapeHTML(pet.breed || '')}" data-breed-input /><div class="pet-breed-listbox" id="dog-breed-listbox" role="listbox" data-breed-listbox hidden>${breedOptions}</div></div></div>
         <label class="pet-form-field">Gender<select name="sex"><option value="">Select gender</option><option value="Male" ${pet.sex === 'Male' ? 'selected' : ''}>Male</option><option value="Female" ${pet.sex === 'Female' ? 'selected' : ''}>Female</option></select></label>
         <div class="pet-form-field pet-birth-date-field"><span>Birth Date</span><div class="pet-birth-date-selects"><select data-birth-day aria-label="Birth day"><option value="">Day</option>${birthDayOptions}</select><select data-birth-month aria-label="Birth month"><option value="">Month</option>${birthMonthOptions}</select><select data-birth-year aria-label="Birth year"><option value="">Year</option>${birthYearOptions}</select></div></div>
         <input type="hidden" name="birthDate" value="${escapeHTML(pet.birthDate || '')}" data-birth-date-value />

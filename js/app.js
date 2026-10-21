@@ -613,6 +613,8 @@ function setupPetProfileForm() {
   const cropZoom = form.querySelector('[data-photo-crop-zoom]');
   const vaccinationInput = form.querySelector('[data-vaccination-upload]');
   const vaccinationList = form.querySelector('[data-vaccination-list]');
+  const breedInput = form.querySelector('[data-breed-input]');
+  const breedListbox = form.querySelector('[data-breed-listbox]');
   const photoPreview = form.querySelector('[data-pet-profile-preview]');
   const feedback = form.querySelector('.form-feedback');
   const deleteDialog = form.querySelector('[data-pet-delete-dialog]');
@@ -635,6 +637,61 @@ function setupPetProfileForm() {
   const birthDay = form.querySelector('[data-birth-day]');
   const birthYear = form.querySelector('[data-birth-year]');
   const birthDateValue = form.querySelector('[data-birth-date-value]');
+  let activeBreedOption = -1;
+  const visibleBreedOptions = () => [...breedListbox.querySelectorAll('[data-breed-option]')].filter((option) => !option.hidden);
+  const closeBreedOptions = () => {
+    breedListbox.hidden = true;
+    breedInput.setAttribute('aria-expanded', 'false');
+    breedInput.removeAttribute('aria-activedescendant');
+    activeBreedOption = -1;
+  };
+  const filterBreedOptions = () => {
+    const query = breedInput.value.trim().toLocaleLowerCase();
+    let matches = 0;
+    breedListbox.querySelectorAll('[data-breed-option]').forEach((option) => {
+      option.hidden = !option.dataset.breedOption.toLocaleLowerCase().includes(query);
+      if (!option.hidden) matches += 1;
+      option.setAttribute('aria-selected', 'false');
+    });
+    activeBreedOption = -1;
+    breedInput.removeAttribute('aria-activedescendant');
+    breedListbox.hidden = matches === 0;
+    breedInput.setAttribute('aria-expanded', String(matches > 0));
+  };
+  const selectBreedOption = (option) => {
+    if (!option) return;
+    breedInput.value = option.dataset.breedOption;
+    breedInput.focus();
+    closeBreedOptions();
+  };
+  breedInput.addEventListener('focus', filterBreedOptions);
+  breedInput.addEventListener('input', filterBreedOptions);
+  breedInput.addEventListener('blur', () => window.setTimeout(closeBreedOptions, 180));
+  breedInput.addEventListener('keydown', (event) => {
+    const options = visibleBreedOptions();
+    if (event.key === 'Escape') { closeBreedOptions(); return; }
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      if (breedListbox.hidden) filterBreedOptions();
+      const refreshedOptions = visibleBreedOptions();
+      if (!refreshedOptions.length) return;
+      event.preventDefault();
+      const direction = event.key === 'ArrowDown' ? 1 : -1;
+      activeBreedOption = activeBreedOption < 0
+        ? (direction > 0 ? 0 : refreshedOptions.length - 1)
+        : (activeBreedOption + direction + refreshedOptions.length) % refreshedOptions.length;
+      refreshedOptions.forEach((option, index) => option.setAttribute('aria-selected', String(index === activeBreedOption)));
+      const active = refreshedOptions[activeBreedOption];
+      breedInput.setAttribute('aria-activedescendant', active.id);
+      active.scrollIntoView({ block: 'nearest' });
+    } else if (event.key === 'Enter' && !breedListbox.hidden && activeBreedOption >= 0) {
+      event.preventDefault();
+      selectBreedOption(options[activeBreedOption]);
+    }
+  });
+  breedListbox.addEventListener('click', (event) => {
+    const option = event.target.closest('[data-breed-option]');
+    if (option) selectBreedOption(option);
+  });
   const syncBirthDate = () => {
     const month = birthMonth.value;
     const day = birthDay.value;
