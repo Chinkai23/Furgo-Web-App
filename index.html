@@ -5,6 +5,14 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#fffbf8" />
     <meta name="description" content="Better care for every pet. Discover trusted pet services with Furgo." />
+    <script>
+      if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.addEventListener('controllerchange', () => window.location.reload());
+        navigator.serviceWorker.register('./service-worker.js', { scope: './', updateViaCache: 'none' }).catch((error) => {
+          console.warn('Furgo update support could not start:', error);
+        });
+      }
+    </script>
     <!-- Browser tab icon uses the Furgo brand logo. -->
     <link rel="icon" type="image/png" href="Image/Icon/Logo.png" />
     <title>Furgo — Better Care For Every Pet</title>
