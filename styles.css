@@ -396,9 +396,9 @@ h1, h2, h3, p { margin-top: 0; }
 .pet-carousel { display: flex; gap: 12px; overflow-x: auto; margin: 0 -20px 0 -12px; padding: 12px 20px 18px 12px; scrollbar-width: none; scroll-snap-type: x mandatory; }
 .pet-carousel::-webkit-scrollbar { display: none; }
 .pet-card, .add-pet-card { width: 340px; min-width: 340px; height: 214px; flex: 0 0 340px; scroll-snap-align: start; }
-.pet-card { position: relative; display: grid; grid-template-columns: 92px minmax(0, 1fr); align-content: center; align-items: center; justify-content: center; column-gap: 12px; padding: 18px 26px 54px; border: 0; border-radius: 22px; color: var(--ink); text-align: left; background: url("Image/Other%20Image/Pet%20Profile%20Background.png") center / 100% 100% no-repeat; box-shadow: 0px 4px 4px rgba(206, 88, 0, 0.55); }
+.pet-card { position: relative; display: grid; grid-template-columns: 112px minmax(0, 1fr); align-content: center; align-items: center; justify-content: center; column-gap: 12px; padding: 18px 26px 54px; border: 0; border-radius: 22px; color: var(--ink); text-align: left; background: url("Image/Other%20Image/Pet%20Profile%20Background.png") center / 100% 100% no-repeat; box-shadow: 0px 4px 4px rgba(206, 88, 0, 0.55); }
 .add-pet-card:focus-visible { outline: 3px solid #ff780066; outline-offset: 3px; }
-.pet-card-side { width: 100%; min-width: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: clamp(6px, 2vw, 10px); }
+.pet-card-side { width: 112px; min-width: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 7px; }
 .pet-photo-trigger { width: 92px; height: 92px; position: relative; flex: 0 0 auto; margin: 0; border-radius: 50%; cursor: pointer; }
 .pet-avatar { width: 100%; height: 100%; display: block; border-radius: 50%; object-fit: cover; background: #fff8f0; }
 .pet-photo-trigger input { width: 100%; height: 100%; position: absolute; inset: 0; opacity: 0; cursor: pointer; }
@@ -411,15 +411,16 @@ h1, h2, h3, p { margin-top: 0; }
 .pet-info .pet-vaccination-status.no-vaccination-cards { color: #9a9a9a; }
 .pet-info .pet-vaccination-status.has-vaccination-cards { color: var(--ink); }
 .pet-info p span { color: #70615a; }.pet-info p b { font-weight: 600; }
-.pet-tags { max-width: 100%; max-height: 42px; display: flex; flex-wrap: wrap; justify-content: center; overflow: hidden; gap: 5px; margin: 0; }
-.pet-tags span { padding: 6px 10px; border-radius: 20px; color: #c75b19; background: #ffcfaa; font-size: 11px; font-weight: 700; white-space: nowrap; }
+.pet-tags { width: 100%; min-width: 0; display: flex; flex-wrap: nowrap; align-items: center; justify-content: center; overflow: hidden; gap: 4px; margin: 0; white-space: nowrap; }
+.pet-tags span { min-width: 0; max-width: 100%; flex: 0 1 auto; overflow: hidden; padding: 5px 8px; border-radius: 20px; color: #c75b19; background: #ffcfaa; font-size: 11px; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
+.pet-tags.has-more-remarks span { max-width: calc(100% - 52px); }
 .pet-profile-button { min-height: 36px; max-width: calc(100% - 56px); position: absolute; bottom: 24px; left: 50%; display: flex; align-items: center; justify-content: center; transform: translateX(-50%); padding: 0 20px; border: 0; border-radius: 20px; color: #fff; background: var(--orange); box-shadow: 0 4px 9px #dc63012f; font-size: 14px; font-weight: 700; white-space: nowrap; }
 .pet-profile-button:focus-visible { outline: 3px solid #ff780066; outline-offset: 3px; }
 .add-pet-card { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; border: 0; border-radius: 22px; color: var(--ink); background: #f3f3f3; box-shadow: 0px 4px 4px rgba(56, 56, 56, 0.45); cursor: pointer; }
 .add-pet-plus { width: 64px; height: 64px; display: block; object-fit: contain; }
 .add-pet-card small { font-size: 12px; font-weight: 600; }
 .pet-tags span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
-.pet-view-more { align-self: center; color: var(--orange-dark); font-size: 10px; font-weight: 700; white-space: nowrap; }
+.pet-view-more { flex: 0 0 auto; align-self: center; color: var(--orange-dark); font-size: 10px; font-weight: 700; white-space: nowrap; }
 .pet-dialog { width: min(92vw, 430px); max-height: 88vh; overflow-y: auto; padding: 24px; border: 0; border-radius: 24px; color: var(--ink); background: #fffaf6; box-shadow: 0 18px 60px #26150d40; }
 .pet-dialog::backdrop { background: #1b130e80; backdrop-filter: blur(3px); }
 .pet-dialog-form { display: grid; gap: 15px; }
