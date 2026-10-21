@@ -19,14 +19,32 @@ export function petCarouselMarkup(icon, pets = loadPetProfiles()) {
   const cards = pets.map((pet) => {
     const avatar = pet.photo || 'Image/Other%20Image/Pet%20Profile%20Picture.png';
     const remarks = Array.isArray(pet.remarks) ? pet.remarks : [...(pet.tags || []), ...(pet.redFlagRemark ? [pet.redFlagRemark] : [])];
-    let visibleRemarks = remarks.slice(0, 2);
-    const hasMoreRemarks = remarks.length > 1 || visibleRemarks.some((remark) => remark.length > 17) || visibleRemarks.reduce((total, remark) => total + remark.length, 0) > 22;
-    if (hasMoreRemarks) visibleRemarks = remarks.slice(0, 1);
     const profileUrl = `#pet-profile?id=${encodeURIComponent(pet.id)}`;
     const hasVaccinationCards = (pet.vaccinationCards || []).length > 0;
-    return `<article class="pet-card"><div class="pet-card-side"><label class="pet-photo-trigger" aria-label="Upload a photo for ${escapeHTML(pet.name)}"><img class="pet-avatar" src="${escapeHTML(avatar)}" alt="${pet.photo ? `${escapeHTML(pet.name)}'s uploaded profile photo` : 'Default pet profile picture'}" /><input type="file" accept="image/*" data-pet-photo="${escapeHTML(pet.id)}" aria-label="Choose ${escapeHTML(pet.name)}'s profile photo" /></label><div class="pet-tags ${hasMoreRemarks ? 'has-more-remarks' : ''}">${visibleRemarks.map((remark) => `<span title="${escapeHTML(remark)}">${escapeHTML(remark)}</span>`).join('')}${hasMoreRemarks ? `<a class="pet-view-more" href="${profileUrl}">View more</a>` : ''}</div></div><div class="pet-info"><h3>${escapeHTML(pet.name)}</h3><p class="pet-description"><span>${escapeHTML(pet.breed || 'Breed not added')}${pet.sex ? ` • ${escapeHTML(pet.sex)}` : ''}</span></p><p class="pet-vaccination-status ${hasVaccinationCards ? 'has-vaccination-cards' : 'no-vaccination-cards'}">Vaccination Cards: ${hasVaccinationCards ? 'Yes' : 'No'}</p><p class="pet-weight">${pet.weight ? `${escapeHTML(pet.weight)}kg` : 'Weight not added'}</p></div><a class="pet-profile-button" href="${profileUrl}">Check Profile</a></article>`;
+    return `<article class="pet-card"><div class="pet-card-side"><label class="pet-photo-trigger" aria-label="Upload a photo for ${escapeHTML(pet.name)}"><img class="pet-avatar" src="${escapeHTML(avatar)}" alt="${pet.photo ? `${escapeHTML(pet.name)}'s uploaded profile photo` : 'Default pet profile picture'}" /><input type="file" accept="image/*" data-pet-photo="${escapeHTML(pet.id)}" aria-label="Choose ${escapeHTML(pet.name)}'s profile photo" /></label><div class="pet-tags">${remarks.map((remark) => `<span data-pet-remark title="${escapeHTML(remark)}">${escapeHTML(remark)}</span>`).join('')}<a class="pet-view-more" data-pet-view-more href="${profileUrl}" hidden>View more</a></div></div><div class="pet-info"><h3>${escapeHTML(pet.name)}</h3><p class="pet-description"><span>${escapeHTML(pet.breed || 'Breed not added')}${pet.sex ? ` • ${escapeHTML(pet.sex)}` : ''}</span></p><p class="pet-vaccination-status ${hasVaccinationCards ? 'has-vaccination-cards' : 'no-vaccination-cards'}">Vaccination Cards: ${hasVaccinationCards ? 'Yes' : 'No'}</p><p class="pet-weight">${pet.weight ? `${escapeHTML(pet.weight)}kg` : 'Weight not added'}</p></div><a class="pet-profile-button" href="${profileUrl}">Check Profile</a></article>`;
   }).join('');
   return `${cards}<a class="add-pet-card" href="#pet-profile?mode=add" aria-label="Add a new pet"><img class="add-pet-plus" src="${icon('Icon-12.png')}" alt="" /><small>Add New Pet</small></a>`;
+}
+
+// Shows every remark that fits in the card's single line; the link takes the remaining space only when needed.
+export function fitPetCardRemarks(root = document) {
+  root.querySelectorAll('.pet-tags').forEach((container) => {
+    const remarks = [...container.querySelectorAll('[data-pet-remark]')];
+    const moreLink = container.querySelector('[data-pet-view-more]');
+    if (!moreLink || remarks.length === 0) return;
+
+    remarks.forEach((remark) => { remark.hidden = false; });
+    moreLink.hidden = true;
+    container.classList.remove('has-more-remarks');
+
+    if (container.scrollWidth <= container.clientWidth) return;
+
+    moreLink.hidden = false;
+    container.classList.add('has-more-remarks');
+    for (let index = remarks.length - 1; index >= 0 && container.scrollWidth > container.clientWidth; index -= 1) {
+      remarks[index].hidden = true;
+    }
+  });
 }
 
 // Home screen: customer greeting, search, credit, service shortcuts, pet profile, promotions, and navigation.

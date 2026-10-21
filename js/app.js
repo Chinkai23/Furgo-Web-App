@@ -1,5 +1,5 @@
 // Main app controller: routes between the individual page files and wires shared interactions.
-import { homePage, loadPetProfiles, petCarouselMarkup } from './pages/home.js';
+import { fitPetCardRemarks, homePage, loadPetProfiles, petCarouselMarkup } from './pages/home.js';
 import { loginPage } from './pages/login.js';
 import { registerPage } from './pages/register.js';
 import { onboardingPage } from './pages/onboarding.js';
@@ -557,7 +557,12 @@ function setupHomePetProfiles() {
   if (!carousel) return;
   const icon = (file) => `Image/Icon/${encodeURIComponent(file)}`;
   const savePets = (items) => localStorage.setItem('furgo-demo-pet-profiles', JSON.stringify(items));
-  const renderPets = () => { carousel.innerHTML = petCarouselMarkup(icon, loadPetProfiles()); };
+  const renderPets = () => {
+    carousel.innerHTML = petCarouselMarkup(icon, loadPetProfiles());
+    fitPetCardRemarks(carousel);
+    window.requestAnimationFrame(() => fitPetCardRemarks(carousel));
+    document.fonts?.ready.then(() => fitPetCardRemarks(carousel));
+  };
   const showMessage = (message) => {
     const toast = document.querySelector('.home-toast');
     if (!toast) return;
@@ -565,6 +570,8 @@ function setupHomePetProfiles() {
     toast.classList.add('visible');
     window.setTimeout(() => toast.classList.remove('visible'), 3000);
   };
+
+  renderPets();
 
   // Saves a chosen photo with its pet and updates that pet card immediately.
   carousel.addEventListener('change', async (event) => {
