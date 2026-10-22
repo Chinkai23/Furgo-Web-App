@@ -1676,6 +1676,24 @@ select::-ms-expand { display: none; }
 .admin-checkin-manual-form input { width: 100%; min-height: 40px; padding: 8px 10px; border: 1px solid #e8dfd8; border-radius: 9px; background: #fff; color: #29272c; font: inherit; text-transform: uppercase; }
 .admin-checkin-manual-form .button { min-height: 40px; font-size: 11px; }
 @media (max-width: 520px) { .admin-checkin-manual-form { grid-template-columns: 1fr; } }
+.admin-checkin-preview-dialog { width: min(92vw, 540px); max-height: min(88vh, 760px); overflow-y: auto; margin: auto; padding: 22px; border: 1px solid #f1dfd0; border-radius: 22px; color: var(--ink); background: #fffaf6; box-shadow: 0 22px 70px #2b170b38; }
+.admin-checkin-preview-dialog::backdrop { background: #21160f88; backdrop-filter: blur(3px); }
+.admin-checkin-preview-heading > span { color: var(--orange-dark); font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+.admin-checkin-preview-heading h2 { margin: 5px 0 16px; font: 700 21px/1.25 'Avenir Next'; }
+.admin-checkin-preview-pet { display: flex; align-items: center; gap: 13px; margin-bottom: 15px; padding: 12px; border-radius: 15px; background: #fff0e4; }
+.admin-checkin-preview-pet img, .admin-checkin-preview-avatar { width: 66px; height: 66px; flex: 0 0 66px; border-radius: 50%; object-fit: cover; background: #fffaf6; }
+.admin-checkin-preview-avatar { display: grid; place-items: center; color: var(--orange-dark); font-size: 27px; }
+.admin-checkin-preview-pet > div:last-child { display: grid; gap: 4px; min-width: 0; }
+.admin-checkin-preview-pet strong { font-size: 17px; }
+.admin-checkin-preview-pet span { color: var(--muted); font-size: 12px; }
+.admin-checkin-preview-details { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin: 0; }
+.admin-checkin-preview-details > div { min-width: 0; padding: 10px; border-radius: 11px; background: #fff; }
+.admin-checkin-preview-details dt { margin-bottom: 4px; color: #8b7565; font-size: 9px; font-weight: 700; text-transform: uppercase; }
+.admin-checkin-preview-details dd { margin: 0; color: #403a36; font-size: 12px; line-height: 1.45; overflow-wrap: anywhere; }
+.admin-checkin-preview-message { margin: 14px 0; color: #756d67; font-size: 12px; line-height: 1.5; }
+.admin-checkin-preview-dialog footer { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 9px; }
+.admin-checkin-preview-dialog footer .button { min-height: 42px; }
+@media (max-width: 480px) { .admin-checkin-preview-dialog { padding: 17px; } .admin-checkin-preview-details { grid-template-columns: 1fr; } .admin-checkin-preview-dialog footer { display: grid; grid-template-columns: 1fr 1fr; } }
 
 /* Customer Pet Daycare: responsive booking modes, care selections, and pass purchase cards. */
 .daycare-page .grooming-booking-form { max-width: 760px; }

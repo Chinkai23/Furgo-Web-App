@@ -4,17 +4,30 @@ function loadJsQR() {
   if (typeof window.jsQR === 'function') return Promise.resolve(window.jsQR);
   if (jsQRLoadPromise) return jsQRLoadPromise;
 
-  jsQRLoadPromise = new Promise((resolve, reject) => {
-    const script = document.createElement('script');
-    script.src = 'https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js';
-    script.async = true;
-    script.dataset.furgoQrDecoder = 'true';
-    script.onload = () => typeof window.jsQR === 'function'
-      ? resolve(window.jsQR)
-      : reject(new Error('The QR decoder did not load.'));
-    script.onerror = () => reject(new Error('The QR decoder could not be downloaded.'));
-    document.head.append(script);
-  }).catch((error) => {
+  jsQRLoadPromise = (async () => {
+    const sources = [
+      'https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js',
+      'https://unpkg.com/jsqr@1.4.0/dist/jsQR.js',
+    ];
+    let lastError;
+    for (const src of sources) {
+      try {
+        await new Promise((resolve, reject) => {
+          const script = document.createElement('script');
+          script.src = src;
+          script.async = true;
+          script.dataset.furgoQrDecoder = 'true';
+          script.onload = () => typeof window.jsQR === 'function' ? resolve() : reject(new Error('The QR decoder did not initialize.'));
+          script.onerror = () => reject(new Error('The QR decoder could not be downloaded.'));
+          document.head.append(script);
+        });
+        if (typeof window.jsQR === 'function') return window.jsQR;
+      } catch (error) {
+        lastError = error;
+      }
+    }
+    throw lastError || new Error('The QR decoder could not be loaded.');
+  })().catch((error) => {
     jsQRLoadPromise = null;
     throw error;
   });
@@ -37,7 +50,14 @@ export async function startQRScanner({ video, onCode, onStatus = () => {}, shoul
   if (!detector) onStatus('Starting camera and loading QR scanner…');
 
   if (!shouldRun()) return { stop() {} };
-  const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' }, audio: false });
+  const stream = await navigator.mediaDevices.getUserMedia({
+    video: {
+      facingMode: { ideal: 'environment' },
+      width: { ideal: 1920 },
+      height: { ideal: 1080 },
+    },
+    audio: false,
+  });
   if (!shouldRun()) {
     stream.getTracks().forEach((track) => track.stop());
     return { stop() {} };
@@ -77,7 +97,10 @@ export async function startQRScanner({ video, onCode, onStatus = () => {}, shoul
         let rawValue = '';
         if (detector) {
           try {
-            const codes = await detector.detect(video);
+            const codes = await Promise.race([
+              detector.detect(video),
+              new Promise((resolve) => window.setTimeout(() => resolve([]), 900)),
+            ]);
             rawValue = codes.find((item) => item.rawValue)?.rawValue || '';
             // Some browsers expose BarcodeDetector but silently return no results for a QR.
             // Try jsQR once in that case instead of waiting forever on the native detector.
@@ -98,7 +121,7 @@ export async function startQRScanner({ video, onCode, onStatus = () => {}, shoul
           }
         }
         if (!rawValue && !detector && decoder && context && video.videoWidth && video.videoHeight) {
-          const maxWidth = 720;
+          const maxWidth = 1200;
           const scale = Math.min(1, maxWidth / video.videoWidth);
           canvas.width = Math.round(video.videoWidth * scale);
           canvas.height = Math.round(video.videoHeight * scale);

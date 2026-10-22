@@ -26,7 +26,7 @@ import { adminDaycarePage, setupAdminDaycare } from './pages/admin-daycare.js';
 import { defaultGroomingSettings, groomingBookingsKey, groomingSettingsKey, groomingWeightTier, loadGroomingBookings, loadGroomingSettings } from './pages/grooming-data.js';
 import { myOrdersPage } from './pages/my-orders.js';
 import { adminOrdersPage, setupAdminOrders } from './pages/admin-orders.js';
-import { applyCheckInScan, checkInPage, refreshCheckInTokens } from './pages/check-in.js';
+import { checkInPage, formatCheckInToken, refreshCheckInTokens } from './pages/check-in.js';
 import { adminBottomNavigation, escapeHTML } from './shared.js';
 import { adminEnquiriesPage, setupAdminEnquiries } from './pages/admin-enquiries.js';
 import { adminCustomersPage, assignUnownedPetProfiles, getCustomerAccountStatus, getCustomerRecordId, saveCustomerRecord, setupAdminCustomers } from './pages/admin-customers.js';
@@ -2247,16 +2247,17 @@ function setupAdminFooterScanner() {
         shouldRun: () => dialog.open,
         onStatus: (message) => { feedback.textContent = message; },
         onCode: (scanned) => {
-          const result = applyCheckInScan(scanned);
-          feedback.textContent = result.message;
-          if (result.ok) {
-            document.dispatchEvent(new CustomEvent('furgo-order-status-updated', { detail: { ...result.order, orderKey: result.orderKey } }));
-            window.setTimeout(() => {
-              if (dialog.open) dialog.close();
-              if (window.location.hash.split('?')[0] === '#admin-orders') window.dispatchEvent(new Event('hashchange'));
-            }, 1400);
+          const manualCode = formatCheckInToken(String(scanned || '').trim().toUpperCase().replace(/[\s-]/g, ''));
+          if (!manualCode) {
+            feedback.textContent = 'The QR code did not contain a manual check-in code.';
+            return false;
           }
-          return result.ok;
+          feedback.textContent = 'QR code scanned. Opening Orders with the manual code filled in.';
+          window.setTimeout(() => {
+            if (dialog.open) dialog.close();
+            window.location.hash = `#admin-orders?view=scan&code=${encodeURIComponent(manualCode)}`;
+          }, 300);
+          return true;
         },
       });
     } catch (error) {

@@ -74,9 +74,10 @@ export function ensureCheckInToken(orderKey, orderId, stage) {
   return token;
 }
 
-// QR version 1-L generator for the 10-character random check-in tokens used by this prototype.
+// QR version 1-L generator. Encode the exact manual code shown to customers so either
+// camera apps or the Admin scanner read the same value staff can type.
 export function makeCheckInQrSvg(token) {
-  const bytes = [...new TextEncoder().encode(String(token))];
+  const bytes = [...new TextEncoder().encode(formatCheckInToken(token))];
   if (bytes.length > 17) throw new Error('Check-in token is too long for this QR code.');
   const bits = [];
   const appendBits = (value, length) => { for (let shift = length - 1; shift >= 0; shift -= 1) bits.push((value >>> shift) & 1); };
@@ -162,12 +163,12 @@ export function makeCheckInQrSvg(token) {
   return `<svg class="check-in-qr" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 29 29" role="img" aria-label="Order check-in QR code"><rect width="29" height="29" fill="#fff"/><path d="${path}" fill="#202024"/></svg>`;
 }
 
-// Looks up a scanned one-time token and advances only its matching service order.
-export function applyCheckInScan(rawValue) {
+// Resolves a scan to an order without changing the order or consuming the token.
+export function previewCheckInScan(rawValue) {
   const token = String(rawValue || '').trim().toUpperCase().replace(/[\s-]/g, '');
   const tokens = readTokenMap();
   const record = tokens[token];
-  if (!record) return { ok: false, message: 'This code is not in the shared check-in records. Refresh the customer QR code and try again. Codes from another device require Supabase migration 0017.' };
+  if (!record) return { ok: false, message: 'This code is not in the shared check-in records. Apply Supabase migration 0019, then refresh the customer QR code and try again.' };
   if (record.usedAt) return { ok: false, message: 'This QR code has already been used.' };
   const orders = readOrders(record.orderKey);
   const order = orders.find((item) => String(item.id) === record.orderId);
@@ -179,40 +180,56 @@ export function applyCheckInScan(rawValue) {
     if (/cancel/.test(currentStatus)) return { ok: false, message: 'This taxi order has been cancelled.' };
     const expectedStage = order.taxiProgress?.status === 'Picked Up' ? 'taxi-dropoff' : 'taxi-pickup';
     if (record.stage !== expectedStage) return { ok: false, message: `Scan the customer’s ${expectedStage === 'taxi-pickup' ? 'pickup' : 'drop-off'} QR code next.` };
-    const now = new Date().toISOString();
-    const previousTaxiStatus = order.taxiProgress?.status || 'Scheduled';
     const nextStatus = record.stage === 'taxi-pickup' ? 'Picked Up' : 'Dropped Off';
-    order.taxiProgress = { ...(order.taxiProgress || {}), status: nextStatus, driverEmail: 'driver@gmail.com', ...(record.stage === 'taxi-pickup' ? { pickedUpAt: now } : { droppedOffAt: now }) };
+    return { ok: true, message: `Ready to confirm taxi ${nextStatus.toLowerCase()}.`, order, orderKey: record.orderKey, orderId: record.orderId, token, stage: record.stage, nextStatus };
+  }
+  if (/cancel|complete|deliver/.test(currentStatus)) return { ok: false, message: 'This order is already completed or cancelled.' };
+  const expectedStage = currentStatus === 'checked in' ? 'check-out' : 'check-in';
+  if (record.stage !== expectedStage) return { ok: false, message: `This order needs its ${expectedStage === 'check-in' ? 'check-in' : 'check-out'} QR code.` };
+  const nextStatus = record.stage === 'check-in' ? 'Checked In' : 'Completed';
+  return { ok: true, message: `Ready to confirm ${nextStatus.toLowerCase()}.`, order, orderKey: record.orderKey, orderId: record.orderId, token, stage: record.stage, nextStatus };
+}
+
+// Advances the order only after staff confirms the preview. Revalidate to prevent a stale popup consuming a used code.
+export function applyCheckInScan(rawValue) {
+  const preview = previewCheckInScan(rawValue);
+  if (!preview.ok) return preview;
+  const { token, orderKey, orderId, stage, nextStatus } = preview;
+  const tokens = readTokenMap();
+  const record = tokens[token];
+  const orders = readOrders(orderKey);
+  const order = orders.find((item) => String(item.id) === String(orderId));
+  if (!record || !order) return { ok: false, message: 'This order or check-in code is no longer available. Refresh and try again.' };
+  const now = new Date().toISOString();
+  if (stage === 'taxi-pickup' || stage === 'taxi-dropoff') {
+    const previousTaxiStatus = order.taxiProgress?.status || 'Scheduled';
+    order.taxiProgress = { ...(order.taxiProgress || {}), status: nextStatus, driverEmail: 'driver@gmail.com', ...(stage === 'taxi-pickup' ? { pickedUpAt: now } : { droppedOffAt: now }) };
     order.statusHistory = [...(order.statusHistory || []), { status: `Taxi ${nextStatus}`, previousStatus: previousTaxiStatus, changedAt: now, changedBy: 'Pet Taxi Driver QR scan' }];
-    localStorage.setItem(record.orderKey, JSON.stringify(orders));
-    if (record.stage === 'taxi-dropoff') {
+    localStorage.setItem(orderKey, JSON.stringify(orders));
+    if (stage === 'taxi-dropoff') {
       try {
         const locationKey = 'furgo-demo-driver-locations';
         const locations = JSON.parse(localStorage.getItem(locationKey) || '{}');
-        delete locations[`${record.orderKey}|${record.orderId}`];
+        delete locations[`${orderKey}|${orderId}`];
         localStorage.setItem(locationKey, JSON.stringify(locations));
       } catch { /* Taxi completion must still be saved if an old location record is malformed. */ }
     }
     record.usedAt = now;
     tokens[token] = record;
     writeTokenMap(tokens);
-    return { ok: true, message: `${order.petName || 'Pet'} taxi ${nextStatus.toLowerCase()}.`, order, orderKey: record.orderKey, nextStatus };
+    return { ok: true, message: `${order.petName || 'Pet'} taxi ${nextStatus.toLowerCase()}.`, order, orderKey, nextStatus };
   }
-  if (/cancel|complete|deliver/.test(currentStatus)) return { ok: false, message: 'This order is already completed or cancelled.' };
-  const expectedStage = currentStatus === 'checked in' ? 'check-out' : 'check-in';
-  if (record.stage !== expectedStage) return { ok: false, message: `This order needs its ${expectedStage === 'check-in' ? 'check-in' : 'check-out'} QR code.` };
-  const now = new Date().toISOString();
-  const nextStatus = record.stage === 'check-in' ? 'Checked In' : 'Completed';
+  const currentStatus = String(order.status || '').toLowerCase();
   order.status = nextStatus;
   order.adminStatus = nextStatus;
-  if (record.stage === 'check-in') order.checkedInAt = now;
+  if (stage === 'check-in') order.checkedInAt = now;
   else order.completedAt = now;
   order.statusHistory = [...(order.statusHistory || []), { status: nextStatus, previousStatus: currentStatus, changedAt: now, changedBy: 'Admin QR scan' }];
-  localStorage.setItem(record.orderKey, JSON.stringify(orders));
+  localStorage.setItem(orderKey, JSON.stringify(orders));
   record.usedAt = now;
   tokens[token] = record;
   writeTokenMap(tokens);
-  return { ok: true, message: `${order.petName || 'Pet'} marked ${nextStatus.toLowerCase()}.`, order, orderKey: record.orderKey, nextStatus };
+  return { ok: true, message: `${order.petName || 'Pet'} marked ${nextStatus.toLowerCase()}.`, order, orderKey, nextStatus };
 }
 
 // Driver scanner guard: accept only taxi pickup/drop-off codes, never the service check-in code.
@@ -243,7 +260,7 @@ function orderSummary(order) {
   return [order.date, order.time, order.outlet].filter(Boolean).join(' · ');
 }
 
-function formatCheckInToken(token) {
+export function formatCheckInToken(token) {
   const value = String(token || '');
   return value.length === 10 ? `${value.slice(0, 5)}-${value.slice(5)}` : value;
 }
