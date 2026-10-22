@@ -2764,10 +2764,10 @@ function wireForms() {
         ? 'Account created for development testing. Opening your Furgo home…'
         : identity.role === 'director' ? 'Director sign-in successful. Opening the Admin Portal…'
           : identity.role === 'manager' ? 'Manager sign-in successful. Opening the Admin Portal…'
-            : identity.role === 'executive' ? 'Executive sign-in successful. Opening Order Management…'
+            : identity.role === 'executive' ? 'Executive sign-in successful. Opening the Admin Portal…'
           : identity.role === 'driver' ? 'Driver sign-in successful. Opening the Driver Portal…'
             : 'Sign-in successful. Opening your Furgo home…';
-      window.setTimeout(() => { window.location.hash = identity.role === 'director' ? '#admin' : ['manager', 'executive'].includes(identity.role) ? '#admin-orders' : identity.role === 'driver' ? '#driver' : '#home'; }, 500);
+      window.setTimeout(() => { window.location.hash = ['director', 'manager', 'executive'].includes(identity.role) ? '#admin' : identity.role === 'driver' ? '#driver' : '#home'; }, 500);
     } catch (error) {
       feedback.textContent = friendlyAuthError(error);
     } finally {
@@ -2834,10 +2834,6 @@ function render() {
   }
   if (serviceAdminPages.includes(page) && routeParams.get('manage') === '1' && !['manager', 'director'].includes(currentRole)) {
     window.location.hash = '#admin-access';
-    return;
-  }
-  if (hasDemoSession && currentRole === 'executive' && !['admin', 'admin-orders', 'admin-access', 'admin-enquiries', 'admin-audit', ...serviceAdminPages, 'login'].includes(page)) {
-    window.location.hash = '#admin-orders';
     return;
   }
   if (driverPages.includes(page) && (!hasDemoSession || sessionStorage.getItem('furgo-demo-user-role') !== 'driver')) {
