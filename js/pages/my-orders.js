@@ -139,7 +139,7 @@ export function myOrdersPage(routeParams = new URLSearchParams()) {
       const orders = visibleOrders.filter((order) => order.serviceId === item.id);
       return `<section class="my-orders-group"><div class="my-orders-group-heading"><h2>${item.label}</h2><span>${orders.length} ${orders.length === 1 ? 'order' : 'orders'}</span></div>${orders.length ? orders.map(orderCard).join('') : `<p class="my-orders-empty-category">No ${item.label.toLowerCase()} orders here yet.</p>`}</section>`;
     }).join('')
-    : visibleOrders.length ? visibleOrders.map(orderCard).join('') : `<section class="my-orders-empty"><h2>No ${orderServices.find((item) => item.id === service)?.label || ''} orders found</h2><p>Try another service or status filter.</p></section>`;
+    : visibleOrders.length ? visibleOrders.map(orderCard).join('') : `<section class="my-orders-empty"><h2>No ${orderServices.find((item) => item.id === service)?.label || ''} Orders Found</h2><p>Try another service or status filter.</p></section>`;
 
   return `<main class="my-orders-page"><header class="my-orders-header"><a href="#${encodeURIComponent(returnTo)}" aria-label="Back">‹</a><h1>My Orders</h1><span aria-hidden="true"></span></header><nav class="my-orders-tabs" aria-label="Filter orders by service">${serviceTabs}</nav><nav class="my-orders-status-tabs" aria-label="Filter orders by status">${statusTabs}</nav><p class="my-orders-count">${visibleOrders.length} ${visibleOrders.length === 1 ? 'order' : 'orders'}</p><div class="my-orders-content">${groups}</div>${bottomNavigation('activity', icon)}</main>`;
 }

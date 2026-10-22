@@ -16,7 +16,7 @@ import { adminMarketplacePage } from './pages/admin-marketplace.js';
 import { loadMarketplaceCart, loadMarketplaceFavorites, loadMarketplaceOfferSettings, loadMarketplaceOrders, loadMarketplaceProducts, marketplaceCartKey, marketplaceFavoritesKey, marketplaceLine, marketplaceOfferSettingsKey, marketplaceOrdersKey, marketplaceProductsKey, safeMarketplaceImage } from './pages/marketplace-data.js';
 import { petProfilePage } from './pages/pet-profile.js';
 import { adminPromotionsPage, loadPromotions, maximumPromotions, normalizePromotionDestination, promotionStorageKey } from './pages/admin-promotions.js';
-import { adminPortalPage } from './pages/admin.js';
+import { adminPortalPage, setupAdminPortal } from './pages/admin.js';
 import { groomingBookingPage, groomingOrdersPage } from './pages/grooming.js';
 import { adminGroomingPage } from './pages/admin-grooming.js';
 import { petHotelPage, setupHotelBooking } from './pages/hotel.js';
@@ -27,10 +27,14 @@ import { defaultGroomingSettings, groomingBookingsKey, groomingSettingsKey, groo
 import { myOrdersPage } from './pages/my-orders.js';
 import { adminOrdersPage, setupAdminOrders } from './pages/admin-orders.js';
 import { applyCheckInScan, checkInPage } from './pages/check-in.js';
-import { adminBottomNavigation } from './shared.js';
+import { adminBottomNavigation, escapeHTML } from './shared.js';
 import { adminEnquiriesPage, setupAdminEnquiries } from './pages/admin-enquiries.js';
 import { adminCustomersPage, assignUnownedPetProfiles, getCustomerAccountStatus, getCustomerRecordId, saveCustomerRecord, setupAdminCustomers } from './pages/admin-customers.js';
 import { driverPortalPage, setupDriverPortal } from './pages/driver.js';
+import { adminAccessPage, adminAuditPage, setupAdminAccess, setupAdminAuditPage } from './pages/admin-access.js';
+import { adminProductServiceInsightsPage, setupAdminProductServiceInsights } from './pages/admin-product-insights.js';
+import { recordAdminAction } from './admin-audit.js';
+import { recentSearchesKey, searchPage } from './pages/search.js';
 import { supabase, toMalaysianE164 } from './supabase.js';
 import { loadCloudAppData } from './app-data-sync.js';
 
@@ -233,9 +237,10 @@ async function saveCloudGroomingSettings(settings, userId) {
 }
 
 async function loadCloudGroomingData(userId, role) {
+  const hasOperationsAccess = ['admin', 'staff', 'director', 'manager', 'executive'].includes(role);
   const [{ data: settingRow, error: settingsError }, bookingsResult] = await Promise.all([
     supabase.from('service_settings').select('settings').eq('service_key', 'grooming').maybeSingle(),
-    role === 'admin'
+    hasOperationsAccess
       ? supabase.from('grooming_bookings').select('*').order('created_at', { ascending: false })
       : supabase.from('grooming_bookings').select('*').eq('user_id', userId).order('created_at', { ascending: false }),
   ]);
@@ -243,7 +248,7 @@ async function loadCloudGroomingData(userId, role) {
   if (bookingsResult.error) throw bookingsResult.error;
   const savedSettings = settingRow?.settings && Object.keys(settingRow.settings).length ? settingRow.settings : null;
   if (savedSettings) localStorage.setItem(groomingSettingsKey, JSON.stringify(savedSettings));
-  else if (role === 'admin') {
+  else if (['admin', 'director', 'manager'].includes(role)) {
     const localSettings = loadGroomingSettings();
     await saveCloudGroomingSettings(localSettings, userId);
   } else if (!localStorage.getItem(groomingSettingsKey)) {
@@ -437,10 +442,11 @@ function friendlyAuthError(error) {
 // Function: Load the signed-in user's trusted role, profile, and account status from Supabase.
 async function loadSupabaseIdentity(user) {
   activeSupabaseUserId = user.id;
-  const [{ data: roleRows, error: roleError }, { data: profile, error: profileError }, { data: account, error: accountError }] = await Promise.all([
+  const [{ data: roleRows, error: roleError }, { data: profile, error: profileError }, { data: account, error: accountError }, portalAccessResult] = await Promise.all([
     supabase.from('user_roles').select('role').eq('user_id', user.id),
     supabase.from('profiles').select('display_name,email,phone_e164').eq('id', user.id).maybeSingle(),
     supabase.from('account_controls').select('status').eq('user_id', user.id).maybeSingle(),
+    supabase.from('portal_access').select('level').eq('user_id', user.id).maybeSingle(),
   ]);
   if (roleError) throw roleError;
   if (profileError) throw profileError;
@@ -452,8 +458,11 @@ async function loadSupabaseIdentity(user) {
     sessionStorage.removeItem('furgo-demo-user-role');
     throw new Error('This account is blacklisted. Please contact Furgo Support for assistance.');
   }
-  const role = roleRows?.some(({ role: value }) => value === 'admin') ? 'admin'
-    : roleRows?.some(({ role: value }) => value === 'driver') ? 'driver' : 'customer';
+  const portalLevel = portalAccessResult.error ? '' : portalAccessResult.data?.level || '';
+  const legacyPortalRole = roleRows?.some(({ role: value }) => value === 'admin') ? 'director'
+    : roleRows?.some(({ role: value }) => value === 'staff') ? 'executive' : '';
+  const role = ['executive', 'manager', 'director'].includes(portalLevel) ? portalLevel
+    : legacyPortalRole || (roleRows?.some(({ role: value }) => value === 'driver') ? 'driver' : 'customer');
   const phone = user.phone || profile?.phone_e164 || user.user_metadata?.phone_e164 || '';
   const snapshot = {
     id: user.id,
@@ -474,7 +483,7 @@ async function loadSupabaseIdentity(user) {
     // Existing features stay usable if the app-data migration has not been applied yet.
     console.warn('Supabase shared app data is not ready yet; using this browser’s saved data:', error);
   }
-  if (role === 'admin') {
+  if (role === 'director') {
     try { await loadCloudAdminCustomers(); }
     catch (error) { console.warn('Could not load customer management records from Supabase:', error); }
   }
@@ -1215,7 +1224,7 @@ function setupMarketplaceInteractions() {
         localStorage.setItem('furgo-demo-addresses', JSON.stringify(addresses));
       }
       const products = loadMarketplaceProducts();
-      const items = lines.map(({ product, variant, quantity, total: lineTotal }) => ({ productId: product.id, variantId: variant.id, name: product.name, variantLabel: variant.label, sku: variant.sku, supplierId: variant.supplierId || variant.supplier || '', supplierSku: variant.supplierSku || '', cost: Number(variant.cost) || 0, quantity, unitPrice: variant.price, total: lineTotal }));
+      const items = lines.map(({ product, variant, quantity, total: lineTotal }) => ({ productId: product.id, variantId: variant.id, name: product.name, category: product.category || 'Uncategorised', nutrition: product.nutrition || '', ingredients: product.ingredients || '', variantLabel: variant.label, sku: variant.sku, supplierId: variant.supplierId || variant.supplier || '', supplierSku: variant.supplierSku || '', cost: Number(variant.cost) || 0, quantity, unitPrice: variant.price, total: lineTotal }));
       const profile = JSON.parse(sessionStorage.getItem('furgo-demo-user-profile') || '{}');
       const reference = `FG-${new Date().toISOString().slice(2, 10).replace(/-/g, '')}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
       const status = payment === 'bank-transfer' ? 'Pending Payment Verification' : 'Paid / Processing';
@@ -1270,6 +1279,7 @@ function setupAdminMarketplace() {
     };
     try {
       localStorage.setItem(marketplaceOfferSettingsKey, JSON.stringify(settings));
+      void recordAdminAction('marketplace_offer_settings_updated', 'marketplace', 'offers');
       feedback.textContent = 'Offer settings saved and applied to customer Marketplace checkout.';
       feedback.className = 'admin-market-offer-feedback success';
     } catch {
@@ -1321,6 +1331,8 @@ function setupAdminMarketplace() {
     }
     try { localStorage.setItem(marketplaceProductsKey, JSON.stringify(products)); }
     catch { toastAdmin('The selected photos are too large for this browser prototype. Choose smaller images.'); return; }
+    const savedProduct = products.find((product) => product.id === productId) || products.find((product) => product.name.trim().toLowerCase() === productName.toLowerCase());
+    void recordAdminAction('marketplace_product_saved', 'marketplace_product', savedProduct?.id || '', { name: productName });
     render();
   });
   document.querySelectorAll('[data-edit-market-product]').forEach((button) => button.addEventListener('click', () => {
@@ -1371,6 +1383,7 @@ function setupAdminMarketplace() {
     if (!product) return;
     product.hidden = !product.hidden;
     localStorage.setItem(marketplaceProductsKey, JSON.stringify(products));
+    void recordAdminAction(product.hidden ? 'marketplace_product_hidden' : 'marketplace_product_published', 'marketplace_product', product.id, { name: product.name });
     if (product.hidden) localStorage.setItem(marketplaceCartKey, JSON.stringify(loadMarketplaceCart().filter((item) => item.productId !== product.id)));
     render();
   }));
@@ -1388,6 +1401,7 @@ function setupAdminMarketplace() {
     localStorage.setItem(marketplaceProductsKey, JSON.stringify(products.filter((item) => item.id !== product.id)));
     localStorage.setItem(marketplaceOrdersKey, JSON.stringify(orders));
     localStorage.setItem(marketplaceCartKey, JSON.stringify(cart));
+    void recordAdminAction('marketplace_product_removed', 'marketplace_product', product.id, { name: product.name });
     render();
   }));
   document.querySelectorAll('[data-copy-supplier-order]').forEach((button) => button.addEventListener('click', async () => {
@@ -1418,12 +1432,13 @@ function setupAdminMarketplace() {
     order.status = 'Shipped';
     order.shippedAt = new Date().toISOString();
     localStorage.setItem(marketplaceOrdersKey, JSON.stringify(orders));
+    void recordAdminAction('order_status_updated', 'marketplace_order', order.reference || order.id, { status: order.status });
     render();
   }));
   document.querySelectorAll('[data-complete-order]').forEach((button) => button.addEventListener('click', () => {
     const orders = loadMarketplaceOrders();
     const order = orders.find((item) => item.id === button.dataset.completeOrder);
-    if (order) { order.status = 'Delivered'; order.deliveredAt = new Date().toISOString(); localStorage.setItem(marketplaceOrdersKey, JSON.stringify(orders)); render(); }
+    if (order) { order.status = 'Delivered'; order.deliveredAt = new Date().toISOString(); localStorage.setItem(marketplaceOrdersKey, JSON.stringify(orders)); void recordAdminAction('order_status_updated', 'marketplace_order', order.reference || order.id, { status: order.status }); render(); }
   }));
   document.querySelectorAll('[data-approve-payment], [data-reject-payment]').forEach((button) => button.addEventListener('click', () => {
     const orders = loadMarketplaceOrders();
@@ -1439,6 +1454,7 @@ function setupAdminMarketplace() {
       localStorage.setItem(marketplaceProductsKey, JSON.stringify(products));
     } else { order.paymentStatus = 'Paid'; order.status = 'Paid / Processing'; }
     localStorage.setItem(marketplaceOrdersKey, JSON.stringify(orders));
+    void recordAdminAction(button.hasAttribute('data-reject-payment') ? 'marketplace_payment_rejected' : 'marketplace_payment_approved', 'marketplace_order', order.reference || order.id, { status: order.paymentStatus });
     render();
   }));
   document.querySelectorAll('[data-order-receipt]').forEach((input) => input.addEventListener('change', async () => {
@@ -1448,7 +1464,7 @@ function setupAdminMarketplace() {
     const data = await new Promise((resolve) => { const reader = new FileReader(); reader.onload = () => resolve(reader.result); reader.onerror = () => resolve(''); reader.readAsDataURL(file); });
     const orders = loadMarketplaceOrders();
     const order = orders.find((item) => item.id === input.dataset.orderReceipt);
-    if (order && data) { order.receipt = { name: file.name, data }; localStorage.setItem(marketplaceOrdersKey, JSON.stringify(orders)); render(); }
+    if (order && data) { order.receipt = { name: file.name, data }; localStorage.setItem(marketplaceOrdersKey, JSON.stringify(orders)); void recordAdminAction('receipt_uploaded', 'marketplace_order', order.reference || order.id); render(); }
   }));
   document.querySelector('[data-export-market-csv]')?.addEventListener('click', () => {
     const supplier = document.querySelector('[data-market-export-supplier]').value;
@@ -1562,6 +1578,7 @@ function setupAdminPromotionsForm() {
         image: canvas.toDataURL('image/jpeg', 0.84),
       };
       localStorage.setItem(promotionStorageKey, JSON.stringify([...promotions, promotion]));
+      void recordAdminAction('promotion_uploaded', 'promotion', promotion.id, { title: promotion.title });
       if (previewUrl) URL.revokeObjectURL(previewUrl);
       render();
     } catch {
@@ -1575,8 +1592,10 @@ function setupAdminPromotionsForm() {
   document.querySelector('[data-admin-promo-list]')?.addEventListener('click', (event) => {
     const deleteButton = event.target.closest('[data-delete-promotion]');
     if (!deleteButton) return;
+    const removedPromotion = loadPromotions().find((promotion) => promotion.id === deleteButton.dataset.deletePromotion);
     const remaining = loadPromotions().filter((promotion) => promotion.id !== deleteButton.dataset.deletePromotion);
     localStorage.setItem(promotionStorageKey, JSON.stringify(remaining));
+    if (removedPromotion) void recordAdminAction('promotion_removed', 'promotion', removedPromotion.id, { title: removedPromotion.title });
     render();
   });
 }
@@ -2114,6 +2133,7 @@ function setupAdminGrooming() {
       try {
         if (authData.user) await saveCloudGroomingSettings(updated, authData.user.id);
         localStorage.setItem(groomingSettingsKey, JSON.stringify(updated));
+        void recordAdminAction('grooming_settings_updated', 'service', 'grooming');
         render();
       } catch (error) {
         feedback.textContent = `Could not save grooming settings: ${friendlyAuthError(error)}`;
@@ -2133,6 +2153,7 @@ function setupAdminGrooming() {
       try {
         if (authData.user) await saveCloudGroomingSettings(settings, authData.user.id);
         localStorage.setItem(groomingSettingsKey, JSON.stringify(settings));
+        void recordAdminAction('grooming_package_removed', 'grooming_package', button.dataset.deleteGroomingPackage);
         render();
       } catch (error) {
         settingsForm.querySelector('[data-admin-grooming-settings-feedback]').textContent = `Could not delete the package: ${friendlyAuthError(error)}`;
@@ -2152,6 +2173,7 @@ function setupAdminGrooming() {
     try {
       await updateCloudGroomingBooking(booking);
       localStorage.setItem(groomingBookingsKey, JSON.stringify(bookings));
+      void recordAdminAction('order_status_updated', 'grooming_booking', booking.reference || booking.id, { status: select.value });
       render();
     } catch (error) {
       window.alert(`Could not update the booking status: ${friendlyAuthError(error)}`);
@@ -2184,6 +2206,7 @@ function setupAdminGrooming() {
     try {
       await updateCloudGroomingBooking(booking);
       localStorage.setItem(groomingBookingsKey, JSON.stringify(bookings));
+      void recordAdminAction('receipt_uploaded', 'grooming_booking', booking.reference || booking.id);
       render();
     } catch (error) {
       window.alert(`Could not save the receipt: ${friendlyAuthError(error)}`);
@@ -2259,6 +2282,229 @@ function setupAdminFooterScanner() {
 }
 
 // Wires shared page actions, pet profiles, forms, profile editing, support, and authentication prototypes.
+function setupDedicatedSearchPage() {
+  const root = document.querySelector('[data-search-page]');
+  const form = root?.querySelector('[data-search-page-form]');
+  const input = root?.querySelector('[data-search-page-input]');
+  const results = root?.querySelector('[data-search-results]');
+  const recentsSection = root?.querySelector('[data-recent-section]');
+  const recentList = root?.querySelector('[data-recent-searches]');
+  const discoverSection = root?.querySelector('[data-discover-section]');
+  if (!root || !form || !input || !results) return;
+
+  const serviceEntries = [
+    { title: 'Marketplace', detail: 'Shop food, treats, toys, and pet essentials', href: '#marketplace', keywords: 'marketplace shop shopping food snacks treats products toys supplements', selectedType: 'service', selectedKey: 'marketplace' },
+    { title: 'Grooming', detail: 'Book a grooming appointment', href: '#grooming', keywords: 'groom grooming groomer bath wash haircut trim brush', selectedType: 'service', selectedKey: 'grooming' },
+    { title: 'Pet Hotel', detail: 'Explore overnight pet stays', href: '#hotel', keywords: 'hotel boarding overnight stay accommodation', selectedType: 'service', selectedKey: 'hotel' },
+    { title: 'Pet Daycare', detail: 'Explore daytime pet care', href: '#daycare', keywords: 'daycare day care sitter sitting playgroup', selectedType: 'service', selectedKey: 'daycare' },
+  ];
+  const productAliases = {
+    'furgo-snack-pumpkin': 'pet cookies cookies cookie dog cookies dog treats biscuits biscuit snacks',
+    'furgo-treat-chicken': 'dog treats chicken bites snacks training treats',
+  };
+  let currentMatches = [];
+  let currentResultCount = 0;
+  const normalize = (value) => String(value || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
+  const readRecents = () => {
+    try {
+      const stored = JSON.parse(localStorage.getItem(recentSearchesKey) || '[]');
+      return Array.isArray(stored) ? stored.filter((term) => typeof term === 'string').slice(0, 8) : [];
+    } catch { return []; }
+  };
+  const saveRecent = (value) => {
+    const term = String(value || '').trim();
+    if (!term) return;
+    const recents = [term, ...readRecents().filter((item) => normalize(item) !== normalize(term))].slice(0, 8);
+    localStorage.setItem(recentSearchesKey, JSON.stringify(recents));
+  };
+  const recordSearchEvent = async (value, resultCount, selectedMatch = null) => {
+    const term = normalize(value).replace(/\s+/g, ' ');
+    if (!term || term.length > 80 || /\S+@\S+\.\S+/.test(term) || /\+?\d[\d ()-]{7,}\d/.test(term)) return;
+    const { error } = await supabase.from('search_analytics').insert({
+      search_term: term,
+      result_count: Math.max(0, Math.min(1000, Number(resultCount) || 0)),
+      selected_type: selectedMatch?.selectedType || selectedMatch?.type || null,
+      selected_key: selectedMatch?.selectedKey || selectedMatch?.key || null,
+    });
+    if (error) console.warn('Search analytics could not be saved:', error.message);
+  };
+  const displayRecents = () => {
+    const recents = readRecents();
+    recentList.replaceChildren();
+    recents.forEach((term) => {
+      const chip = document.createElement('button');
+      chip.type = 'button';
+      chip.className = 'search-chip';
+      chip.dataset.searchTerm = term;
+      chip.textContent = term;
+      recentList.append(chip);
+    });
+    recentsSection.hidden = recents.length === 0;
+  };
+  const renderResults = (query) => {
+    const normalizedQuery = normalize(query);
+    results.replaceChildren();
+    currentMatches = [];
+    if (!normalizedQuery) {
+      results.hidden = true;
+      recentsSection.hidden = readRecents().length === 0;
+      discoverSection.hidden = false;
+      input.setAttribute('aria-expanded', 'false');
+      currentResultCount = 0;
+      return;
+    }
+
+    recentsSection.hidden = true;
+    discoverSection.hidden = true;
+    const products = loadMarketplaceProducts().filter((product) => !product.hidden && product.variants?.some((variant) => Number(variant.stock) > 0));
+    const productMatches = products.map((product) => {
+      const searchable = normalize([
+        product.name, product.category, product.description, product.suitableBreeds,
+        product.issues, product.ingredients, product.nutrition, productAliases[product.id],
+      ].filter(Boolean).join(' '));
+      if (!searchable.includes(normalizedQuery)) return null;
+      const isCookieSearch = normalize(productAliases[product.id]).includes(normalizedQuery) && /cookie|biscuit/.test(normalizedQuery);
+      return {
+        title: isCookieSearch ? `${query.trim()[0].toUpperCase()}${query.trim().slice(1)}` : product.name,
+        detail: `${product.name} · Marketplace${product.category ? ` · ${product.category}` : ''}`,
+        href: `#product?id=${encodeURIComponent(product.id)}`,
+        searchText: searchable,
+        selectedType: 'product',
+        selectedKey: product.id,
+      };
+    }).filter(Boolean);
+    const serviceMatches = serviceEntries.filter((entry) => normalize(`${entry.title} ${entry.detail} ${entry.keywords}`).includes(normalizedQuery)).map((entry) => ({ ...entry, searchText: normalize(`${entry.title} ${entry.detail} ${entry.keywords}`) }));
+    const allMatches = [...productMatches, ...serviceMatches].sort((a, b) => {
+      const aStarts = a.searchText.startsWith(normalizedQuery) || normalize(a.title).startsWith(normalizedQuery) ? 0 : 1;
+      const bStarts = b.searchText.startsWith(normalizedQuery) || normalize(b.title).startsWith(normalizedQuery) ? 0 : 1;
+      return aStarts - bStarts;
+    });
+    currentResultCount = allMatches.length;
+    currentMatches = allMatches.slice(0, 8);
+
+    if (!currentMatches.length) {
+      const empty = document.createElement('p');
+      empty.className = 'search-no-results';
+      empty.textContent = 'No relevant items found.';
+      results.append(empty);
+    } else {
+      const list = document.createElement('ul');
+      list.className = 'search-result-list';
+      currentMatches.forEach((match) => {
+        const item = document.createElement('li');
+        const link = document.createElement('a');
+        link.className = 'search-result-item';
+        link.href = match.href;
+        const title = document.createElement('strong');
+        title.textContent = match.title;
+        const detail = document.createElement('span');
+        detail.textContent = match.detail;
+        link.append(title, detail);
+        item.append(link);
+        list.append(item);
+      });
+      results.append(list);
+    }
+    results.hidden = false;
+    input.setAttribute('aria-expanded', 'true');
+  };
+
+  displayRecents();
+  input.addEventListener('input', () => renderResults(input.value));
+  input.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') {
+      input.value = '';
+      renderResults('');
+      input.blur();
+    } else if (event.key === 'ArrowDown' && currentMatches.length) {
+      event.preventDefault();
+      results.querySelector('a')?.focus();
+    }
+  });
+  form.addEventListener('submit', (event) => {
+    event.preventDefault();
+    if (input.value.trim()) saveRecent(input.value);
+    if (!currentMatches.length) {
+      void recordSearchEvent(input.value, 0);
+      renderResults(input.value);
+      return;
+    }
+    void recordSearchEvent(input.value, currentResultCount, currentMatches[0]);
+    window.location.hash = currentMatches[0].href;
+  });
+  results.addEventListener('click', (event) => {
+    const link = event.target.closest('a[href]');
+    if (link) {
+      saveRecent(input.value);
+      const match = currentMatches.find((item) => item.href === link.getAttribute('href'));
+      void recordSearchEvent(input.value, currentResultCount, match);
+    }
+  });
+  root.addEventListener('click', (event) => {
+    const termButton = event.target.closest('[data-search-term]');
+    if (termButton) {
+      input.value = termButton.dataset.searchTerm;
+      renderResults(input.value);
+      input.focus();
+    }
+    if (event.target.closest('[data-clear-searches]')) {
+      localStorage.removeItem(recentSearchesKey);
+      displayRecents();
+    }
+  });
+  window.setTimeout(() => input.focus(), 0);
+}
+
+async function setupAdminSearchAnalytics() {
+  const root = document.querySelector('[data-admin-search-analytics]');
+  const content = root?.querySelector('[data-search-analytics-content]');
+  const period = root?.querySelector('[data-search-analytics-period]');
+  if (!root || !content || !period) return;
+
+  const renderInsights = async () => {
+    content.textContent = 'Loading search insights…';
+    const { data, error } = await supabase.rpc('get_search_analytics', { p_days: Number(period.value) || 30 });
+    if (error) {
+      content.textContent = 'Search analytics are not connected yet. Apply supabase/migrations/0006_search_analytics.sql to enable collection and reporting.';
+      return;
+    }
+    const insights = data && typeof data === 'object' ? data : {};
+    const topTerms = Array.isArray(insights.top_terms) ? insights.top_terms : [];
+    const noResultTerms = Array.isArray(insights.no_result_terms) ? insights.no_result_terms : [];
+    const clickedResults = Array.isArray(insights.clicked_results) ? insights.clicked_results : [];
+    const names = new Map([
+      ...loadMarketplaceProducts().map((product) => [product.id, product.name]),
+      ['marketplace', 'Marketplace'], ['grooming', 'Grooming'], ['hotel', 'Pet Hotel'], ['daycare', 'Pet Daycare'],
+    ]);
+    const tableRows = (rows, nameKey, countKey, secondColumn) => rows.length
+      ? rows.map((item) => `<tr><td>${escapeHTML(item[nameKey] || 'Unknown')}</td><td>${Number(item[countKey]) || 0}</td>${secondColumn ? `<td>${secondColumn(item)}</td>` : ''}</tr>`).join('')
+      : '<tr><td colspan="3">No searches in this period.</td></tr>';
+    const termTable = (title, rows, countKey, thirdHeader = '') => `<div class="admin-search-table-wrap"><h3>${title}</h3><table class="admin-search-table"><thead><tr><th>Search term</th><th>Count</th>${thirdHeader ? `<th>${thirdHeader}</th>` : ''}</tr></thead><tbody>${tableRows(rows, 'search_term', countKey, thirdHeader ? (item) => Number(item.selected_count) || 0 : null)}</tbody></table></div>`;
+    content.innerHTML = `<div class="admin-search-total-row"><div class="admin-search-total"><span>Searches</span><strong>${Number(insights.total_searches) || 0}</strong></div><div class="admin-search-total"><span>Searches With No Matches</span><strong>${Number(insights.no_result_searches) || 0}</strong></div></div><div class="admin-search-tables">${termTable('Most Searched', topTerms, 'searches', 'Selected Result')}${termTable('No-Match Searches', noResultTerms, 'searches')}</div><div class="admin-search-table-wrap admin-search-clicked"><h3>Most Selected Results</h3><table class="admin-search-table"><thead><tr><th>Result</th><th>Type</th><th>Selections</th></tr></thead><tbody>${clickedResults.length ? clickedResults.map((item) => `<tr><td>${escapeHTML(names.get(item.selected_key) || item.selected_key || 'Unknown')}</td><td>${escapeHTML(item.selected_type || '')}</td><td>${Number(item.clicks) || 0}</td></tr>`).join('') : '<tr><td colspan="3">No selected results in this period.</td></tr>'}</tbody></table></div>`;
+  };
+  period.addEventListener('change', () => { void renderInsights(); });
+  void renderInsights();
+}
+
+async function setupCustomerEnquiryHistory() {
+  const root = document.querySelector('[data-customer-enquiries]');
+  if (!root) return;
+  const { data, error } = await supabase.from('support_enquiries')
+    .select('id,topic,message,created_at,reply,replied_at')
+    .order('created_at', { ascending: false });
+  if (error) {
+    root.textContent = 'Your enquiry history is not available right now.';
+    return;
+  }
+  const enquiries = Array.isArray(data) ? data : [];
+  root.innerHTML = enquiries.length ? enquiries.map((enquiry) => {
+    const received = enquiry.created_at ? new Date(enquiry.created_at) : null;
+    const replied = enquiry.replied_at ? new Date(enquiry.replied_at) : null;
+    const hasReply = Boolean(enquiry.reply && replied);
+    return `<article class="customer-enquiry-entry"><header><strong>${escapeHTML(enquiry.topic || 'General enquiry')}</strong><span class="admin-enquiry-status ${hasReply ? 'is-replied' : 'is-pending'}">${hasReply ? 'Replied' : 'Awaiting reply'}</span></header><time datetime="${escapeHTML(enquiry.created_at || '')}">Sent ${escapeHTML(received && !Number.isNaN(received.getTime()) ? received.toLocaleString('en-MY') : 'date not recorded')}</time><p>${escapeHTML(enquiry.message || '')}</p>${hasReply ? `<section><strong>Furgo replied</strong><time datetime="${escapeHTML(enquiry.replied_at)}">${escapeHTML(!Number.isNaN(replied.getTime()) ? replied.toLocaleString('en-MY') : '')}</time><p>${escapeHTML(enquiry.reply)}</p></section>` : ''}</article>`;
+  }).join('') : '<p>No enquiries yet. Use Share Feedback to send a message to Furgo.</p>';
+}
+
 function wireForms() {
   if (!groomingQrSyncListenerInstalled) {
     document.addEventListener('furgo-order-status-updated', async (event) => {
@@ -2294,10 +2540,17 @@ function wireForms() {
   setupDaycareBooking();
   setupAdminDaycare();
   setupAdminOrders();
+  setupAdminAccess();
+  setupAdminAuditPage();
   setupAdminEnquiries();
   setupAdminCustomers();
+  setupAdminProductServiceInsights();
+  setupAdminPortal();
+  void setupCustomerEnquiryHistory();
   setupAdminFooterScanner();
   setupDriverPortal();
+  setupDedicatedSearchPage();
+  void setupAdminSearchAnalytics();
   const toast = document.querySelector('.home-toast');
   if (toast) {
     document.querySelectorAll('[data-toast]').forEach((item) => item.addEventListener('click', (event) => {
@@ -2312,27 +2565,6 @@ function wireForms() {
       toast.classList.add('visible');
       window.setTimeout(() => toast.classList.remove('visible'), 2600);
     }));
-    document.querySelector('[data-search-form]')?.addEventListener('submit', (event) => {
-      event.preventDefault();
-      const query = event.currentTarget.elements.service.value.trim().toLowerCase();
-      if (!query) {
-        toast.textContent = 'Type a service to search.';
-        toast.classList.add('visible');
-        window.setTimeout(() => toast.classList.remove('visible'), 2600);
-        return;
-      }
-      const match = ['marketplace', 'grooming', 'hotel', 'daycare'].find((name) => name.includes(query) || query.includes(name));
-      if (match === 'marketplace') window.location.hash = '#marketplace';
-      else if (match === 'grooming') window.location.hash = '#grooming';
-      else if (match === 'hotel') window.location.hash = '#hotel';
-      else if (match === 'daycare') window.location.hash = '#daycare';
-      else if (match) window.location.hash = '#register';
-      else {
-        toast.textContent = query ? 'No matching service yet. Try grooming, hotel, daycare, or marketplace.' : 'Type a service to search.';
-        toast.classList.add('visible');
-        window.setTimeout(() => toast.classList.remove('visible'), 2600);
-      }
-    });
   }
 
   // Save the editable username while preserving the read-only phone and email.
@@ -2367,15 +2599,24 @@ function wireForms() {
 
   // Save feedback in the account's synced app data so it appears in the Admin enquiry inbox.
   const supportForm = document.querySelector('[data-support-form]');
-  supportForm?.addEventListener('submit', (event) => {
+  supportForm?.addEventListener('submit', async (event) => {
     event.preventDefault();
     if (!supportForm.reportValidity()) return;
-    const requests = JSON.parse(localStorage.getItem('furgo-demo-support-requests') || '[]');
-    requests.push({ topic: supportForm.elements.topic.value, message: supportForm.elements.message.value.trim(), timestamp: new Date().toISOString() });
-    localStorage.setItem('furgo-demo-support-requests', JSON.stringify(requests));
     const message = supportForm.querySelector('.form-feedback');
-    message.textContent = 'This request was saved in the browser prototype only. It was not sent to Furgo Support.';
+    const submitButton = supportForm.querySelector('[type="submit"]');
+    submitButton.disabled = true;
+    message.textContent = 'Sending your enquiry…';
     message.classList.add('visible');
+    const { error } = await supabase.rpc('submit_support_enquiry', {
+      p_topic: supportForm.elements.topic.value,
+      p_message: supportForm.elements.message.value.trim(),
+    });
+    submitButton.disabled = false;
+    if (error) {
+      message.textContent = error.message || 'Your enquiry could not be sent. Please try again.';
+      return;
+    }
+    message.textContent = 'Your enquiry has been sent. You can check for Furgo’s reply in the Help Center.';
     supportForm.reset();
   });
 
@@ -2535,10 +2776,12 @@ function wireForms() {
       }
       feedback.textContent = mode === 'register'
         ? 'Account created for development testing. Opening your Furgo home…'
-        : identity.role === 'admin' ? 'Admin sign-in successful. Opening the Admin Portal…'
+        : identity.role === 'director' ? 'Director sign-in successful. Opening the Admin Portal…'
+          : identity.role === 'manager' ? 'Manager sign-in successful. Opening the Admin Portal…'
+            : identity.role === 'executive' ? 'Executive sign-in successful. Opening Order Management…'
           : identity.role === 'driver' ? 'Driver sign-in successful. Opening the Driver Portal…'
             : 'Sign-in successful. Opening your Furgo home…';
-      window.setTimeout(() => { window.location.hash = identity.role === 'admin' ? '#admin' : identity.role === 'driver' ? '#driver' : '#home'; }, 500);
+      window.setTimeout(() => { window.location.hash = identity.role === 'director' ? '#admin' : ['manager', 'executive'].includes(identity.role) ? '#admin-orders' : identity.role === 'driver' ? '#driver' : '#home'; }, 500);
     } catch (error) {
       feedback.textContent = friendlyAuthError(error);
     } finally {
@@ -2576,17 +2819,41 @@ function render() {
       assignUnownedPetProfiles(currentCustomer);
     } catch { /* Keep the current page usable if local demo profile data is malformed. */ }
   }
-  const adminPages = ['admin', 'admin-orders', 'admin-promotions', 'admin-marketplace', 'admin-grooming', 'admin-hotel', 'admin-daycare', 'admin-enquiries', 'admin-customers'];
+  const directorPages = ['admin-customers', 'admin-product-insights'];
+  const managerPages = ['admin-promotions', 'admin-marketplace', 'admin-grooming', 'admin-hotel', 'admin-daycare'];
+  const portalPages = ['admin', 'admin-orders', 'admin-access', 'admin-enquiries', 'admin-audit', ...managerPages, ...directorPages];
   const driverPages = ['driver'];
-  if (adminPages.includes(page) && (!hasDemoSession || sessionStorage.getItem('furgo-demo-user-role') !== 'admin')) {
+  const savedRole = sessionStorage.getItem('furgo-demo-user-role');
+  const currentRole = savedRole === 'staff' ? 'executive' : savedRole === 'admin' ? 'director' : savedRole;
+  if (currentRole !== savedRole && currentRole) {
+    sessionStorage.setItem('furgo-demo-user-role', currentRole);
+    try {
+      const profile = JSON.parse(sessionStorage.getItem('furgo-demo-user-profile') || '{}');
+      profile.role = currentRole;
+      sessionStorage.setItem('furgo-demo-user-profile', JSON.stringify(profile));
+    } catch { /* Keep the portal usable if old session data is malformed. */ }
+  }
+  if (portalPages.includes(page) && (!hasDemoSession || !['executive', 'manager', 'director'].includes(currentRole))) {
     window.location.hash = '#login';
+    return;
+  }
+  if (directorPages.includes(page) && currentRole !== 'director') {
+    window.location.hash = currentRole === 'manager' ? '#admin-access' : currentRole === 'executive' ? '#admin-orders' : '#login';
+    return;
+  }
+  if (managerPages.includes(page) && !['manager', 'director'].includes(currentRole)) {
+    window.location.hash = currentRole === 'executive' ? '#admin-access' : '#login';
+    return;
+  }
+  if (hasDemoSession && currentRole === 'executive' && !['admin', 'admin-orders', 'admin-access', 'admin-enquiries', 'admin-audit', 'login'].includes(page)) {
+    window.location.hash = '#admin-orders';
     return;
   }
   if (driverPages.includes(page) && (!hasDemoSession || sessionStorage.getItem('furgo-demo-user-role') !== 'driver')) {
     window.location.hash = '#login';
     return;
   }
-  const protectedPages = ['home', 'services', 'about', 'profile', 'edit-profile', 'help-center', 'feedback', 'pet-profile', 'address', 'payment-method', 'credit', 'marketplace', 'product', 'cart', 'checkout', 'orders', 'check-in', 'favourites', 'grooming', 'grooming-orders', 'hotel', 'daycare'];
+  const protectedPages = ['home', 'search', 'services', 'about', 'profile', 'edit-profile', 'help-center', 'feedback', 'pet-profile', 'address', 'payment-method', 'credit', 'marketplace', 'product', 'cart', 'checkout', 'orders', 'check-in', 'favourites', 'grooming', 'grooming-orders', 'hotel', 'daycare'];
   if (hasDemoSession && sessionStorage.getItem('furgo-demo-user-role') === 'driver' && page !== 'driver' && page !== 'login') {
     window.location.hash = '#driver';
     return;
@@ -2621,6 +2888,7 @@ function render() {
 
   const pageRenderers = {
     home: homePage,
+    search: searchPage,
     login: loginPage,
     register: registerPage,
     onboarding: onboardingPage,
@@ -2652,10 +2920,14 @@ function render() {
     'admin-daycare': adminDaycarePage,
     'admin-enquiries': adminEnquiriesPage,
     'admin-customers': () => adminCustomersPage(routeParams),
+    'admin-access': adminAccessPage,
+    'admin-audit': adminAuditPage,
+    'admin-product-insights': adminProductServiceInsightsPage,
     driver: driverPortalPage,
   };
   const titles = {
     home: 'Furgo — Better Care For Every Pet',
+    search: 'Search — Furgo',
     login: 'Log in — Furgo',
     register: 'Create an account — Furgo',
     onboarding: 'Complete your profile — Furgo',
@@ -2686,13 +2958,16 @@ function render() {
     'admin-daycare': 'Pet Daycare — Furgo Admin',
     'admin-enquiries': 'Customer Enquiries — Furgo Admin',
     'admin-customers': 'Customer Profiles — Furgo Admin',
+    'admin-access': 'Admin Access — Furgo',
+    'admin-audit': 'Activity Log — Furgo',
+    'admin-product-insights': 'Product & Service Insights — Furgo Admin',
     driver: 'Driver Portal — Furgo Pet Taxi',
   };
   const renderPage = pageRenderers[page] || homePage;
   document.title = titles[page] || titles.home;
   document.querySelector('#app').innerHTML = renderPage();
   // Keep the Admin Portal navigation consistent across dashboard and management pages.
-  if (adminPages.includes(page)) document.querySelector('#app').insertAdjacentHTML('beforeend', adminBottomNavigation(page === 'admin' ? 'admin' : page === 'admin-orders' ? 'orders' : page === 'admin-enquiries' ? 'enquiries' : page === 'admin-customers' ? 'customers' : ''));
+  if (portalPages.includes(page)) document.querySelector('#app').insertAdjacentHTML('beforeend', adminBottomNavigation(page === 'admin' ? 'admin' : page === 'admin-orders' ? 'orders' : page === 'admin-enquiries' ? 'enquiries' : page === 'admin-access' ? 'admin-access' : '', currentRole));
   if (page === 'login' || page === 'register') recordOnboardingEvent('auth_portal_opened', page);
   if (page === 'register' && sessionStorage.getItem('furgo-demo-registration-started') !== 'true') {
     recordOnboardingEvent('registration_started', 'phone_direct');

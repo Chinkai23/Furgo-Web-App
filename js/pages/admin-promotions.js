@@ -34,7 +34,7 @@ export function adminPromotionsPage() {
   return `<main class="admin-promotions-page">
     <header class="admin-promotions-heading"><a href="#admin" aria-label="Back to Admin Portal">‹</a><div><span>Admin tools</span><h1>Home Promotions</h1></div></header>
     <section class="admin-promotions-panel">
-      <h2>Promotion banners <span data-promotion-count>${promotions.length} / ${maximumPromotions}</span></h2>
+      <h2>Promotion Banners <span data-promotion-count>${promotions.length} / ${maximumPromotions}</span></h2>
       <p class="admin-promo-guidance">Upload a banner image. It will be center-cropped and saved at the standard size of 1200 × 600 px (2:1). Add a destination page or secure URL. A maximum of eight promotions can be active.</p>
       <form class="admin-promo-form" data-admin-promo-form>
         <label>Promotion title<input name="title" required maxlength="80" placeholder="e.g. 20% off grooming" /></label>

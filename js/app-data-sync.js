@@ -26,7 +26,6 @@ const operationKeys = new Set([
   'furgo-demo-hotel-bookings',
   'furgo-demo-daycare-bookings',
   'furgo-demo-daycare-orders',
-  'furgo-demo-support-requests',
   'furgo-demo-check-in-tokens',
   'furgo-demo-driver-locations',
 ]);
@@ -36,6 +35,17 @@ const dedicatedOperationKeys = new Set([
   'furgo-demo-hotel-bookings',
   'furgo-demo-daycare-bookings',
 ]);
+const elevatedOrderRoles = new Set(['admin', 'staff', 'executive', 'manager', 'director']);
+const fullAdminRoles = new Set(['admin', 'director']);
+const managerSharedSettingsKeys = new Set([
+  'furgo-demo-hotel-settings',
+  'furgo-demo-daycare-settings',
+  'furgo-demo-marketplace-products',
+  'furgo-demo-marketplace-offers',
+  'furgo-demo-promotions',
+]);
+const updateOnlyOrderRoles = new Set(['staff', 'executive', 'manager']);
+const staffLegacyOrderKeys = new Set(['furgo-demo-marketplace-orders', 'furgo-demo-hotel-bookings', 'furgo-demo-daycare-bookings', 'furgo-demo-daycare-orders']);
 
 const allSyncedKeys = new Set([...sharedKeys, ...customerKeys, ...operationKeys]);
 let originalSetItem;
@@ -57,6 +67,10 @@ function getScope(key) {
   return '';
 }
 
+function canManageSharedKey(role, key) {
+  return fullAdminRoles.has(role) || (role === 'manager' && managerSharedSettingsKeys.has(key));
+}
+
 function readLocal(key) {
   const raw = localStorage.getItem(key);
   if (raw == null) return null;
@@ -66,17 +80,17 @@ function readLocal(key) {
 async function writeRemote(key, value) {
   const scope = getScope(key);
   if (!scope || !activeUserId) return;
-  if (scope === 'shared' && activeRole !== 'admin') return;
-  if (scope !== 'shared' && activeRole === 'admin' && scope === 'customer') return;
+  if (scope === 'shared' && !canManageSharedKey(activeRole, key)) return;
+  if (scope !== 'shared' && fullAdminRoles.has(activeRole) && scope === 'customer') return;
 
   if (dedicatedTablesReady && dedicatedOperationKeys.has(key)) {
     await writeDedicatedOperations(key, value);
     return;
   }
 
-  const records = scope === 'operation' && activeRole === 'admin' && Array.isArray(value)
+  const records = scope === 'operation' && elevatedOrderRoles.has(activeRole) && Array.isArray(value)
     ? groupOperationsByOwner(value)
-    : scope === 'operation' && activeRole === 'admin' && operationObjectKeys.has(key) && value && typeof value === 'object'
+    : scope === 'operation' && elevatedOrderRoles.has(activeRole) && operationObjectKeys.has(key) && value && typeof value === 'object'
       ? groupOperationObjectByOwner(value)
       : [{ ownerId: scope === 'shared' ? null : activeUserId, value }];
   for (const record of records) {
@@ -109,7 +123,7 @@ async function writeDedicatedRecord(key, record, ownerId) {
   const createdAt = safeTimestamp(record.createdAt);
   if (key === 'furgo-demo-marketplace-orders') {
     const { _cloudOwnerId, userId, items = [], ...details } = record;
-    const { error } = await supabase.from('marketplace_orders').upsert({
+    const payload = {
       id,
       user_id: ownerId,
       reference: String(record.reference || id),
@@ -119,8 +133,12 @@ async function writeDedicatedRecord(key, record, ownerId) {
       details,
       created_at: createdAt,
       updated_at: new Date().toISOString(),
-    }, { onConflict: 'id' });
+    };
+    const { error } = updateOnlyOrderRoles.has(activeRole)
+      ? await supabase.from('marketplace_orders').update(payload).eq('id', id)
+      : await supabase.from('marketplace_orders').upsert(payload, { onConflict: 'id' });
     if (error) throw error;
+    if (updateOnlyOrderRoles.has(activeRole)) return;
     const { error: removeItemsError } = await supabase.from('marketplace_order_items').delete().eq('order_id', id);
     if (removeItemsError) throw removeItemsError;
     if (Array.isArray(items) && items.length) {
@@ -136,7 +154,7 @@ async function writeDedicatedRecord(key, record, ownerId) {
 
   const { _cloudOwnerId, userId, ...details } = record;
   if (key === 'furgo-demo-hotel-bookings') {
-    const { error } = await supabase.from('pet_hotel_bookings').upsert({
+    const payload = {
       id,
       user_id: ownerId,
       reference: String(record.reference || id),
@@ -149,12 +167,15 @@ async function writeDedicatedRecord(key, record, ownerId) {
       details,
       created_at: createdAt,
       updated_at: new Date().toISOString(),
-    }, { onConflict: 'id' });
+    };
+    const { error } = updateOnlyOrderRoles.has(activeRole)
+      ? await supabase.from('pet_hotel_bookings').update(payload).eq('id', id)
+      : await supabase.from('pet_hotel_bookings').upsert(payload, { onConflict: 'id' });
     if (error) throw error;
     return;
   }
 
-  const { error } = await supabase.from('pet_daycare_bookings').upsert({
+  const payload = {
     id,
     user_id: ownerId,
     reference: String(record.reference || id),
@@ -166,12 +187,15 @@ async function writeDedicatedRecord(key, record, ownerId) {
     details,
     created_at: createdAt,
     updated_at: new Date().toISOString(),
-  }, { onConflict: 'id' });
+  };
+  const { error } = updateOnlyOrderRoles.has(activeRole)
+    ? await supabase.from('pet_daycare_bookings').update(payload).eq('id', id)
+    : await supabase.from('pet_daycare_bookings').upsert(payload, { onConflict: 'id' });
   if (error) throw error;
 }
 
 async function writeDedicatedOperations(key, value) {
-  const records = activeRole === 'admin' && Array.isArray(value)
+  const records = elevatedOrderRoles.has(activeRole) && Array.isArray(value)
     ? groupOperationsByOwner(value)
     : [{ ownerId: activeUserId, value: Array.isArray(value) ? value : [] }];
   for (const group of records) {
@@ -197,13 +221,13 @@ function dedicatedRecordFromRow(key, row, items = []) {
     record.dropoffTime = row.dropoff_time || record.dropoffTime || '';
     record.pickupTime = row.pickup_time || record.pickupTime || '';
   }
-  if (activeRole === 'admin') record._cloudOwnerId = row.user_id;
+  if (elevatedOrderRoles.has(activeRole)) record._cloudOwnerId = row.user_id;
   return record;
 }
 
 async function loadDedicatedOperations(userId, role) {
   const localValues = new Map([...dedicatedOperationKeys].map((key) => [key, readLocal(key)]));
-  const ownQuery = (query) => role === 'admin' ? query : query.eq('user_id', userId);
+  const ownQuery = (query) => elevatedOrderRoles.has(role) ? query : query.eq('user_id', userId);
   const [marketResult, hotelResult, daycareResult] = await Promise.all([
     ownQuery(supabase.from('marketplace_orders').select('*').order('created_at', { ascending: false })),
     ownQuery(supabase.from('pet_hotel_bookings').select('*').order('created_at', { ascending: false })),
@@ -317,7 +341,7 @@ function installStorageMirror(userId, role) {
     if (this !== localStorage || !allSyncedKeys.has(key) || !activeUserId || applyingRemoteData) return;
     if (dedicatedTablesReady && dedicatedOperationKeys.has(key)) return;
     const scope = getScope(key);
-    if (scope === 'shared' && activeRole !== 'admin') return;
+    if (scope === 'shared' && !canManageSharedKey(activeRole, key)) return;
     const ownerId = scope === 'shared' ? null : activeUserId;
     void supabase.from('app_data').delete().eq('record_id', rowId(scope, key, ownerId))
       .then(({ error }) => { if (error) console.warn(`Could not remove ${key} from Supabase:`, error); });
@@ -328,7 +352,7 @@ function applyRealtimeRow(row, removed = false) {
   const key = row?.storage_key;
   if (!allSyncedKeys.has(key) || dedicatedTablesReady && (dedicatedOperationKeys.has(key) || key === 'furgo-demo-daycare-orders')) return;
   const scope = row.scope || getScope(key);
-  if (scope === 'shared' && activeRole !== 'admin') {
+  if (scope === 'shared' && !fullAdminRoles.has(activeRole)) {
     applyingRemoteData = true;
     if (removed) originalRemoveItem.call(localStorage, key);
     else originalSetItem.call(localStorage, key, JSON.stringify(row.payload));
@@ -336,7 +360,7 @@ function applyRealtimeRow(row, removed = false) {
     window.dispatchEvent(new StorageEvent('storage', { key }));
     return;
   }
-  if (row.owner_id === activeUserId && activeRole !== 'admin') {
+  if (row.owner_id === activeUserId && !fullAdminRoles.has(activeRole)) {
     applyingRemoteData = true;
     if (removed) originalRemoveItem.call(localStorage, key);
     else originalSetItem.call(localStorage, key, JSON.stringify(row.payload));
@@ -344,7 +368,7 @@ function applyRealtimeRow(row, removed = false) {
     window.dispatchEvent(new StorageEvent('storage', { key }));
     return;
   }
-  if (activeRole !== 'admin' || scope !== 'operation') return;
+  if (!elevatedOrderRoles.has(activeRole) || scope !== 'operation') return;
 
   if (operationObjectKeys.has(key)) {
     const current = readLocal(key) || {};
@@ -401,24 +425,26 @@ export async function loadCloudAppData(userId, role) {
       console.warn('Dedicated order tables are not ready yet; loading legacy order data:', dedicatedError);
     }
     for (const key of allSyncedKeys) {
+      if (role === 'executive' && !staffLegacyOrderKeys.has(key)) continue;
       if (dedicatedDataReady && (dedicatedOperationKeys.has(key) || key === 'furgo-demo-daycare-orders')) continue;
       const scope = getScope(key);
       if (scope === 'shared') {
+        if (role === 'manager' && !managerSharedSettingsKeys.has(key)) continue;
         const shared = byRecordId.get(rowId('shared', key, null));
         if (shared) originalSetItem.call(localStorage, key, JSON.stringify(shared.payload));
-        else if (role === 'admin') await writeRemote(key, readLocal(key));
+        else if (canManageSharedKey(role, key)) await writeRemote(key, readLocal(key));
         continue;
       }
 
       const ownedRows = rows.filter((row) => row.storage_key === key && row.scope === scope && row.owner_id);
-      if (role === 'admin' && scope === 'operation') {
+      if (elevatedOrderRoles.has(role) && scope === 'operation') {
         const merged = operationObjectKeys.has(key)
           ? Object.assign({}, ...ownedRows.map((row) => Object.fromEntries(Object.entries(row.payload || {}).map(([entryKey, entryValue]) => [entryKey, { ...entryValue, _cloudOwnerId: row.owner_id }]))))
           : ownedRows.flatMap((row) => Array.isArray(row.payload)
             ? row.payload.map((item) => ({ ...item, userId: row.owner_id, _cloudOwnerId: row.owner_id }))
             : []);
         originalSetItem.call(localStorage, key, JSON.stringify(merged));
-      } else if (role !== 'admin') {
+      } else if (!fullAdminRoles.has(role)) {
         const own = byRecordId.get(rowId(scope, key, userId));
         if (own) originalSetItem.call(localStorage, key, JSON.stringify(own.payload));
         else {
