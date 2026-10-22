@@ -2,6 +2,7 @@ import { bottomNavigation, escapeHTML } from '../shared.js';
 import { groomingBookingsKey, loadGroomingBookings } from './grooming-data.js';
 import { hotelBookingsKey, loadHotelBookings } from './hotel-data.js';
 import { supabase } from '../supabase.js';
+import qrcode from '../vendor/qrcode-generator.mjs';
 
 export const checkInTokensKey = 'furgo-demo-check-in-tokens';
 const daycareKeys = ['furgo-demo-daycare-bookings', 'furgo-demo-pet-daycare-bookings', 'furgo-demo-daycare-orders'];
@@ -74,93 +75,38 @@ export function ensureCheckInToken(orderKey, orderId, stage) {
   return token;
 }
 
-// QR version 1-L generator. Encode the exact manual code shown to customers so either
-// camera apps or the Admin scanner read the same value staff can type.
+function checkInScanUrl(token) {
+  const current = new URL(window.location.href);
+  const base = current.hostname === 'localhost' || current.hostname === '127.0.0.1'
+    ? new URL('https://chinkai23.github.io/Furgo-Web-App/')
+    : current;
+  base.search = '';
+  base.hash = `admin-orders?code=${encodeURIComponent(formatCheckInToken(token))}`;
+  return base.toString();
+}
+
+// Create a standards-based QR containing a URL so phone camera apps recognize it.
 export function makeCheckInQrSvg(token) {
-  const bytes = [...new TextEncoder().encode(formatCheckInToken(token))];
-  if (bytes.length > 17) throw new Error('Check-in token is too long for this QR code.');
-  const bits = [];
-  const appendBits = (value, length) => { for (let shift = length - 1; shift >= 0; shift -= 1) bits.push((value >>> shift) & 1); };
-  appendBits(0b0100, 4);
-  appendBits(bytes.length, 8);
-  bytes.forEach((byte) => appendBits(byte, 8));
-  for (let i = 0; i < 4 && bits.length < 152; i += 1) bits.push(0);
-  while (bits.length % 8) bits.push(0);
-  const data = [];
-  for (let offset = 0; offset < bits.length; offset += 8) data.push(bits.slice(offset, offset + 8).reduce((value, bit) => (value << 1) | bit, 0));
-  for (let pad = 0; data.length < 19; pad += 1) data.push(pad % 2 ? 0x11 : 0xec);
+  const qr = qrcode(0, 'M');
+  qr.addData(checkInScanUrl(token), 'Byte');
+  qr.make();
+  return qr.createSvgTag({ cellSize: 8, margin: 32, scalable: true, alt: { text: 'Order check-in link', id: `check-in-qr-description-${token}` } })
+    .replace('<svg ', '<svg class="check-in-qr" ');
+}
 
-  const multiply = (left, right) => {
-    let result = 0;
-    for (let i = 7; i >= 0; i -= 1) {
-      result = (result << 1) ^ (((result >>> 7) & 1) * 0x11d);
-      result ^= ((right >>> i) & 1) * left;
-    }
-    return result;
-  };
-  const generator = [87, 229, 146, 149, 238, 102, 21];
-  const ecc = Array(7).fill(0);
-  data.forEach((byte) => {
-    const factor = byte ^ ecc[0];
-    ecc.shift(); ecc.push(0);
-    generator.forEach((coefficient, index) => { ecc[index] ^= multiply(coefficient, factor); });
-  });
-  const codewords = [...data, ...ecc];
-  const size = 21;
-  const matrix = Array.from({ length: size }, () => Array(size).fill(false));
-  const reserved = Array.from({ length: size }, () => Array(size).fill(false));
-  const setFunction = (x, y, dark) => { matrix[y][x] = dark; reserved[y][x] = true; };
-
-  [[3, 3], [size - 4, 3], [3, size - 4]].forEach(([centerX, centerY]) => {
-    for (let dy = -4; dy <= 4; dy += 1) for (let dx = -4; dx <= 4; dx += 1) {
-      const x = centerX + dx; const y = centerY + dy;
-      if (x < 0 || y < 0 || x >= size || y >= size) continue;
-      const edge = Math.max(Math.abs(dx), Math.abs(dy));
-      setFunction(x, y, edge !== 2 && edge !== 4);
-    }
-  });
-  for (let index = 8; index < size - 8; index += 1) {
-    setFunction(6, index, index % 2 === 0);
-    setFunction(index, 6, index % 2 === 0);
+// Accept both the printed code and the URL payload used by the QR image.
+export function extractCheckInCode(rawValue) {
+  const value = String(rawValue || '').trim();
+  if (/^https?:\/\//i.test(value)) {
+    try {
+      const scannedUrl = new URL(value);
+      const hashQuery = scannedUrl.hash.includes('?') ? scannedUrl.hash.slice(scannedUrl.hash.indexOf('?') + 1) : '';
+      const params = new URLSearchParams(hashQuery);
+      const code = scannedUrl.searchParams.get('code') || params.get('code');
+      return String(code || '').trim().toUpperCase().replace(/[\s-]/g, '');
+    } catch { return ''; }
   }
-  for (let index = 0; index < 15; index += 1) {
-    const first = index < 6 ? [8, index] : index < 8 ? [8, index + 1] : [14 - index, 8];
-    const second = index < 8 ? [size - 1 - index, 8] : [8, size - 15 + index];
-    setFunction(first[0], first[1], false);
-    setFunction(second[0], second[1], false);
-  }
-  setFunction(8, size - 8, true);
-
-  let bitIndex = 0;
-  for (let right = size - 1; right >= 1; right -= 2) {
-    if (right === 6) right = 5;
-    for (let vertical = 0; vertical < size; vertical += 1) {
-      const upward = ((right + 1) & 2) === 0;
-      const y = upward ? size - 1 - vertical : vertical;
-      for (let offset = 0; offset < 2; offset += 1) {
-        const x = right - offset;
-        if (reserved[y][x]) continue;
-        const bit = bitIndex < codewords.length * 8 ? (codewords[bitIndex >>> 3] >>> (7 - (bitIndex & 7))) & 1 : 0;
-        matrix[y][x] = Boolean(bit ^ ((x + y) % 2 === 0 ? 1 : 0));
-        bitIndex += 1;
-      }
-    }
-  }
-
-  let format = 0b01000;
-  let remainder = format << 10;
-  for (let bit = 14; bit >= 10; bit -= 1) if ((remainder >>> bit) & 1) remainder ^= 0x537 << (bit - 10);
-  format = ((format << 10) | remainder) ^ 0x5412;
-  for (let index = 0; index < 15; index += 1) {
-    const dark = ((format >>> index) & 1) !== 0;
-    const first = index < 6 ? [8, index] : index < 8 ? [8, index + 1] : [14 - index, 8];
-    const second = index < 8 ? [size - 1 - index, 8] : [8, size - 15 + index];
-    matrix[first[1]][first[0]] = dark;
-    matrix[second[1]][second[0]] = dark;
-  }
-  matrix[size - 8][8] = true;
-  const path = matrix.map((row, y) => row.map((dark, x) => dark ? `M${x + 4} ${y + 4}h1v1h-1z` : '').join('')).join('');
-  return `<svg class="check-in-qr" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 29 29" role="img" aria-label="Order check-in QR code"><rect width="29" height="29" fill="#fff"/><path d="${path}" fill="#202024"/></svg>`;
+  return value.toUpperCase().replace(/[\s-]/g, '');
 }
 
 // Resolves a scan to an order without changing the order or consuming the token.

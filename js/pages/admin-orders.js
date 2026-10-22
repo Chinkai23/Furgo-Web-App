@@ -2,7 +2,7 @@ import { escapeHTML } from '../shared.js';
 import { marketplaceOrdersKey, loadMarketplaceOrders } from './marketplace-data.js';
 import { groomingBookingsKey, loadGroomingBookings } from './grooming-data.js';
 import { hotelBookingsKey, loadHotelBookings } from './hotel-data.js';
-import { applyCheckInScan, formatCheckInToken, previewCheckInScan, refreshCheckInTokens, setupCheckInCodeInput } from './check-in.js';
+import { applyCheckInScan, extractCheckInCode, formatCheckInToken, previewCheckInScan, refreshCheckInTokens, setupCheckInCodeInput } from './check-in.js';
 import { driverLocationForOrder } from './driver.js';
 import { recordAdminAction } from '../admin-audit.js';
 import { startQRScanner } from '../qr-scanner.js';
@@ -169,7 +169,7 @@ export function setupAdminOrders() {
     return true;
   };
   const showPreviewForCode = async (rawCode) => {
-    const code = String(rawCode || '').trim().toUpperCase().replace(/[\s-]/g, '');
+    const code = extractCheckInCode(rawCode);
     if (!code) return false;
     if (scanStatus) scanStatus.textContent = 'Looking up the code…';
     try { await refreshCheckInTokens(); }
@@ -193,7 +193,7 @@ export function setupAdminOrders() {
     return true;
   };
   const fillCodeFromScan = (rawCode) => {
-    const code = String(rawCode || '').trim().toUpperCase().replace(/[\s-]/g, '');
+    const code = extractCheckInCode(rawCode);
     if (!codeInput || !code) {
       if (scanStatus) scanStatus.textContent = 'The QR code did not contain a manual check-in code.';
       return false;

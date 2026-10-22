@@ -4,30 +4,17 @@ function loadJsQR() {
   if (typeof window.jsQR === 'function') return Promise.resolve(window.jsQR);
   if (jsQRLoadPromise) return jsQRLoadPromise;
 
-  jsQRLoadPromise = (async () => {
-    const sources = [
-      'https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js',
-      'https://unpkg.com/jsqr@1.4.0/dist/jsQR.js',
-    ];
-    let lastError;
-    for (const src of sources) {
-      try {
-        await new Promise((resolve, reject) => {
-          const script = document.createElement('script');
-          script.src = src;
-          script.async = true;
-          script.dataset.furgoQrDecoder = 'true';
-          script.onload = () => typeof window.jsQR === 'function' ? resolve() : reject(new Error('The QR decoder did not initialize.'));
-          script.onerror = () => reject(new Error('The QR decoder could not be downloaded.'));
-          document.head.append(script);
-        });
-        if (typeof window.jsQR === 'function') return window.jsQR;
-      } catch (error) {
-        lastError = error;
-      }
-    }
-    throw lastError || new Error('The QR decoder could not be loaded.');
-  })().catch((error) => {
+  jsQRLoadPromise = new Promise((resolve, reject) => {
+    const script = document.createElement('script');
+    script.src = new URL('./vendor/jsQR.js', import.meta.url).href;
+    script.async = true;
+    script.dataset.furgoQrDecoder = 'true';
+    script.onload = () => typeof window.jsQR === 'function'
+      ? resolve(window.jsQR)
+      : reject(new Error('The local QR decoder did not initialize.'));
+    script.onerror = () => reject(new Error('The local QR decoder could not be loaded.'));
+    document.head.append(script);
+  }).catch((error) => {
     jsQRLoadPromise = null;
     throw error;
   });

@@ -26,7 +26,7 @@ import { adminDaycarePage, setupAdminDaycare } from './pages/admin-daycare.js';
 import { defaultGroomingSettings, groomingBookingsKey, groomingSettingsKey, groomingWeightTier, loadGroomingBookings, loadGroomingSettings } from './pages/grooming-data.js';
 import { myOrdersPage } from './pages/my-orders.js';
 import { adminOrdersPage, setupAdminOrders } from './pages/admin-orders.js';
-import { checkInPage, formatCheckInToken, refreshCheckInTokens } from './pages/check-in.js';
+import { checkInPage, extractCheckInCode, formatCheckInToken, refreshCheckInTokens } from './pages/check-in.js';
 import { adminBottomNavigation, escapeHTML } from './shared.js';
 import { adminEnquiriesPage, setupAdminEnquiries } from './pages/admin-enquiries.js';
 import { adminCustomersPage, assignUnownedPetProfiles, getCustomerAccountStatus, getCustomerRecordId, saveCustomerRecord, setupAdminCustomers } from './pages/admin-customers.js';
@@ -2247,7 +2247,7 @@ function setupAdminFooterScanner() {
         shouldRun: () => dialog.open,
         onStatus: (message) => { feedback.textContent = message; },
         onCode: (scanned) => {
-          const manualCode = formatCheckInToken(String(scanned || '').trim().toUpperCase().replace(/[\s-]/g, ''));
+          const manualCode = formatCheckInToken(extractCheckInCode(scanned));
           if (!manualCode) {
             feedback.textContent = 'The QR code did not contain a manual check-in code.';
             return false;
