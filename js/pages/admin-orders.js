@@ -2,7 +2,7 @@ import { escapeHTML } from '../shared.js';
 import { marketplaceOrdersKey, loadMarketplaceOrders } from './marketplace-data.js';
 import { groomingBookingsKey, loadGroomingBookings } from './grooming-data.js';
 import { hotelBookingsKey, loadHotelBookings } from './hotel-data.js';
-import { applyCheckInScan, setupCheckInCodeInput } from './check-in.js';
+import { applyCheckInScan, refreshCheckInTokens, setupCheckInCodeInput } from './check-in.js';
 import { driverLocationForOrder } from './driver.js';
 import { recordAdminAction } from '../admin-audit.js';
 import { startQRScanner } from '../qr-scanner.js';
@@ -113,13 +113,19 @@ export function setupAdminOrders() {
       const statusRow = [...card.querySelectorAll('.admin-orders-detail dt')].find((label) => label.textContent.trim().toLowerCase() === 'status')?.parentElement;
       if (statusRow?.querySelector('dd')) statusRow.querySelector('dd').textContent = result.nextStatus;
     }
-    document.dispatchEvent(new CustomEvent('furgo-order-status-updated', { detail: result.order }));
+    // Grooming bookings are synced through a dedicated Supabase table, so include the
+    // source key expected by the shared cloud-update listener.
+    document.dispatchEvent(new CustomEvent('furgo-order-status-updated', { detail: { ...result.order, orderKey: result.orderKey } }));
     return true;
   };
   startScanButton?.addEventListener('click', async () => {
     if (cameraScanner) return;
     try {
       if (scanStatus) scanStatus.textContent = 'Starting camera…';
+      try { await refreshCheckInTokens(); }
+      catch (error) {
+        if (scanStatus) scanStatus.textContent = `Could not refresh shared check-in codes: ${error.message}`;
+      }
       cameraScanner = await startQRScanner({
         video,
         shouldRun: () => video.isConnected,
@@ -132,9 +138,13 @@ export function setupAdminOrders() {
     }
   });
   if (startScanButton) window.addEventListener('hashchange', stopCamera, { once: true });
-  document.querySelector('[data-checkin-manual-form]')?.addEventListener('submit', (event) => {
+  document.querySelector('[data-checkin-manual-form]')?.addEventListener('submit', async (event) => {
     event.preventDefault();
     const form = event.currentTarget;
+    try { await refreshCheckInTokens(); }
+    catch (error) {
+      if (scanStatus) scanStatus.textContent = `Could not refresh shared check-in codes: ${error.message}`;
+    }
     if (showScanResult(new FormData(form).get('token'))) form.reset();
   });
 

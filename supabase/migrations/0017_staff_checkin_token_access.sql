@@ -109,6 +109,10 @@ create policy "Limit staff app data updates to their level"
     )
   );
 
+drop policy if exists "Staff read check-in token records" on public.app_data;
+drop policy if exists "Staff create check-in token records" on public.app_data;
+drop policy if exists "Staff update check-in token records" on public.app_data;
+
 create policy "Staff read check-in token records"
   on public.app_data for select to authenticated
   using (

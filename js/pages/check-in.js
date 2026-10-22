@@ -1,6 +1,7 @@
 import { bottomNavigation, escapeHTML } from '../shared.js';
 import { groomingBookingsKey, loadGroomingBookings } from './grooming-data.js';
 import { hotelBookingsKey, loadHotelBookings } from './hotel-data.js';
+import { supabase } from '../supabase.js';
 
 export const checkInTokensKey = 'furgo-demo-check-in-tokens';
 const daycareKeys = ['furgo-demo-daycare-bookings', 'furgo-demo-pet-daycare-bookings', 'furgo-demo-daycare-orders'];
@@ -24,6 +25,34 @@ function readTokenMap() {
 
 function writeTokenMap(tokens) {
   localStorage.setItem(checkInTokensKey, JSON.stringify(tokens));
+}
+
+// Refresh customer-generated one-time codes from Supabase before staff validate them.
+// The customer and admin portals often run in separate browsers, so localStorage alone
+// cannot be the source of truth for a code created on the customer's device.
+export async function refreshCheckInTokens() {
+  const { data, error } = await supabase.from('app_data')
+    .select('owner_id,payload')
+    .eq('scope', 'operation')
+    .eq('storage_key', checkInTokensKey);
+  if (error) throw error;
+
+  const localTokens = readTokenMap();
+  const merged = { ...localTokens };
+  for (const row of data || []) {
+    for (const [token, record] of Object.entries(row.payload || {})) {
+      if (!record || typeof record !== 'object') continue;
+      const local = merged[token];
+      merged[token] = {
+        ...record,
+        // Preserve a locally completed scan if its write is still in flight.
+        ...(local?.usedAt && !record.usedAt ? { usedAt: local.usedAt } : {}),
+        _cloudOwnerId: row.owner_id,
+      };
+    }
+  }
+  writeTokenMap(merged);
+  return merged;
 }
 
 function makeToken() {
@@ -138,7 +167,8 @@ export function applyCheckInScan(rawValue) {
   const token = String(rawValue || '').trim().toUpperCase().replace(/[\s-]/g, '');
   const tokens = readTokenMap();
   const record = tokens[token];
-  if (!record || record.usedAt) return { ok: false, message: 'This QR code is invalid or has already been used.' };
+  if (!record) return { ok: false, message: 'This code is not in the shared check-in records. Refresh the customer QR code and try again. Codes from another device require Supabase migration 0017.' };
+  if (record.usedAt) return { ok: false, message: 'This QR code has already been used.' };
   const orders = readOrders(record.orderKey);
   const order = orders.find((item) => String(item.id) === record.orderId);
   if (!order) return { ok: false, message: 'The order for this QR code could not be found in this prototype.' };

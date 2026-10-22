@@ -26,7 +26,7 @@ import { adminDaycarePage, setupAdminDaycare } from './pages/admin-daycare.js';
 import { defaultGroomingSettings, groomingBookingsKey, groomingSettingsKey, groomingWeightTier, loadGroomingBookings, loadGroomingSettings } from './pages/grooming-data.js';
 import { myOrdersPage } from './pages/my-orders.js';
 import { adminOrdersPage, setupAdminOrders } from './pages/admin-orders.js';
-import { applyCheckInScan, checkInPage } from './pages/check-in.js';
+import { applyCheckInScan, checkInPage, refreshCheckInTokens } from './pages/check-in.js';
 import { adminBottomNavigation, escapeHTML } from './shared.js';
 import { adminEnquiriesPage, setupAdminEnquiries } from './pages/admin-enquiries.js';
 import { adminCustomersPage, assignUnownedPetProfiles, getCustomerAccountStatus, getCustomerRecordId, saveCustomerRecord, setupAdminCustomers } from './pages/admin-customers.js';
@@ -2240,6 +2240,8 @@ function setupAdminFooterScanner() {
     dialog.showModal();
     feedback.textContent = 'Starting camera…';
     try {
+      try { await refreshCheckInTokens(); }
+      catch (error) { feedback.textContent = `Could not refresh shared check-in codes: ${error.message}`; }
       scanner = await startQRScanner({
         video,
         shouldRun: () => dialog.open,
@@ -2248,7 +2250,7 @@ function setupAdminFooterScanner() {
           const result = applyCheckInScan(scanned);
           feedback.textContent = result.message;
           if (result.ok) {
-            document.dispatchEvent(new CustomEvent('furgo-order-status-updated', { detail: result.order }));
+            document.dispatchEvent(new CustomEvent('furgo-order-status-updated', { detail: { ...result.order, orderKey: result.orderKey } }));
             window.setTimeout(() => {
               if (dialog.open) dialog.close();
               if (window.location.hash.split('?')[0] === '#admin-orders') window.dispatchEvent(new Event('hashchange'));
