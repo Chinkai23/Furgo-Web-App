@@ -36,7 +36,7 @@ button { cursor: pointer; }
   justify-content: space-between;
 }
 .brand { display: inline-flex; align-items: center; gap: 10px; font: 700 27px/1 'Avenir Next'; letter-spacing: -1.8px; }
-.brand-image { display: block; width: 56px; height: 56px; object-fit: contain; }
+.brand-image { display: block; width: auto; max-width: 140px; height: 46px; object-fit: contain; }
 .brand-mark { width: 39px; height: 39px; display: grid; place-items: center; border-radius: 13px; color: white; background: var(--orange); }
 .brand-mark svg { width: 24px; height: 24px; }
 .nav-links { display: flex; align-items: center; gap: 34px; color: #55545a; font-size: 14px; font-weight: 600; }
@@ -348,7 +348,7 @@ h1, h2, h3, p { margin-top: 0; }
 }
 @media (max-width: 680px) {
   .site-header { width: calc(100% - 36px); height: 72px; }
-  .brand { font-size: 24px; }.brand-image { width: 46px; height: 46px; }
+  .brand { font-size: 24px; }.brand-image { height: 40px; }
   .nav-links { display: none; }
   .nav-actions { gap: 4px; }.nav-login { padding: 10px; font-size: 13px; }.nav-actions .button { min-height: 40px; padding: 0 14px; border-radius: 12px; font-size: 12px; }
   .hero { width: calc(100% - 24px); min-height: auto; margin-top: 4px; padding: 38px 25px 25px; border-radius: 26px; grid-template-columns: 1fr; }
