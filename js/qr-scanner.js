@@ -44,6 +44,7 @@ export async function startQRScanner({ video, onCode, onStatus = () => {}, shoul
   }
   let active = true;
   let timer = null;
+  let fallbackAttempted = false;
   const stop = () => {
     if (!active) return;
     active = false;
@@ -78,9 +79,22 @@ export async function startQRScanner({ video, onCode, onStatus = () => {}, shoul
           try {
             const codes = await detector.detect(video);
             rawValue = codes.find((item) => item.rawValue)?.rawValue || '';
+            // Some browsers expose BarcodeDetector but silently return no results for a QR.
+            // Try jsQR once in that case instead of waiting forever on the native detector.
+            if (!rawValue && !fallbackAttempted) {
+              fallbackAttempted = true;
+              try {
+                decoder = await loadJsQR();
+                detector = null;
+              } catch {
+                onStatus('The camera has not detected a QR code yet. You can also enter the code manually.');
+              }
+            }
           } catch {
             detector = null;
-            decoder ||= await loadJsQR();
+            fallbackAttempted = true;
+            try { decoder ||= await loadJsQR(); }
+            catch { onStatus('The camera scanner could not start. You can also enter the code manually.'); }
           }
         }
         if (!rawValue && !detector && decoder && context && video.videoWidth && video.videoHeight) {

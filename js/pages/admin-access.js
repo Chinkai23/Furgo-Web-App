@@ -2,7 +2,7 @@ import { escapeHTML } from '../shared.js';
 import { supabase } from '../supabase.js';
 
 const levels = {
-  executive: { name: 'Executive', order: 1, summary: 'View and manage orders, receipts, and customer check-ins.' },
+  executive: { name: 'Executive', order: 1, summary: 'Manage orders and check-ins, and view service operations.' },
   manager: { name: 'Manager', order: 2, summary: 'Manage orders, promotions, Marketplace, Grooming, Pet Hotel, and Daycare.' },
   director: { name: 'Director', order: 3, summary: 'Full portal access, including customer records, search insights, and product and service reports.' },
 };
@@ -21,10 +21,10 @@ export function adminAccessPage() {
   const availableFeatures = [
     featureCard('Orders & check-in', 'Review orders, update status, upload receipts, and check customers in.', '#admin-orders', true),
     featureCard('Promotions', 'Create, update, and remove home page promotions.', '#admin-promotions', isManager),
-    featureCard('Marketplace', 'Manage products, offers, supplier information, and marketplace orders.', '#admin-marketplace', isManager),
-    featureCard('Grooming', 'Manage appointment settings, bookings, and grooming operations.', '#admin-grooming', isManager),
-    featureCard('Pet Hotel', 'Manage rooms, pricing, availability, and reservations.', '#admin-hotel', isManager),
-    featureCard('Pet Daycare', 'Manage rates, capacity, add-ons, and bookings.', '#admin-daycare', isManager),
+    featureCard('Marketplace', isManager ? 'Manage products, offers, supplier information, and marketplace orders.' : 'View products, supplier information, and marketplace orders.', '#admin-marketplace', true),
+    featureCard('Grooming', isManager ? 'Manage appointment settings, bookings, and grooming operations.' : 'View bookings, safety notes, and grooming operations.', '#admin-grooming', true),
+    featureCard('Pet Hotel', isManager ? 'Manage rooms, pricing, availability, and reservations.' : 'View room availability, care notes, and reservations.', '#admin-hotel', true),
+    featureCard('Pet Daycare', isManager ? 'Manage rates, capacity, add-ons, and bookings.' : 'View the daily roster, care notes, and bookings.', '#admin-daycare', true),
     featureCard('Activity log', isManager ? 'Review actions performed by Executives, Managers, and Directors.' : 'Review actions performed by Executive admins.', '#admin-audit', true),
     featureCard('Product & Service Insights', 'Review purchase timelines, nutrition and product demand, pet demographics, service demand, and locations.', '#admin-product-insights', isDirector),
     featureCard('Customers', 'Open customer accounts, pet records, and Search Insights.', '#admin-customers', isDirector),

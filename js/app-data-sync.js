@@ -44,6 +44,7 @@ const managerSharedSettingsKeys = new Set([
   'furgo-demo-marketplace-offers',
   'furgo-demo-promotions',
 ]);
+const executiveMarketplaceKeys = new Set(['furgo-demo-marketplace-products']);
 const updateOnlyOrderRoles = new Set(['staff', 'executive', 'manager']);
 const staffLegacyOrderKeys = new Set(['furgo-demo-marketplace-orders', 'furgo-demo-hotel-bookings', 'furgo-demo-daycare-bookings', 'furgo-demo-daycare-orders']);
 
@@ -68,7 +69,9 @@ function getScope(key) {
 }
 
 function canManageSharedKey(role, key) {
-  return fullAdminRoles.has(role) || (role === 'manager' && managerSharedSettingsKeys.has(key));
+  return fullAdminRoles.has(role)
+    || (role === 'manager' && managerSharedSettingsKeys.has(key))
+    || (role === 'executive' && executiveMarketplaceKeys.has(key));
 }
 
 function readLocal(key) {
@@ -443,7 +446,7 @@ export async function loadCloudAppData(userId, role) {
       console.warn('Dedicated order tables are not ready yet; loading legacy order data:', dedicatedError);
     }
     for (const key of allSyncedKeys) {
-      if (role === 'executive' && !staffLegacyOrderKeys.has(key)) continue;
+      if (role === 'executive' && !staffLegacyOrderKeys.has(key) && key !== 'furgo-demo-check-in-tokens' && !executiveMarketplaceKeys.has(key)) continue;
       if (dedicatedDataReady && (dedicatedOperationKeys.has(key) || key === 'furgo-demo-daycare-orders')) continue;
       const scope = getScope(key);
       if (scope === 'shared') {

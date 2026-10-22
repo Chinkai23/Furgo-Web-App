@@ -1,5 +1,5 @@
 import { escapeHTML } from '../shared.js';
-import { applyTaxiScan } from './check-in.js';
+import { applyTaxiScan, setupCheckInCodeInput } from './check-in.js';
 import { groomingBookingsKey, loadGroomingBookings } from './grooming-data.js';
 import { hotelBookingsKey, loadHotelBookings } from './hotel-data.js';
 import { daycareBookingsKey, loadDaycareBookings } from './daycare-data.js';
@@ -97,6 +97,7 @@ export function setupDriverPortal() {
   const video = document.querySelector('[data-driver-scan-video]');
   const feedback = document.querySelector('[data-driver-scan-feedback]');
   if (!dialog || !video || !feedback) return;
+  setupCheckInCodeInput(dialog.querySelector('[data-driver-manual-scan] input[name="token"]'));
   let cameraScanner = null;
   let watchId = null;
   let activeLocationJob = '';
@@ -143,7 +144,7 @@ export function setupDriverPortal() {
         video,
         shouldRun: () => dialog.open,
         onStatus: (message) => { feedback.textContent = message; },
-        onCode: (code) => { applyScan(code); return true; },
+        onCode: applyScan,
       });
     } catch (error) { stopCamera(); feedback.textContent = `${error.message} Enter the code below instead.`; }
   }));

@@ -2,7 +2,7 @@ import { escapeHTML } from '../shared.js';
 import { marketplaceOrdersKey, loadMarketplaceOrders } from './marketplace-data.js';
 import { groomingBookingsKey, loadGroomingBookings } from './grooming-data.js';
 import { hotelBookingsKey, loadHotelBookings } from './hotel-data.js';
-import { applyCheckInScan } from './check-in.js';
+import { applyCheckInScan, setupCheckInCodeInput } from './check-in.js';
 import { driverLocationForOrder } from './driver.js';
 import { recordAdminAction } from '../admin-audit.js';
 import { startQRScanner } from '../qr-scanner.js';
@@ -71,7 +71,9 @@ export function adminOrdersPage() {
     const reference = order.reference || order.id || 'Order';
     const customer = order.customerName || order.name || order.customer?.name || 'Customer';
     const date = order.createdAt || order.date || order.checkIn || '';
-    return `<details class="admin-orders-card"><summary><span class="admin-orders-reference"><strong>${escapeHTML(reference)}</strong><small>${escapeHTML(order.serviceLabel)} · ${escapeHTML(customer)}${date ? ` · ${escapeHTML(new Date(date).toLocaleDateString('en-MY'))}` : ''}</small></span><span class="admin-orders-status-pill">${escapeHTML(order.adminStatus)}</span><span class="admin-orders-receipt ${receipt ? 'has-receipt' : 'missing-receipt'}" aria-label="${receipt ? 'Receipt uploaded' : 'Receipt not uploaded'}" title="${receipt ? 'Receipt uploaded' : 'Receipt not uploaded'}">${receipt ? '✓' : '×'}</span></summary><div class="admin-orders-detail"><dl>${detailRows(order)}</dl>${taxiTracking}<div class="admin-orders-receipt-preview">${receipt ? `<a href="${escapeHTML(receipt.data)}" target="_blank" rel="noopener" download="${escapeHTML(receipt.name || 'receipt')}">Current receipt: ${escapeHTML(receipt.name || 'View receipt')}</a>` : '<span>No receipt uploaded yet.</span>'}</div><div class="admin-orders-actions"><label>Order status<select data-admin-order-status="${escapeHTML(order.storageKey)}|${escapeHTML(order.id)}">${['New', 'Recorded', 'In Progress', 'Checked In', 'Completed', 'Cancelled'].map((status) => `<option ${order.adminStatus === status ? 'selected' : ''}>${status}</option>`).join('')}</select></label><button class="button button-light" type="button" data-save-admin-order-status="${escapeHTML(order.storageKey)}|${escapeHTML(order.id)}">Save status</button><label class="admin-orders-upload">Upload receipt / invoice<input type="file" accept="image/png,image/jpeg,image/webp,application/pdf" data-admin-order-receipt="${escapeHTML(order.storageKey)}|${escapeHTML(order.id)}" /></label></div></div></details>`;
+    const statuses = ['New', 'Recorded', 'In Progress', 'Checked In', 'Completed', 'Cancelled'];
+    const statusButtons = statuses.map((status) => `<button class="button ${order.adminStatus === status ? 'button-primary is-active' : 'button-light'}" type="button" data-admin-order-status="${escapeHTML(order.storageKey)}|${escapeHTML(order.id)}" data-set-admin-order-status="${escapeHTML(status)}" aria-pressed="${order.adminStatus === status}">${escapeHTML(status)}</button>`).join('');
+    return `<details class="admin-orders-card"><summary><span class="admin-orders-reference"><strong>${escapeHTML(reference)}</strong><small>${escapeHTML(order.serviceLabel)} · ${escapeHTML(customer)}${date ? ` · ${escapeHTML(new Date(date).toLocaleDateString('en-MY'))}` : ''}</small></span><span class="admin-orders-status-pill">${escapeHTML(order.adminStatus)}</span><span class="admin-orders-receipt ${receipt ? 'has-receipt' : 'missing-receipt'}" aria-label="${receipt ? 'Receipt uploaded' : 'Receipt not uploaded'}" title="${receipt ? 'Receipt uploaded' : 'Receipt not uploaded'}">${receipt ? '✓' : '×'}</span></summary><div class="admin-orders-detail"><div class="admin-orders-actions"><div class="admin-order-status-control"><strong>Order Status</strong><div class="admin-order-status-buttons" role="group" aria-label="Change order status">${statusButtons}</div></div><label class="admin-orders-upload">Upload Receipt / Invoice<input type="file" accept="image/png,image/jpeg,image/webp,application/pdf" data-admin-order-receipt="${escapeHTML(order.storageKey)}|${escapeHTML(order.id)}" /></label></div><div class="admin-orders-receipt-preview">${receipt ? `<a href="${escapeHTML(receipt.data)}" target="_blank" rel="noopener" download="${escapeHTML(receipt.name || 'receipt')}">Current receipt: ${escapeHTML(receipt.name || 'View receipt')}</a>` : '<span>No receipt uploaded yet.</span>'}</div><dl>${detailRows(order)}</dl>${taxiTracking}</div></details>`;
   }).join('');
   return `<main class="admin-portal-page admin-orders-page"><header class="admin-portal-header"><a class="admin-portal-brand" href="${homeHref}"><img src="Image/Icon/Logo.png" alt="Furgo" /><span>${portalName}</span></a><div class="admin-portal-account"><a href="${homeHref}">${isDirector ? 'Dashboard' : 'Admin'}</a><button type="button" data-logout>Log out</button></div></header><header class="admin-market-heading"><a href="${homeHref}" aria-label="Back to ${portalName}">‹</a><div><span>Customer operations</span><h1>Orders</h1></div></header><section class="admin-market-stats"><article><span>New orders</span><strong>${newCount}</strong></article><article><span>All orders</span><strong>${orders.length}</strong></article><article><span>Receipts uploaded</span><strong>${orders.filter((order) => order.receipt).length}</strong></article></section><section class="admin-market-panel admin-checkin-scan-panel"><div class="admin-market-panel-heading"><div><span>Visit check-in</span><h2>Scan Customer QR Code</h2></div><p>Scan the customer's check-in or check-out QR code. Their booking status will update immediately.</p></div><div class="admin-checkin-scan-controls"><button class="button button-light" type="button" data-start-checkin-scan>Start camera scan</button><video class="admin-checkin-video" data-checkin-video playsinline muted hidden></video><p class="admin-checkin-scan-feedback" data-checkin-scan-feedback role="status" aria-live="polite">Camera access requires HTTPS and permission. You can also enter the scanned code below.</p><form class="admin-checkin-manual-form" data-checkin-manual-form><label>QR code<input name="token" inputmode="text" autocomplete="off" autocapitalize="characters" maxlength="17" minlength="10" pattern="[2-9A-HJ-NP-Z]{5}-?[2-9A-HJ-NP-Z]{5}|[2-9A-HJ-NP-Z]{17}" placeholder="e.g. 7K4MR-9TX2C" required /></label><button class="button button-primary" type="submit">Apply scan</button></form></div></section><section class="admin-market-panel"><div class="admin-market-panel-heading"><div><span>Order management</span><h2>All Customer Orders</h2></div><p>Open an order to review its saved customer, service, pet, payment, and booking details. Update its status or upload a receipt/invoice for the customer.</p></div><div class="admin-orders-columns"><span>Order</span><span>Status</span><span>Receipt</span></div><div class="admin-orders-list">${cards || '<p class="admin-market-empty">No customer orders have been placed yet.</p>'}</div></section></main>`;
 }
@@ -81,6 +83,7 @@ export function setupAdminOrders() {
   const scanStatus = document.querySelector('[data-checkin-scan-feedback]');
   const video = document.querySelector('[data-checkin-video]');
   const startScanButton = document.querySelector('[data-start-checkin-scan]');
+  setupCheckInCodeInput(document.querySelector('[data-checkin-manual-form] input[name="token"]'));
   let cameraScanner = null;
   const stopCamera = () => {
     cameraScanner?.stop();
@@ -99,9 +102,14 @@ export function setupAdminOrders() {
     });
     if (card) {
       const pill = card.querySelector('.admin-orders-status-pill');
-      const select = card.querySelector('[data-admin-order-status]');
       if (pill) pill.textContent = result.nextStatus;
-      if (select) select.value = result.nextStatus;
+      card.querySelectorAll('[data-set-admin-order-status]').forEach((button) => {
+        const active = button.dataset.setAdminOrderStatus === result.nextStatus;
+        button.classList.toggle('button-primary', active);
+        button.classList.toggle('button-light', !active);
+        button.classList.toggle('is-active', active);
+        button.setAttribute('aria-pressed', String(active));
+      });
       const statusRow = [...card.querySelectorAll('.admin-orders-detail dt')].find((label) => label.textContent.trim().toLowerCase() === 'status')?.parentElement;
       if (statusRow?.querySelector('dd')) statusRow.querySelector('dd').textContent = result.nextStatus;
     }
@@ -130,9 +138,9 @@ export function setupAdminOrders() {
     if (showScanResult(new FormData(form).get('token'))) form.reset();
   });
 
-  document.querySelectorAll('[data-save-admin-order-status]').forEach((button) => button.addEventListener('click', () => {
-    const [key, id] = button.dataset.saveAdminOrderStatus.split('|');
-    const status = button.closest('.admin-orders-detail')?.querySelector('[data-admin-order-status]')?.value;
+  document.querySelectorAll('[data-set-admin-order-status]').forEach((button) => button.addEventListener('click', () => {
+    const [key, id] = button.dataset.adminOrderStatus.split('|');
+    const status = button.dataset.setAdminOrderStatus;
     const orders = readOrders(key);
     const order = orders.find((item) => String(item.id) === id);
     if (!order || !status) return;
@@ -143,7 +151,18 @@ export function setupAdminOrders() {
     order.statusHistory = [...(order.statusHistory || []), { status, previousStatus, changedAt: new Date().toISOString(), changedBy: actorLevel[0].toUpperCase() + actorLevel.slice(1) }];
     localStorage.setItem(key, JSON.stringify(orders));
     void recordAdminAction('order_status_updated', 'order', order.reference || id, { status });
-    window.dispatchEvent(new Event('hashchange'));
+    const card = button.closest('.admin-orders-card');
+    card?.querySelectorAll('[data-set-admin-order-status]').forEach((item) => {
+      const active = item === button;
+      item.classList.toggle('button-primary', active);
+      item.classList.toggle('button-light', !active);
+      item.classList.toggle('is-active', active);
+      item.setAttribute('aria-pressed', String(active));
+    });
+    const pill = card?.querySelector('.admin-orders-status-pill');
+    if (pill) pill.textContent = status;
+    const statusRow = [...(card?.querySelectorAll('.admin-orders-detail dt') || [])].find((label) => label.textContent.trim().toLowerCase() === 'status')?.parentElement;
+    if (statusRow?.querySelector('dd')) statusRow.querySelector('dd').textContent = status;
   }));
 
   document.querySelectorAll('[data-admin-order-receipt]').forEach((input) => input.addEventListener('change', async () => {

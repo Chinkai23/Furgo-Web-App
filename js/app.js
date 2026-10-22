@@ -2246,7 +2246,7 @@ function setupAdminFooterScanner() {
         onStatus: (message) => { feedback.textContent = message; },
         onCode: (scanned) => {
           const result = applyCheckInScan(scanned);
-          feedback.textContent = result.ok ? result.message : `${result.message} Close this window and tap Scan again to retry.`;
+          feedback.textContent = result.message;
           if (result.ok) {
             document.dispatchEvent(new CustomEvent('furgo-order-status-updated', { detail: result.order }));
             window.setTimeout(() => {
@@ -2254,7 +2254,7 @@ function setupAdminFooterScanner() {
               if (window.location.hash.split('?')[0] === '#admin-orders') window.dispatchEvent(new Event('hashchange'));
             }, 1400);
           }
-          return true;
+          return result.ok;
         },
       });
     } catch (error) {
@@ -2804,8 +2804,9 @@ function render() {
     } catch { /* Keep the current page usable if local demo profile data is malformed. */ }
   }
   const directorPages = ['admin-customers', 'admin-product-insights'];
-  const managerPages = ['admin-promotions', 'admin-marketplace', 'admin-grooming', 'admin-hotel', 'admin-daycare'];
-  const portalPages = ['admin', 'admin-orders', 'admin-access', 'admin-enquiries', 'admin-audit', ...managerPages, ...directorPages];
+  const managerPages = ['admin-promotions'];
+  const serviceAdminPages = ['admin-marketplace', 'admin-grooming', 'admin-hotel', 'admin-daycare'];
+  const portalPages = ['admin', 'admin-orders', 'admin-access', 'admin-enquiries', 'admin-audit', ...managerPages, ...serviceAdminPages, ...directorPages];
   const driverPages = ['driver'];
   const savedRole = sessionStorage.getItem('furgo-demo-user-role');
   const currentRole = savedRole === 'staff' ? 'executive' : savedRole === 'admin' ? 'director' : savedRole;
@@ -2829,7 +2830,11 @@ function render() {
     window.location.hash = currentRole === 'executive' ? '#admin-access' : '#login';
     return;
   }
-  if (hasDemoSession && currentRole === 'executive' && !['admin', 'admin-orders', 'admin-access', 'admin-enquiries', 'admin-audit', 'login'].includes(page)) {
+  if (serviceAdminPages.includes(page) && routeParams.get('manage') === '1' && !['manager', 'director'].includes(currentRole)) {
+    window.location.hash = '#admin-access';
+    return;
+  }
+  if (hasDemoSession && currentRole === 'executive' && !['admin', 'admin-orders', 'admin-access', 'admin-enquiries', 'admin-audit', ...serviceAdminPages, 'login'].includes(page)) {
     window.location.hash = '#admin-orders';
     return;
   }
@@ -2899,9 +2904,9 @@ function render() {
     'admin-orders': adminOrdersPage,
     'admin-promotions': adminPromotionsPage,
     'admin-marketplace': adminMarketplacePage,
-    'admin-grooming': adminGroomingPage,
-    'admin-hotel': adminHotelPage,
-    'admin-daycare': adminDaycarePage,
+    'admin-grooming': () => adminGroomingPage({ settingsOnly: routeParams.get('manage') === '1' }),
+    'admin-hotel': () => adminHotelPage({ settingsOnly: routeParams.get('manage') === '1' }),
+    'admin-daycare': () => adminDaycarePage({ settingsOnly: routeParams.get('manage') === '1' }),
     'admin-enquiries': adminEnquiriesPage,
     'admin-customers': () => adminCustomersPage(routeParams),
     'admin-access': adminAccessPage,
@@ -2978,6 +2983,34 @@ function showSplash() {
 window.addEventListener('hashchange', () => {
   if (splashTimer) window.clearTimeout(splashTimer);
   if (supabaseAuthReady) render();
+});
+
+// Keep admin back arrows tied to the admin page that opened the current section.
+document.addEventListener('click', (event) => {
+  const link = event.target.closest('a[href^="#"]');
+  if (!link) return;
+  const currentHash = window.location.hash || '#admin';
+  const currentPage = currentHash.slice(1).split('?')[0];
+  if (!currentPage.startsWith('admin')) return;
+
+  if (/^Back\b/i.test(link.getAttribute('aria-label') || '')) {
+    let returnStack = [];
+    try { returnStack = JSON.parse(sessionStorage.getItem('furgo-admin-return-stack') || '[]'); } catch { returnStack = []; }
+    const previous = returnStack.pop();
+    sessionStorage.setItem('furgo-admin-return-stack', JSON.stringify(returnStack));
+    const fallback = link.getAttribute('href') || '#admin';
+    const destination = typeof previous === 'string' && previous.startsWith('#admin') ? previous : fallback;
+    event.preventDefault();
+    if (destination !== currentHash) window.location.hash = destination;
+    return;
+  }
+
+  const destination = link.getAttribute('href') || '';
+  if (!destination.startsWith('#admin') || destination === currentHash) return;
+  let returnStack = [];
+  try { returnStack = JSON.parse(sessionStorage.getItem('furgo-admin-return-stack') || '[]'); } catch { returnStack = []; }
+  returnStack.push(currentHash);
+  sessionStorage.setItem('furgo-admin-return-stack', JSON.stringify(returnStack.slice(-20)));
 });
 
 // Refresh customer and admin screens when a related order changes in another tab.

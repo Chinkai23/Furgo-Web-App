@@ -218,6 +218,21 @@ function formatCheckInToken(token) {
   return value.length === 10 ? `${value.slice(0, 5)}-${value.slice(5)}` : value;
 }
 
+// Format ten-character manual codes as people type them, while accepting pasted codes with or without a hyphen.
+export function setupCheckInCodeInput(input) {
+  if (!input || input.dataset.codeFormatReady === 'true') return;
+  input.dataset.codeFormatReady = 'true';
+  input.addEventListener('input', () => {
+    const cursor = input.selectionStart ?? input.value.length;
+    const beforeCursor = input.value.slice(0, cursor).toUpperCase().replace(/[\s-]/g, '');
+    const normalized = input.value.toUpperCase().replace(/[\s-]/g, '');
+    const format = (value) => value.length > 10 ? value : value.length > 5 ? `${value.slice(0, 5)}-${value.slice(5)}` : value;
+    input.value = format(normalized);
+    const nextCursor = Math.min(format(beforeCursor).length, input.value.length);
+    input.setSelectionRange(nextCursor, nextCursor);
+  });
+}
+
 function selectedOrderDetail(order) {
   if (!order) return '<section class="check-in-detail check-in-detail-empty"><h2>Choose An Order To Continue</h2><p>Select an active booking above to show its check-in QR code and details.</p></section>';
   const phase = String(order.status || '').toLowerCase() === 'checked in' ? 'check-out' : 'check-in';

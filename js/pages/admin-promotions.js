@@ -1,4 +1,5 @@
 import { escapeHTML } from '../shared.js';
+import { marketplaceOfferSettingsPanel } from './admin-marketplace.js';
 
 export const promotionStorageKey = 'furgo-demo-promotions';
 export const maximumPromotions = 8;
@@ -46,5 +47,6 @@ export function adminPromotionsPage() {
       </form>
       <ul class="admin-promo-list" data-admin-promo-list>${promotionRows || '<li class="admin-promo-empty">No promotions are set up yet.</li>'}</ul>
     </section>
+    ${marketplaceOfferSettingsPanel()}
   </main>`;
 }

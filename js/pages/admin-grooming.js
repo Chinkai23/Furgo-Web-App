@@ -7,7 +7,9 @@ const weekdays = [
 ];
 
 // Admin Grooming: editable service calendar, slot capacity, prices, and booking operations.
-export function adminGroomingPage() {
+export function adminGroomingPage({ settingsOnly = false } = {}) {
+  const profile = JSON.parse(sessionStorage.getItem('furgo-demo-user-profile') || '{}');
+  const isExecutive = ['executive', 'staff'].includes(profile.role);
   const settings = loadGroomingSettings();
   const bookings = loadGroomingBookings().sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   const weekdayControls = weekdays.map((day) => `<label class="admin-grooming-weekday"><input type="checkbox" name="availableWeekdays" value="${day.value}" ${settings.availableWeekdays.includes(day.value) ? 'checked' : ''} />${day.label}</label>`).join('');
@@ -22,8 +24,8 @@ export function adminGroomingPage() {
     <header class="admin-portal-header"><a class="admin-portal-brand" href="#admin"><img src="Image/Icon/Logo.png" alt="Furgo" /><span>Admin Portal</span></a><div class="admin-portal-account"><a href="#admin">Dashboard</a><button type="button" data-logout>Log out</button></div></header>
     <header class="admin-grooming-heading"><a href="#admin" aria-label="Back to Admin Dashboard">‹</a><div><span>Service operations</span><h1>Grooming</h1></div></header>
     <section class="admin-market-stats"><article><span>Bookings</span><strong>${bookings.length}</strong></article><article><span>Awaiting service</span><strong>${bookings.filter((booking) => booking.status === 'Pending / Confirmed').length}</strong></article><article><span>Completed</span><strong>${bookings.filter((booking) => booking.status === 'Completed').length}</strong></article></section>
-    <section class="admin-market-panel"><div class="admin-market-panel-heading"><div><span>Service setup</span><h2>Packages, Outlet Prices & Availability</h2></div><p>Manage bookable dates, time slots, service prices, and capacity for the customer booking calendar.</p></div>
-      <form class="admin-grooming-settings-form" data-admin-grooming-settings>
+    <section class="admin-market-panel" ${settingsOnly ? '' : 'hidden'}><div class="admin-market-panel-heading"><div><span>Manage Service</span><h2>Packages, Outlet Prices & Availability</h2></div><p>Manage bookable dates, time slots, service prices, and capacity for the customer booking calendar.</p></div>
+      <form class="admin-grooming-settings-form" data-admin-grooming-settings>${isExecutive ? '<fieldset disabled class="admin-executive-locked">' : ''}
         <div class="admin-grooming-settings-grid">
           <label>Outlet names (comma-separated)<input name="outlets" value="${escapeHTML(settings.outlets.join(', '))}" required /></label>
           <label>Available time slots (comma-separated)<input name="timeSlots" value="${escapeHTML(settings.timeSlots.join(', '))}" required placeholder="09:00, 10:30, 14:00" /></label>
@@ -48,8 +50,8 @@ export function adminGroomingPage() {
         <div class="admin-grooming-package-list">${packageRows}</div>
         <div class="admin-grooming-add-package"><h3>Add A Service Package</h3><div class="admin-grooming-settings-grid"><label>Package name<input name="newPackageName" maxlength="70" /></label><label>Short customer description<input name="newPackageDescription" maxlength="180" /></label><label>Small tier price<input name="newPackageSmall" type="number" min="0" step="0.01" value="0" /></label><label>Medium tier price<input name="newPackageMedium" type="number" min="0" step="0.01" value="0" /></label><label>Large tier price<input name="newPackageLarge" type="number" min="0" step="0.01" value="0" /></label><label>Duration minutes<input name="newPackageDuration" type="number" min="15" step="15" value="60" /></label></div></div>
         <div class="admin-market-form-actions"><button class="button button-primary" type="submit">Save Grooming Settings</button><span class="admin-grooming-settings-feedback" data-admin-grooming-settings-feedback role="status"></span></div>
-      </form>
+      ${isExecutive ? '</fieldset>' : ''}</form>
     </section>
-    <section class="admin-market-panel"><div class="admin-market-panel-heading"><div><span>Live appointments</span><h2>Grooming Order Board</h2></div><p>Review customer and pet safety details, update each booking status, and upload the official deposit or full-payment receipt.</p></div><div class="admin-grooming-order-list">${orderCards || '<p class="admin-market-empty">No grooming bookings have been placed yet.</p>'}</div></section>
+    <section class="admin-market-panel" ${settingsOnly ? 'hidden' : ''}><div class="admin-market-panel-heading"><div><span>Live appointments</span><h2>Grooming Order Board</h2></div><p>Review customer and pet safety details, update each booking status, and upload the official deposit or full-payment receipt.</p></div><div class="admin-grooming-order-list">${orderCards || '<p class="admin-market-empty">No grooming bookings have been placed yet.</p>'}</div></section>
   </main>`;
 }
