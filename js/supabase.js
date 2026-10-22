@@ -3,9 +3,12 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
 // This publishable key is designed for browser use; never put a service-role key here.
+export const SUPABASE_URL = 'https://oefhrnzwyocslrtpgnia.supabase.co';
+export const SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_G5MbDsKB2nuQ8Sg_GGUg0A_sIsMTBq8';
+
 export const supabase = createClient(
-  'https://oefhrnzwyocslrtpgnia.supabase.co',
-  'sb_publishable_G5MbDsKB2nuQ8Sg_GGUg0A_sIsMTBq8',
+  SUPABASE_URL,
+  SUPABASE_PUBLISHABLE_KEY,
   { auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true } },
 );
 

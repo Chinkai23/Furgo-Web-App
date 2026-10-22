@@ -1,5 +1,5 @@
 import { escapeHTML } from '../shared.js';
-import { supabase } from '../supabase.js';
+import { SUPABASE_PUBLISHABLE_KEY, SUPABASE_URL, supabase } from '../supabase.js';
 
 const levels = {
   executive: { name: 'Executive', order: 1, summary: 'View and manage orders, receipts, and customer check-ins.' },
@@ -11,25 +11,47 @@ let directorRemovalNotificationTimer;
 async function reauthenticateAdmin(password) {
   const { data: currentData, error: currentError } = await supabase.auth.getUser();
   if (currentError || !currentData.user?.email) {
-    return 'Could not verify the signed-in account. Please sign in again.';
+    return { error: 'Could not verify the signed-in account. Please sign in again.', accessToken: null };
   }
   const { data, error } = await supabase.auth.signInWithPassword({
     email: currentData.user.email,
     password,
   });
-  if (error) return 'Password verification failed. Check your account password and try again.';
+  if (error) return { error: 'Password verification failed. Check your account password and try again.', accessToken: null };
   if (!data.session?.access_token || !data.session?.refresh_token) {
-    return 'Password was accepted, but Supabase did not return a refreshed session. Please sign in again.';
+    return { error: 'Password was accepted, but Supabase did not return a refreshed session. Please sign in again.', accessToken: null };
   }
 
-  // Explicitly persist the newly authenticated token before an RPC checks its auth_time claim.
-  const { error: sessionError } = await supabase.auth.setSession({
-    access_token: data.session.access_token,
-    refresh_token: data.session.refresh_token,
-  });
-  if (sessionError) return 'Password was accepted, but the refreshed session could not be applied. Please sign in again.';
-  await supabase.auth.getSession();
-  return '';
+  // Use this exact sign-in token for the privileged RPC. This avoids a stale
+  // auth header being read from the shared client during session refreshes.
+  return { error: '', accessToken: data.session.access_token };
+}
+
+async function runAdminRpc(functionName, args, accessToken = null) {
+  if (!accessToken) return supabase.rpc(functionName, args);
+
+  try {
+    const response = await fetch(`${SUPABASE_URL}/rest/v1/rpc/${encodeURIComponent(functionName)}`, {
+      method: 'POST',
+      headers: {
+        apikey: SUPABASE_PUBLISHABLE_KEY,
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+      },
+      body: JSON.stringify(args),
+    });
+    const responseText = await response.text();
+    let data = null;
+    try { data = responseText ? JSON.parse(responseText) : null; }
+    catch { data = responseText; }
+    if (!response.ok) {
+      return { data: null, error: { message: data?.message || String(data || `Request failed (${response.status}).`), code: data?.code, details: data?.details, hint: data?.hint } };
+    }
+    return { data, error: null };
+  } catch (error) {
+    return { data: null, error: { message: error?.message || 'The access change could not reach Supabase.' } };
+  }
 }
 
 function featureCard(title, description, href, allowed) {
@@ -158,6 +180,7 @@ export function setupAdminAccess() {
     const requestsDirectorRemoval = action === 'remove' && level === 'director';
     const needsPasswordConfirmation = requestsDirectorRemoval
       || (action !== 'remove' && ['manager', 'director'].includes(level));
+    let accessToken = null;
     if (needsPasswordConfirmation) {
       const password = await requestPasswordConfirmation(level, requestsDirectorRemoval ? 'request_director_removal' : action);
       if (password === null) {
@@ -165,15 +188,16 @@ export function setupAdminAccess() {
         return false;
       }
       feedback.textContent = 'Verifying account password…';
-      const verificationError = await reauthenticateAdmin(password);
-      if (verificationError) {
-        feedback.textContent = verificationError;
+      const verification = await reauthenticateAdmin(password);
+      if (verification.error) {
+        feedback.textContent = verification.error;
         return false;
       }
+      accessToken = verification.accessToken;
     }
     if (requestsDirectorRemoval) {
       feedback.textContent = 'Submitting approval request…';
-      const { error } = await supabase.rpc('request_director_removal', { p_target_email: email });
+      const { error } = await runAdminRpc('request_director_removal', { p_target_email: email }, accessToken);
       if (error) {
         feedback.textContent = error.message || 'The Director removal request could not be created.';
         return false;
@@ -183,7 +207,7 @@ export function setupAdminAccess() {
       return true;
     }
     feedback.textContent = 'Saving…';
-    const { error } = await supabase.rpc('manage_admin_team_member', { p_email: email, p_level: level || null, p_action: action });
+    const { error } = await runAdminRpc('manage_admin_team_member', { p_email: email, p_level: level || null, p_action: action }, accessToken);
     if (error) {
       feedback.textContent = error.message || 'The team access change could not be saved.';
       return false;
@@ -228,16 +252,16 @@ export function setupAdminAccess() {
       voteButton.disabled = false;
       return;
     }
-    const verificationError = await reauthenticateAdmin(password);
-    if (verificationError) {
+    const verification = await reauthenticateAdmin(password);
+    if (verification.error) {
       voteButton.disabled = false;
-      approvals.insertAdjacentHTML('afterbegin', `<p class="admin-director-approval-error" role="alert">${escapeHTML(verificationError)}</p>`);
+      approvals.insertAdjacentHTML('afterbegin', `<p class="admin-director-approval-error" role="alert">${escapeHTML(verification.error)}</p>`);
       return;
     }
-    const { data, error } = await supabase.rpc('vote_director_removal_request', {
+    const { data, error } = await runAdminRpc('vote_director_removal_request', {
       p_request_id: voteButton.dataset.requestId,
       p_decision: decision,
-    });
+    }, verification.accessToken);
     if (error) {
       voteButton.disabled = false;
       approvals.insertAdjacentHTML('afterbegin', `<p class="admin-director-approval-error" role="alert">${escapeHTML(error.message || 'Your vote could not be saved.')}</p>`);
