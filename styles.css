@@ -1614,6 +1614,8 @@ select::-ms-expand { display: none; }
 .admin-order-status-buttons { display: flex; flex-wrap: wrap; gap: 6px; }
 .admin-order-status-buttons .button-light { color: #5f5751; background: #fff; border: 1px solid #e8dfd8; }
 .admin-order-status-buttons .button-primary.is-active { color: #fff; background: #ff7900; border-color: #ff7900; }
+.admin-order-status-buttons button:disabled { cursor: default; opacity: 1; }
+.admin-order-status-control > small { color: #8b817a; font-size: 10px; font-weight: 400; line-height: 1.5; }
 .admin-orders-upload { min-width: 0; }
 .admin-executive-locked { min-width: 0; margin: 0; padding: 0; border: 0; opacity: .62; }
 .admin-executive-locked :disabled { cursor: not-allowed; }
@@ -1693,6 +1695,8 @@ select::-ms-expand { display: none; }
 .admin-checkin-preview-message { margin: 14px 0; color: #756d67; font-size: 12px; line-height: 1.5; }
 .admin-checkin-preview-dialog footer { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 9px; }
 .admin-checkin-preview-dialog footer .button { min-height: 42px; }
+.admin-checkin-preview-dialog footer .button:disabled { color: #827d79; border-color: #dedbd7; background: #e8e6e3; box-shadow: none; cursor: not-allowed; opacity: 1; transform: none; }
+.admin-checkin-preview-dialog footer .button:disabled:hover { background: #e8e6e3; transform: none; }
 @media (max-width: 480px) { .admin-checkin-preview-dialog { padding: 17px; } .admin-checkin-preview-details { grid-template-columns: 1fr; } .admin-checkin-preview-dialog footer { display: grid; grid-template-columns: 1fr 1fr; } }
 
 /* Customer Pet Daycare: responsive booking modes, care selections, and pass purchase cards. */

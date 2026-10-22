@@ -28,7 +28,20 @@ function writeTokenMap(tokens) {
   localStorage.setItem(checkInTokensKey, JSON.stringify(tokens));
 }
 
-// Refresh customer-generated one-time codes from Supabase before staff validate them.
+function revokeOrderTokens(orderKey, orderId, reason = 'order_completed') {
+  const tokens = readTokenMap();
+  const revokedAt = new Date().toISOString();
+  let changed = false;
+  for (const record of Object.values(tokens)) {
+    if (record.orderKey !== orderKey || String(record.orderId) !== String(orderId) || record.revokedAt) continue;
+    record.revokedAt = revokedAt;
+    record.revokedReason = reason;
+    changed = true;
+  }
+  if (changed) writeTokenMap(tokens);
+}
+
+// Refresh customer-generated check-in codes from Supabase before staff validate them.
 // The customer and admin portals often run in separate browsers, so localStorage alone
 // cannot be the source of truth for a code created on the customer's device.
 export async function refreshCheckInTokens() {
@@ -48,6 +61,7 @@ export async function refreshCheckInTokens() {
         ...record,
         // Preserve a locally completed scan if its write is still in flight.
         ...(local?.usedAt && !record.usedAt ? { usedAt: local.usedAt } : {}),
+        ...(local?.revokedAt && !record.revokedAt ? { revokedAt: local.revokedAt, revokedReason: local.revokedReason } : {}),
         _cloudOwnerId: row.owner_id,
       };
     }
@@ -63,14 +77,17 @@ function makeToken() {
   return [...bytes].map((byte) => alphabet[byte & 31]).join('');
 }
 
-// Makes a short, order-specific single-use code for the requested visit stage.
+// Makes a short, order-specific code for the requested visit stage.
 export function ensureCheckInToken(orderKey, orderId, stage) {
   const tokens = readTokenMap();
-  const existing = Object.values(tokens).find((record) => record.orderKey === orderKey && String(record.orderId) === String(orderId) && record.stage === stage && !record.usedAt);
+  // Service bookings keep one QR for the whole visit. Its action advances from
+  // check-in to check-out after the order status changes.
+  const tokenStage = ['check-in', 'check-out'].includes(stage) ? 'check-in' : stage;
+  const existing = Object.values(tokens).find((record) => record.orderKey === orderKey && String(record.orderId) === String(orderId) && record.stage === tokenStage);
   if (existing) return existing.token;
   let token = makeToken();
   while (tokens[token]) token = makeToken();
-  tokens[token] = { token, orderKey, orderId: String(orderId), stage, createdAt: new Date().toISOString() };
+  tokens[token] = { token, orderKey, orderId: String(orderId), stage: tokenStage, createdAt: new Date().toISOString() };
   writeTokenMap(tokens);
   return token;
 }
@@ -115,12 +132,13 @@ export function previewCheckInScan(rawValue) {
   const tokens = readTokenMap();
   const record = tokens[token];
   if (!record) return { ok: false, message: 'This code is not in the shared check-in records. Apply Supabase migration 0019, then refresh the customer QR code and try again.' };
-  if (record.usedAt) return { ok: false, message: 'This QR code has already been used.' };
   const orders = readOrders(record.orderKey);
   const order = orders.find((item) => String(item.id) === record.orderId);
   if (!order) return { ok: false, message: 'The order for this QR code could not be found in this prototype.' };
-  const currentStatus = String(order.status || '').toLowerCase();
+  if (record.revokedAt) return { ok: false, message: 'This order is completed and its QR/manual code has been retired.' };
+  const currentStatus = String(order.adminStatus || order.status || '').toLowerCase().replace(/[-_]/g, ' ');
   if (record.stage === 'taxi-pickup' || record.stage === 'taxi-dropoff') {
+    if (record.usedAt) return { ok: false, message: 'This Pet Taxi QR code has already been used.' };
     const hasTaxi = Boolean(order.includeTaxi || order.taxi?.pickup || order.taxi?.dropoff);
     if (!hasTaxi) return { ok: false, message: 'This order does not include Pet Taxi.' };
     if (/cancel/.test(currentStatus)) return { ok: false, message: 'This taxi order has been cancelled.' };
@@ -130,16 +148,21 @@ export function previewCheckInScan(rawValue) {
     return { ok: true, message: `Ready to confirm taxi ${nextStatus.toLowerCase()}.`, order, orderKey: record.orderKey, orderId: record.orderId, token, stage: record.stage, nextStatus };
   }
   if (/cancel|complete|deliver/.test(currentStatus)) return { ok: false, message: 'This order is already completed or cancelled.' };
-  const expectedStage = currentStatus === 'checked in' ? 'check-out' : 'check-in';
-  if (record.stage !== expectedStage) return { ok: false, message: `This order needs its ${expectedStage === 'check-in' ? 'check-in' : 'check-out'} QR code.` };
-  const nextStatus = record.stage === 'check-in' ? 'Checked In' : 'Completed';
-  return { ok: true, message: `Ready to confirm ${nextStatus.toLowerCase()}.`, order, orderKey: record.orderKey, orderId: record.orderId, token, stage: record.stage, nextStatus };
+  const checkedIn = currentStatus === 'checked in';
+  const paymentStatus = String(order.paymentStatus || '').toLowerCase();
+  if (!checkedIn && /failed|declined|pending payment|pending online|awaiting verification|pending payment verification|unpaid/.test(paymentStatus)) {
+    return { ok: false, message: 'This order is not ready for check-in because its payment is still pending or failed.' };
+  }
+  if (!['check-in', 'check-out'].includes(record.stage)) return { ok: false, message: 'This code is not a service check-in or check-out code.' };
+  const nextStatus = checkedIn ? 'Completed' : 'Checked-In';
+  return { ok: true, message: `Ready to confirm ${checkedIn ? 'check-out' : 'check-in'}.`, order, orderKey: record.orderKey, orderId: record.orderId, token, stage: checkedIn ? 'check-out' : 'check-in', nextStatus };
 }
 
-// Advances the order only after staff confirms the preview. Revalidate to prevent a stale popup consuming a used code.
+// Advances the order only after staff confirms the preview; the visit QR stays reusable for checkout.
 export function applyCheckInScan(rawValue) {
   const preview = previewCheckInScan(rawValue);
   if (!preview.ok) return preview;
+  if (preview.alreadyProcessed) return preview;
   const { token, orderKey, orderId, stage, nextStatus } = preview;
   const tokens = readTokenMap();
   const record = tokens[token];
@@ -165,16 +188,15 @@ export function applyCheckInScan(rawValue) {
     writeTokenMap(tokens);
     return { ok: true, message: `${order.petName || 'Pet'} taxi ${nextStatus.toLowerCase()}.`, order, orderKey, nextStatus };
   }
-  const currentStatus = String(order.status || '').toLowerCase();
+  const currentStatus = String(order.adminStatus || order.status || '').toLowerCase().replace(/[-_]/g, ' ');
   order.status = nextStatus;
   order.adminStatus = nextStatus;
   if (stage === 'check-in') order.checkedInAt = now;
   else order.completedAt = now;
   order.statusHistory = [...(order.statusHistory || []), { status: nextStatus, previousStatus: currentStatus, changedAt: now, changedBy: 'Admin QR scan' }];
   localStorage.setItem(orderKey, JSON.stringify(orders));
-  record.usedAt = now;
-  tokens[token] = record;
-  writeTokenMap(tokens);
+  // The same QR remains valid so a staff member can scan it again at checkout.
+  if (stage === 'check-out') revokeOrderTokens(orderKey, orderId);
   return { ok: true, message: `${order.petName || 'Pet'} marked ${nextStatus.toLowerCase()}.`, order, orderKey, nextStatus };
 }
 
@@ -228,7 +250,8 @@ export function setupCheckInCodeInput(input) {
 
 function selectedOrderDetail(order) {
   if (!order) return '<section class="check-in-detail check-in-detail-empty"><h2>Choose An Order To Continue</h2><p>Select an active booking above to show its check-in QR code and details.</p></section>';
-  const phase = String(order.status || '').toLowerCase() === 'checked in' ? 'check-out' : 'check-in';
+  if (/complete|deliver/i.test(`${order.adminStatus || ''} ${order.status || ''}`)) return '<section class="check-in-detail check-in-detail-empty"><h2>Order Completed</h2><p>This order has been completed. Its QR code and manual code are no longer available.</p></section>';
+  const phase = String(order.adminStatus || order.status || '').toLowerCase().replace(/[-_]/g, ' ') === 'checked in' ? 'check-out' : 'check-in';
   const token = ensureCheckInToken(order._storageKey, order.id, phase);
   const hasTaxi = Boolean(order.includeTaxi || order.taxi?.pickup || order.taxi?.dropoff);
   const taxiStatus = order.taxiProgress?.status || 'Scheduled';
@@ -236,11 +259,12 @@ function selectedOrderDetail(order) {
   const taxiToken = hasTaxi && taxiStatus !== 'Dropped Off' ? ensureCheckInToken(order._storageKey, order.id, taxiPhase) : '';
   const taxiQr = taxiToken ? `<section class="check-in-taxi-qr"><div><span>Pet Taxi · ${escapeHTML(taxiStatus)}</span><h3>${taxiPhase === 'taxi-pickup' ? 'Driver Pickup QR' : 'Driver Drop-Off QR'}</h3><p>Show this order-specific code to your driver to confirm ${taxiPhase === 'taxi-pickup' ? 'pickup' : 'drop-off'}.</p><small class="check-in-manual-code">Manual code: <strong>${escapeHTML(formatCheckInToken(taxiToken))}</strong></small></div>${makeCheckInQrSvg(taxiToken)}</section>` : hasTaxi ? '<p class="check-in-taxi-complete">Pet Taxi drop-off is complete.</p>' : '';
   const heading = phase === 'check-in' ? 'Check-In QR Code' : 'Check-Out QR Code';
-  const action = phase === 'check-in' ? 'Ask staff to scan this code when you arrive.' : 'Your pet is checked in. Ask staff to scan this code when you are ready to check out.';
-  return `<section class="check-in-detail"><div class="check-in-detail-heading"><div><span>${escapeHTML(order._serviceLabel)}</span><h2>${escapeHTML(order.petName)} · ${escapeHTML(order.reference || order.id)}</h2></div><b class="check-in-status ${phase === 'check-out' ? 'is-checked-in' : ''}">${phase === 'check-out' ? 'Checked In' : escapeHTML(order.status || 'In Progress')}</b></div><div class="check-in-qr-layout">${makeCheckInQrSvg(token)}<div><h3>${heading}</h3><p>${escapeHTML(action)}</p><small>Reference: ${escapeHTML(order.reference || order.id)}</small><small class="check-in-manual-code">Manual code: <strong>${escapeHTML(formatCheckInToken(token))}</strong></small></div></div>${taxiQr}<dl class="check-in-order-details"><div><dt>Pet</dt><dd>${escapeHTML(order.petName)}</dd></div><div><dt>Service</dt><dd>${escapeHTML(order._serviceLabel)}</dd></div><div><dt>Details</dt><dd>${escapeHTML(orderSummary(order) || 'Booking details are being prepared.')}</dd></div><div><dt>Current status</dt><dd>${escapeHTML(order.status || 'In Progress')}</dd></div>${hasTaxi ? `<div><dt>Pet Taxi status</dt><dd>${escapeHTML(taxiStatus)}</dd></div>` : ''}</dl><p class="check-in-demo-note">Visit and Pet Taxi QR codes are single-use in this browser prototype.</p></section>`;
+  const action = phase === 'check-in' ? 'Ask staff to scan this code when you arrive.' : 'Your pet is checked in. Ask staff to scan this same code again when you are ready to check out.';
+  const scanNote = phase === 'check-in' ? 'Scanning opens a review first. Staff check-in only completes after confirmation.' : 'Scanning opens a review first. Staff check-out only completes after confirmation.';
+  return `<section class="check-in-detail"><div class="check-in-detail-heading"><div><span>${escapeHTML(order._serviceLabel)}</span><h2>${escapeHTML(order.petName)} · ${escapeHTML(order.reference || order.id)}</h2></div><b class="check-in-status ${phase === 'check-out' ? 'is-checked-in' : ''}">${phase === 'check-out' ? 'Checked In' : escapeHTML(order.status || 'In Progress')}</b></div><div class="check-in-qr-layout">${makeCheckInQrSvg(token)}<div><h3>${heading}</h3><p>${escapeHTML(action)}</p><small>Reference: ${escapeHTML(order.reference || order.id)}</small><small class="check-in-manual-code">Manual code: <strong>${escapeHTML(formatCheckInToken(token))}</strong></small></div></div>${taxiQr}<dl class="check-in-order-details"><div><dt>Pet</dt><dd>${escapeHTML(order.petName)}</dd></div><div><dt>Service</dt><dd>${escapeHTML(order._serviceLabel)}</dd></div><div><dt>Details</dt><dd>${escapeHTML(orderSummary(order) || 'Booking details are being prepared.')}</dd></div><div><dt>Current status</dt><dd>${escapeHTML(order.status || 'In Progress')}</dd></div>${hasTaxi ? `<div><dt>Pet Taxi status</dt><dd>${escapeHTML(taxiStatus)}</dd></div>` : ''}</dl><p class="check-in-demo-note">${escapeHTML(scanNote)}</p></section>`;
 }
 
-// Customer Check In: shows upcoming service bookings and the current one-time visit QR.
+// Customer Check In: shows upcoming service bookings and the current visit QR.
 export function checkInPage(routeParams = new URLSearchParams()) {
   let profile = {};
   try { profile = JSON.parse(sessionStorage.getItem('furgo-demo-user-profile') || '{}'); } catch { profile = {}; }
