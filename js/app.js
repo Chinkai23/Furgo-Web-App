@@ -37,6 +37,7 @@ import { recordAdminAction } from './admin-audit.js';
 import { recentSearchesKey, searchPage } from './pages/search.js';
 import { supabase, toMalaysianE164 } from './supabase.js';
 import { loadCloudAppData } from './app-data-sync.js';
+import { startQRScanner } from './qr-scanner.js';
 
 // Section: Supabase-backed authentication state
 // Function: Prevent protected routes rendering before the persisted Supabase session is read.
@@ -2221,14 +2222,13 @@ function setupAdminFooterScanner() {
   const video = document.querySelector('[data-admin-footer-scan-video]');
   const feedback = document.querySelector('[data-admin-footer-scan-feedback]');
   if (!trigger || !dialog || !video || !feedback) return;
-  let stream = null;
-  let active = false;
+  let scanner = null;
   const stopCamera = () => {
-    active = false;
-    stream?.getTracks().forEach((track) => track.stop());
-    stream = null;
+    scanner?.stop();
+    scanner = null;
     video.pause();
     video.srcObject = null;
+    video.hidden = true;
   };
   const closeScanner = () => { if (dialog.open) dialog.close(); else stopCamera(); };
   dialog.addEventListener('close', stopCamera);
@@ -2236,47 +2236,31 @@ function setupAdminFooterScanner() {
   window.addEventListener('hashchange', closeScanner, { once: true });
 
   trigger.addEventListener('click', async () => {
-    if (!navigator.mediaDevices?.getUserMedia || !('BarcodeDetector' in window)) {
-      window.location.hash = '#admin-orders?view=scan';
-      return;
-    }
     if (dialog.open) return;
     dialog.showModal();
     feedback.textContent = 'Starting camera…';
     try {
-      const detector = new window.BarcodeDetector({ formats: ['qr_code'] });
-      stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' }, audio: false });
-      video.srcObject = stream;
-      await video.play();
-      feedback.textContent = 'Point the camera at the customer’s order QR code.';
-      active = true;
-      const scanFrame = async () => {
-        if (!active || !video.isConnected || !dialog.open) return;
-        try {
-          const codes = await detector.detect(video);
-          const scanned = codes.find((item) => item.rawValue)?.rawValue;
-          if (scanned) {
-            const result = applyCheckInScan(scanned);
-            stopCamera();
-            feedback.textContent = result.ok ? result.message : `${result.message} Close this window and tap Scan again to retry.`;
-            if (result.ok) {
-              document.dispatchEvent(new CustomEvent('furgo-order-status-updated', { detail: result.order }));
-              window.setTimeout(() => {
-                if (dialog.open) dialog.close();
-                if (window.location.hash.split('?')[0] === '#admin-orders') window.dispatchEvent(new Event('hashchange'));
-              }, 1400);
-              return;
-            }
-            return;
+      scanner = await startQRScanner({
+        video,
+        shouldRun: () => dialog.open,
+        onStatus: (message) => { feedback.textContent = message; },
+        onCode: (scanned) => {
+          const result = applyCheckInScan(scanned);
+          feedback.textContent = result.ok ? result.message : `${result.message} Close this window and tap Scan again to retry.`;
+          if (result.ok) {
+            document.dispatchEvent(new CustomEvent('furgo-order-status-updated', { detail: result.order }));
+            window.setTimeout(() => {
+              if (dialog.open) dialog.close();
+              if (window.location.hash.split('?')[0] === '#admin-orders') window.dispatchEvent(new Event('hashchange'));
+            }, 1400);
           }
-        } catch { /* Continue checking the camera stream for a readable QR code. */ }
-        if (active) window.setTimeout(scanFrame, 250);
-      };
-      scanFrame();
-    } catch {
+          return true;
+        },
+      });
+    } catch (error) {
       stopCamera();
-      feedback.textContent = 'Camera access is blocked or unavailable. Opening the order page for manual code entry.';
-      window.setTimeout(() => { window.location.hash = '#admin-orders?view=scan'; }, 900);
+      feedback.textContent = `${error.message} Opening the order page for manual code entry.`;
+      window.setTimeout(() => { window.location.hash = '#admin-orders?view=scan'; }, 1400);
     }
   });
 }

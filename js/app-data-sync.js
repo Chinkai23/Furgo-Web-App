@@ -203,6 +203,24 @@ async function writeDedicatedOperations(key, value) {
   }
 }
 
+// Saves a service booking to Supabase before updating the browser cache, matching Grooming's submit flow.
+export async function saveDedicatedBooking(key, booking, records) {
+  if (!dedicatedOperationKeys.has(key) || !Array.isArray(records)) throw new Error('This booking type cannot be synchronized.');
+  if (activeUserId) {
+    if (dedicatedTablesReady) await writeDedicatedRecord(key, booking, booking.userId || activeUserId);
+    else await writeRemote(key, records);
+  }
+  const serialized = JSON.stringify(records);
+  applyingRemoteData = true;
+  try {
+    if (originalSetItem) originalSetItem.call(localStorage, key, serialized);
+    else localStorage.setItem(key, serialized);
+  } finally {
+    applyingRemoteData = false;
+  }
+  window.dispatchEvent(new StorageEvent('storage', { key }));
+}
+
 function dedicatedRecordFromRow(key, row, items = []) {
   const record = { ...(row.details || {}), id: row.id, userId: row.user_id, reference: row.reference, status: row.status, createdAt: row.created_at };
   if (key === 'furgo-demo-marketplace-orders') {

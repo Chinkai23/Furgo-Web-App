@@ -3,6 +3,7 @@ import { applyTaxiScan } from './check-in.js';
 import { groomingBookingsKey, loadGroomingBookings } from './grooming-data.js';
 import { hotelBookingsKey, loadHotelBookings } from './hotel-data.js';
 import { daycareBookingsKey, loadDaycareBookings } from './daycare-data.js';
+import { startQRScanner } from '../qr-scanner.js';
 
 export const driverLocationsKey = 'furgo-demo-driver-locations';
 const DRIVER_EMAIL = 'driver@gmail.com';
@@ -87,7 +88,7 @@ export function driverPortalPage() {
   const jobs = loadPetTaxiJobs();
   const today = localDateKey();
   const upcoming = jobs.filter((job) => !job.scheduledDate || job.scheduledDate >= today);
-  return `<main class="admin-portal-page driver-portal-page"><header class="admin-portal-header"><a class="admin-portal-brand" href="#driver"><img src="Image/Icon/Logo.png" alt="Furgo" /><span>Driver Portal</span></a><div class="admin-portal-account"><span>${DRIVER_EMAIL}</span><button type="button" data-logout>Log out</button></div></header><section class="driver-portal-welcome"><span>Pet Taxi operations</span><h1>My Routes</h1><p>Review today’s and upcoming trips, pickup details, and pet care notes.</p></section><section class="driver-portal-summary"><article><span>Today’s trips</span><strong>${upcoming.filter((job) => job.scheduledDate === today).length}</strong></article><article><span>Upcoming trips</span><strong>${upcoming.filter((job) => job.scheduledDate !== today).length}</strong></article><article><span>Waiting for pickup</span><strong>${upcoming.filter((job) => job.taxiStatus === 'Scheduled').length}</strong></article><article><span>In progress</span><strong>${upcoming.filter((job) => job.taxiStatus === 'Picked Up').length}</strong></article></section><section class="driver-jobs-section" id="driver-trips"><div class="driver-section-heading"><div><span>Assigned Pet Taxi orders</span><h2>Today & Future Trips</h2></div></div><div class="driver-job-list">${upcoming.map(jobCard).join('') || '<div class="driver-empty"><h2>No Upcoming Pet Taxi Orders</h2><p>Taxi requests from Grooming, Pet Hotel, and Pet Daycare will appear here.</p></div>'}</div></section></main><nav class="driver-bottom-nav" aria-label="Driver actions"><button type="button" data-driver-open-scanner aria-label="Scan customer QR code"><img src="Image/Icon/Icon-09.png" alt="" /><span>Scan QR</span></button></nav><dialog class="driver-scan-dialog" data-driver-scan-dialog aria-labelledby="driver-scan-title"><header><h2 id="driver-scan-title">Scan Customer Order QR</h2><button type="button" data-driver-close-scan aria-label="Close scanner">×</button></header><video data-driver-scan-video playsinline muted hidden></video><p data-driver-scan-feedback role="status" aria-live="polite">Use the camera or enter the customer’s code.</p><form data-driver-manual-scan><label>QR code<input name="token" inputmode="text" autocomplete="off" autocapitalize="characters" maxlength="17" minlength="17" pattern="[2-9A-HJ-NP-Z]{17}" placeholder="17-character code" required /></label><button class="button button-primary" type="submit">Apply pickup / drop-off scan</button></form></dialog>`;
+  return `<main class="admin-portal-page driver-portal-page"><header class="admin-portal-header"><a class="admin-portal-brand" href="#driver"><img src="Image/Icon/Logo.png" alt="Furgo" /><span>Driver Portal</span></a><div class="admin-portal-account"><span>${DRIVER_EMAIL}</span><button type="button" data-logout>Log out</button></div></header><section class="driver-portal-welcome"><span>Pet Taxi operations</span><h1>My Routes</h1><p>Review today’s and upcoming trips, pickup details, and pet care notes.</p></section><section class="driver-portal-summary"><article><span>Today’s trips</span><strong>${upcoming.filter((job) => job.scheduledDate === today).length}</strong></article><article><span>Upcoming trips</span><strong>${upcoming.filter((job) => job.scheduledDate !== today).length}</strong></article><article><span>Waiting for pickup</span><strong>${upcoming.filter((job) => job.taxiStatus === 'Scheduled').length}</strong></article><article><span>In progress</span><strong>${upcoming.filter((job) => job.taxiStatus === 'Picked Up').length}</strong></article></section><section class="driver-jobs-section" id="driver-trips"><div class="driver-section-heading"><div><span>Assigned Pet Taxi orders</span><h2>Today & Future Trips</h2></div></div><div class="driver-job-list">${upcoming.map(jobCard).join('') || '<div class="driver-empty"><h2>No Upcoming Pet Taxi Orders</h2><p>Taxi requests from Grooming, Pet Hotel, and Pet Daycare will appear here.</p></div>'}</div></section></main><nav class="driver-bottom-nav" aria-label="Driver actions"><button type="button" data-driver-open-scanner aria-label="Scan customer QR code"><img src="Image/Icon/Icon-09.png" alt="" /><span>Scan QR</span></button></nav><dialog class="driver-scan-dialog" data-driver-scan-dialog aria-labelledby="driver-scan-title"><header><h2 id="driver-scan-title">Scan Customer Order QR</h2><button type="button" data-driver-close-scan aria-label="Close scanner">×</button></header><video data-driver-scan-video playsinline muted hidden></video><p data-driver-scan-feedback role="status" aria-live="polite">Use the camera or enter the customer’s code.</p><form data-driver-manual-scan><label>QR code<input name="token" inputmode="text" autocomplete="off" autocapitalize="characters" maxlength="17" minlength="10" pattern="[2-9A-HJ-NP-Z]{5}-?[2-9A-HJ-NP-Z]{5}|[2-9A-HJ-NP-Z]{17}" placeholder="e.g. 7K4MR-9TX2C" required /></label><button class="button button-primary" type="submit">Apply pickup / drop-off scan</button></form></dialog>`;
 }
 
 // Driver interactions: camera/manual QR scan advances a taxi trip; GPS sharing is limited to an active job.
@@ -96,11 +97,10 @@ export function setupDriverPortal() {
   const video = document.querySelector('[data-driver-scan-video]');
   const feedback = document.querySelector('[data-driver-scan-feedback]');
   if (!dialog || !video || !feedback) return;
-  let camera = null;
-  let scanning = false;
+  let cameraScanner = null;
   let watchId = null;
   let activeLocationJob = '';
-  const stopCamera = () => { scanning = false; camera?.getTracks().forEach((track) => track.stop()); camera = null; video.pause(); video.srcObject = null; video.hidden = true; };
+  const stopCamera = () => { cameraScanner?.stop(); cameraScanner = null; video.pause(); video.srcObject = null; video.hidden = true; };
   const stopLocation = () => { if (watchId !== null) navigator.geolocation?.clearWatch(watchId); watchId = null; activeLocationJob = ''; };
   dialog.querySelector('[data-driver-close-scan]')?.addEventListener('click', () => dialog.close());
   dialog.addEventListener('close', stopCamera);
@@ -136,20 +136,16 @@ export function setupDriverPortal() {
   document.querySelectorAll('[data-driver-open-scanner]').forEach((button) => button.addEventListener('click', async () => {
     feedback.textContent = 'Use the camera or enter the customer’s code.';
     dialog.showModal();
-    if (!navigator.mediaDevices?.getUserMedia || !('BarcodeDetector' in window)) { feedback.textContent = 'Camera QR scanning is unavailable in this browser. Enter the code below.'; return; }
+    if (cameraScanner) return;
     try {
       feedback.textContent = 'Starting camera…'; video.hidden = false;
-      const detector = new window.BarcodeDetector({ formats: ['qr_code'] });
-      camera = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' }, audio: false });
-      video.srcObject = camera; await video.play(); scanning = true;
-      feedback.textContent = 'Point the camera at the customer’s taxi QR code.';
-      const scanFrame = async () => {
-        if (!scanning || !dialog.open) return;
-        try { const codes = await detector.detect(video); const code = codes.find((item) => item.rawValue)?.rawValue; if (code) { stopCamera(); applyScan(code); return; } } catch { /* Keep scanning while the camera frame is readable. */ }
-        if (scanning) window.setTimeout(scanFrame, 250);
-      };
-      scanFrame();
-    } catch { stopCamera(); feedback.textContent = 'Camera permission was denied or unavailable. Enter the code below instead.'; }
+      cameraScanner = await startQRScanner({
+        video,
+        shouldRun: () => dialog.open,
+        onStatus: (message) => { feedback.textContent = message; },
+        onCode: (code) => { applyScan(code); return true; },
+      });
+    } catch (error) { stopCamera(); feedback.textContent = `${error.message} Enter the code below instead.`; }
   }));
   window.addEventListener('hashchange', () => { stopCamera(); stopLocation(); }, { once: true });
 }

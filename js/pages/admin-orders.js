@@ -5,6 +5,7 @@ import { hotelBookingsKey, loadHotelBookings } from './hotel-data.js';
 import { applyCheckInScan } from './check-in.js';
 import { driverLocationForOrder } from './driver.js';
 import { recordAdminAction } from '../admin-audit.js';
+import { startQRScanner } from '../qr-scanner.js';
 
 const daycareKeys = ['furgo-demo-daycare-bookings', 'furgo-demo-pet-daycare-bookings', 'furgo-demo-daycare-orders'];
 const orderSources = [
@@ -72,7 +73,7 @@ export function adminOrdersPage() {
     const date = order.createdAt || order.date || order.checkIn || '';
     return `<details class="admin-orders-card"><summary><span class="admin-orders-reference"><strong>${escapeHTML(reference)}</strong><small>${escapeHTML(order.serviceLabel)} · ${escapeHTML(customer)}${date ? ` · ${escapeHTML(new Date(date).toLocaleDateString('en-MY'))}` : ''}</small></span><span class="admin-orders-status-pill">${escapeHTML(order.adminStatus)}</span><span class="admin-orders-receipt ${receipt ? 'has-receipt' : 'missing-receipt'}" aria-label="${receipt ? 'Receipt uploaded' : 'Receipt not uploaded'}" title="${receipt ? 'Receipt uploaded' : 'Receipt not uploaded'}">${receipt ? '✓' : '×'}</span></summary><div class="admin-orders-detail"><dl>${detailRows(order)}</dl>${taxiTracking}<div class="admin-orders-receipt-preview">${receipt ? `<a href="${escapeHTML(receipt.data)}" target="_blank" rel="noopener" download="${escapeHTML(receipt.name || 'receipt')}">Current receipt: ${escapeHTML(receipt.name || 'View receipt')}</a>` : '<span>No receipt uploaded yet.</span>'}</div><div class="admin-orders-actions"><label>Order status<select data-admin-order-status="${escapeHTML(order.storageKey)}|${escapeHTML(order.id)}">${['New', 'Recorded', 'In Progress', 'Checked In', 'Completed', 'Cancelled'].map((status) => `<option ${order.adminStatus === status ? 'selected' : ''}>${status}</option>`).join('')}</select></label><button class="button button-light" type="button" data-save-admin-order-status="${escapeHTML(order.storageKey)}|${escapeHTML(order.id)}">Save status</button><label class="admin-orders-upload">Upload receipt / invoice<input type="file" accept="image/png,image/jpeg,image/webp,application/pdf" data-admin-order-receipt="${escapeHTML(order.storageKey)}|${escapeHTML(order.id)}" /></label></div></div></details>`;
   }).join('');
-  return `<main class="admin-portal-page admin-orders-page"><header class="admin-portal-header"><a class="admin-portal-brand" href="${homeHref}"><img src="Image/Icon/Logo.png" alt="Furgo" /><span>${portalName}</span></a><div class="admin-portal-account"><a href="${homeHref}">${isDirector ? 'Dashboard' : 'Admin'}</a><button type="button" data-logout>Log out</button></div></header><header class="admin-market-heading"><a href="${homeHref}" aria-label="Back to ${portalName}">‹</a><div><span>Customer operations</span><h1>Orders</h1></div></header><section class="admin-market-stats"><article><span>New orders</span><strong>${newCount}</strong></article><article><span>All orders</span><strong>${orders.length}</strong></article><article><span>Receipts uploaded</span><strong>${orders.filter((order) => order.receipt).length}</strong></article></section><section class="admin-market-panel admin-checkin-scan-panel"><div class="admin-market-panel-heading"><div><span>Visit check-in</span><h2>Scan Customer QR Code</h2></div><p>Scan the customer's check-in or check-out QR code. Their booking status will update immediately.</p></div><div class="admin-checkin-scan-controls"><button class="button button-light" type="button" data-start-checkin-scan>Start camera scan</button><video class="admin-checkin-video" data-checkin-video playsinline muted hidden></video><p class="admin-checkin-scan-feedback" data-checkin-scan-feedback role="status" aria-live="polite">Camera access requires HTTPS and permission. You can also enter the scanned code below.</p><form class="admin-checkin-manual-form" data-checkin-manual-form><label>QR code<input name="token" inputmode="text" autocomplete="off" autocapitalize="characters" maxlength="17" minlength="17" pattern="[2-9A-HJ-NP-Z]{17}" placeholder="17-character code" required /></label><button class="button button-primary" type="submit">Apply scan</button></form></div></section><section class="admin-market-panel"><div class="admin-market-panel-heading"><div><span>Order management</span><h2>All Customer Orders</h2></div><p>Open an order to review its saved customer, service, pet, payment, and booking details. Update its status or upload a receipt/invoice for the customer.</p></div><div class="admin-orders-columns"><span>Order</span><span>Status</span><span>Receipt</span></div><div class="admin-orders-list">${cards || '<p class="admin-market-empty">No customer orders have been placed yet.</p>'}</div></section></main>`;
+  return `<main class="admin-portal-page admin-orders-page"><header class="admin-portal-header"><a class="admin-portal-brand" href="${homeHref}"><img src="Image/Icon/Logo.png" alt="Furgo" /><span>${portalName}</span></a><div class="admin-portal-account"><a href="${homeHref}">${isDirector ? 'Dashboard' : 'Admin'}</a><button type="button" data-logout>Log out</button></div></header><header class="admin-market-heading"><a href="${homeHref}" aria-label="Back to ${portalName}">‹</a><div><span>Customer operations</span><h1>Orders</h1></div></header><section class="admin-market-stats"><article><span>New orders</span><strong>${newCount}</strong></article><article><span>All orders</span><strong>${orders.length}</strong></article><article><span>Receipts uploaded</span><strong>${orders.filter((order) => order.receipt).length}</strong></article></section><section class="admin-market-panel admin-checkin-scan-panel"><div class="admin-market-panel-heading"><div><span>Visit check-in</span><h2>Scan Customer QR Code</h2></div><p>Scan the customer's check-in or check-out QR code. Their booking status will update immediately.</p></div><div class="admin-checkin-scan-controls"><button class="button button-light" type="button" data-start-checkin-scan>Start camera scan</button><video class="admin-checkin-video" data-checkin-video playsinline muted hidden></video><p class="admin-checkin-scan-feedback" data-checkin-scan-feedback role="status" aria-live="polite">Camera access requires HTTPS and permission. You can also enter the scanned code below.</p><form class="admin-checkin-manual-form" data-checkin-manual-form><label>QR code<input name="token" inputmode="text" autocomplete="off" autocapitalize="characters" maxlength="17" minlength="10" pattern="[2-9A-HJ-NP-Z]{5}-?[2-9A-HJ-NP-Z]{5}|[2-9A-HJ-NP-Z]{17}" placeholder="e.g. 7K4MR-9TX2C" required /></label><button class="button button-primary" type="submit">Apply scan</button></form></div></section><section class="admin-market-panel"><div class="admin-market-panel-heading"><div><span>Order management</span><h2>All Customer Orders</h2></div><p>Open an order to review its saved customer, service, pet, payment, and booking details. Update its status or upload a receipt/invoice for the customer.</p></div><div class="admin-orders-columns"><span>Order</span><span>Status</span><span>Receipt</span></div><div class="admin-orders-list">${cards || '<p class="admin-market-empty">No customer orders have been placed yet.</p>'}</div></section></main>`;
 }
 
 // Saves admin status changes and receipt files into the same storage records read by My Orders.
@@ -80,12 +81,10 @@ export function setupAdminOrders() {
   const scanStatus = document.querySelector('[data-checkin-scan-feedback]');
   const video = document.querySelector('[data-checkin-video]');
   const startScanButton = document.querySelector('[data-start-checkin-scan]');
-  let cameraStream = null;
-  let scanActive = false;
+  let cameraScanner = null;
   const stopCamera = () => {
-    scanActive = false;
-    cameraStream?.getTracks().forEach((track) => track.stop());
-    cameraStream = null;
+    cameraScanner?.stop();
+    cameraScanner = null;
     if (video) { video.pause(); video.srcObject = null; video.hidden = true; }
   };
   const showScanResult = (rawCode) => {
@@ -110,29 +109,18 @@ export function setupAdminOrders() {
     return true;
   };
   startScanButton?.addEventListener('click', async () => {
-    if (!navigator.mediaDevices?.getUserMedia) { if (scanStatus) scanStatus.textContent = 'Camera scanning is unavailable here. Enter the scanned code below.'; return; }
-    if (!('BarcodeDetector' in window)) { if (scanStatus) scanStatus.textContent = 'This browser cannot scan QR codes directly. Use a supported browser or enter the scanned code below.'; return; }
+    if (cameraScanner) return;
     try {
-      const detector = new window.BarcodeDetector({ formats: ['qr_code'] });
-      cameraStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' }, audio: false });
-      video.srcObject = cameraStream;
-      video.hidden = false;
-      await video.play();
-      scanActive = true;
-      if (scanStatus) scanStatus.textContent = 'Point the camera at the customer’s QR code.';
-      const scanFrame = async () => {
-        if (!scanActive || !video.isConnected) { stopCamera(); return; }
-        try {
-          const codes = await detector.detect(video);
-          const code = codes.find((item) => item.rawValue)?.rawValue;
-          if (code && showScanResult(code)) { stopCamera(); return; }
-        } catch { /* Wait for another frame while the camera is active. */ }
-        window.setTimeout(scanFrame, 250);
-      };
-      scanFrame();
-    } catch {
+      if (scanStatus) scanStatus.textContent = 'Starting camera…';
+      cameraScanner = await startQRScanner({
+        video,
+        shouldRun: () => video.isConnected,
+        onStatus: (message) => { if (scanStatus) scanStatus.textContent = message; },
+        onCode: showScanResult,
+      });
+    } catch (error) {
       stopCamera();
-      if (scanStatus) scanStatus.textContent = 'Camera access was blocked or unavailable. Allow camera permission, or enter the scanned code below.';
+      if (scanStatus) scanStatus.textContent = `${error.message} Allow camera permission, or enter the scanned code below.`;
     }
   });
   if (startScanButton) window.addEventListener('hashchange', stopCamera, { once: true });

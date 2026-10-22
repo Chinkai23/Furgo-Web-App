@@ -27,7 +27,7 @@ function writeTokenMap(tokens) {
 }
 
 function makeToken() {
-  const bytes = new Uint8Array(17);
+  const bytes = new Uint8Array(10);
   crypto.getRandomValues(bytes);
   const alphabet = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
   return [...bytes].map((byte) => alphabet[byte & 31]).join('');
@@ -45,7 +45,7 @@ export function ensureCheckInToken(orderKey, orderId, stage) {
   return token;
 }
 
-// QR version 1-L generator for the 16-character random check-in tokens used by this prototype.
+// QR version 1-L generator for the 10-character random check-in tokens used by this prototype.
 export function makeCheckInQrSvg(token) {
   const bytes = [...new TextEncoder().encode(String(token))];
   if (bytes.length > 17) throw new Error('Check-in token is too long for this QR code.');
@@ -135,7 +135,7 @@ export function makeCheckInQrSvg(token) {
 
 // Looks up a scanned one-time token and advances only its matching service order.
 export function applyCheckInScan(rawValue) {
-  const token = String(rawValue || '').trim().toUpperCase();
+  const token = String(rawValue || '').trim().toUpperCase().replace(/[\s-]/g, '');
   const tokens = readTokenMap();
   const record = tokens[token];
   if (!record || record.usedAt) return { ok: false, message: 'This QR code is invalid or has already been used.' };
@@ -187,7 +187,8 @@ export function applyCheckInScan(rawValue) {
 
 // Driver scanner guard: accept only taxi pickup/drop-off codes, never the service check-in code.
 export function applyTaxiScan(rawValue) {
-  const record = readTokenMap()[String(rawValue || '').trim().toUpperCase()];
+  const token = String(rawValue || '').trim().toUpperCase().replace(/[\s-]/g, '');
+  const record = readTokenMap()[token];
   if (!record || !['taxi-pickup', 'taxi-dropoff'].includes(record.stage)) return { ok: false, message: 'This is not a Pet Taxi pickup or drop-off QR code.' };
   return applyCheckInScan(rawValue);
 }
@@ -212,6 +213,11 @@ function orderSummary(order) {
   return [order.date, order.time, order.outlet].filter(Boolean).join(' · ');
 }
 
+function formatCheckInToken(token) {
+  const value = String(token || '');
+  return value.length === 10 ? `${value.slice(0, 5)}-${value.slice(5)}` : value;
+}
+
 function selectedOrderDetail(order) {
   if (!order) return '<section class="check-in-detail check-in-detail-empty"><h2>Choose An Order To Continue</h2><p>Select an active booking above to show its check-in QR code and details.</p></section>';
   const phase = String(order.status || '').toLowerCase() === 'checked in' ? 'check-out' : 'check-in';
@@ -220,10 +226,10 @@ function selectedOrderDetail(order) {
   const taxiStatus = order.taxiProgress?.status || 'Scheduled';
   const taxiPhase = taxiStatus === 'Picked Up' ? 'taxi-dropoff' : 'taxi-pickup';
   const taxiToken = hasTaxi && taxiStatus !== 'Dropped Off' ? ensureCheckInToken(order._storageKey, order.id, taxiPhase) : '';
-  const taxiQr = taxiToken ? `<section class="check-in-taxi-qr"><div><span>Pet Taxi · ${escapeHTML(taxiStatus)}</span><h3>${taxiPhase === 'taxi-pickup' ? 'Driver Pickup QR' : 'Driver Drop-Off QR'}</h3><p>Show this order-specific code to your driver to confirm ${taxiPhase === 'taxi-pickup' ? 'pickup' : 'drop-off'}.</p></div>${makeCheckInQrSvg(taxiToken)}</section>` : hasTaxi ? '<p class="check-in-taxi-complete">Pet Taxi drop-off is complete.</p>' : '';
+  const taxiQr = taxiToken ? `<section class="check-in-taxi-qr"><div><span>Pet Taxi · ${escapeHTML(taxiStatus)}</span><h3>${taxiPhase === 'taxi-pickup' ? 'Driver Pickup QR' : 'Driver Drop-Off QR'}</h3><p>Show this order-specific code to your driver to confirm ${taxiPhase === 'taxi-pickup' ? 'pickup' : 'drop-off'}.</p><small class="check-in-manual-code">Manual code: <strong>${escapeHTML(formatCheckInToken(taxiToken))}</strong></small></div>${makeCheckInQrSvg(taxiToken)}</section>` : hasTaxi ? '<p class="check-in-taxi-complete">Pet Taxi drop-off is complete.</p>' : '';
   const heading = phase === 'check-in' ? 'Check-In QR Code' : 'Check-Out QR Code';
   const action = phase === 'check-in' ? 'Ask staff to scan this code when you arrive.' : 'Your pet is checked in. Ask staff to scan this code when you are ready to check out.';
-  return `<section class="check-in-detail"><div class="check-in-detail-heading"><div><span>${escapeHTML(order._serviceLabel)}</span><h2>${escapeHTML(order.petName)} · ${escapeHTML(order.reference || order.id)}</h2></div><b class="check-in-status ${phase === 'check-out' ? 'is-checked-in' : ''}">${phase === 'check-out' ? 'Checked In' : escapeHTML(order.status || 'In Progress')}</b></div><div class="check-in-qr-layout">${makeCheckInQrSvg(token)}<div><h3>${heading}</h3><p>${escapeHTML(action)}</p><small>Reference: ${escapeHTML(order.reference || order.id)}</small></div></div>${taxiQr}<dl class="check-in-order-details"><div><dt>Pet</dt><dd>${escapeHTML(order.petName)}</dd></div><div><dt>Service</dt><dd>${escapeHTML(order._serviceLabel)}</dd></div><div><dt>Details</dt><dd>${escapeHTML(orderSummary(order) || 'Booking details are being prepared.')}</dd></div><div><dt>Current status</dt><dd>${escapeHTML(order.status || 'In Progress')}</dd></div>${hasTaxi ? `<div><dt>Pet Taxi status</dt><dd>${escapeHTML(taxiStatus)}</dd></div>` : ''}</dl><p class="check-in-demo-note">Visit and Pet Taxi QR codes are single-use in this browser prototype.</p></section>`;
+  return `<section class="check-in-detail"><div class="check-in-detail-heading"><div><span>${escapeHTML(order._serviceLabel)}</span><h2>${escapeHTML(order.petName)} · ${escapeHTML(order.reference || order.id)}</h2></div><b class="check-in-status ${phase === 'check-out' ? 'is-checked-in' : ''}">${phase === 'check-out' ? 'Checked In' : escapeHTML(order.status || 'In Progress')}</b></div><div class="check-in-qr-layout">${makeCheckInQrSvg(token)}<div><h3>${heading}</h3><p>${escapeHTML(action)}</p><small>Reference: ${escapeHTML(order.reference || order.id)}</small><small class="check-in-manual-code">Manual code: <strong>${escapeHTML(formatCheckInToken(token))}</strong></small></div></div>${taxiQr}<dl class="check-in-order-details"><div><dt>Pet</dt><dd>${escapeHTML(order.petName)}</dd></div><div><dt>Service</dt><dd>${escapeHTML(order._serviceLabel)}</dd></div><div><dt>Details</dt><dd>${escapeHTML(orderSummary(order) || 'Booking details are being prepared.')}</dd></div><div><dt>Current status</dt><dd>${escapeHTML(order.status || 'In Progress')}</dd></div>${hasTaxi ? `<div><dt>Pet Taxi status</dt><dd>${escapeHTML(taxiStatus)}</dd></div>` : ''}</dl><p class="check-in-demo-note">Visit and Pet Taxi QR codes are single-use in this browser prototype.</p></section>`;
 }
 
 // Customer Check In: shows upcoming service bookings and the current one-time visit QR.
