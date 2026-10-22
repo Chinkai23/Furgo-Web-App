@@ -1,5 +1,5 @@
 import { escapeHTML } from '../shared.js';
-import { SUPABASE_PUBLISHABLE_KEY, SUPABASE_URL, supabase } from '../supabase.js';
+import { supabase } from '../supabase.js';
 
 const levels = {
   executive: { name: 'Executive', order: 1, summary: 'View and manage orders, receipts, and customer check-ins.' },
@@ -7,52 +7,6 @@ const levels = {
   director: { name: 'Director', order: 3, summary: 'Full portal access, including customer records, search insights, and product and service reports.' },
 };
 let directorRemovalNotificationTimer;
-
-async function reauthenticateAdmin(password) {
-  const { data: currentData, error: currentError } = await supabase.auth.getUser();
-  if (currentError || !currentData.user?.email) {
-    return { error: 'Could not verify the signed-in account. Please sign in again.', accessToken: null };
-  }
-  const { data, error } = await supabase.auth.signInWithPassword({
-    email: currentData.user.email,
-    password,
-  });
-  if (error) return { error: 'Password verification failed. Check your account password and try again.', accessToken: null };
-  if (!data.session?.access_token || !data.session?.refresh_token) {
-    return { error: 'Password was accepted, but Supabase did not return a refreshed session. Please sign in again.', accessToken: null };
-  }
-
-  // Use this exact sign-in token for the privileged RPC. This avoids a stale
-  // auth header being read from the shared client during session refreshes.
-  return { error: '', accessToken: data.session.access_token };
-}
-
-async function runAdminRpc(functionName, args, accessToken = null) {
-  if (!accessToken) return supabase.rpc(functionName, args);
-
-  try {
-    const response = await fetch(`${SUPABASE_URL}/rest/v1/rpc/${encodeURIComponent(functionName)}`, {
-      method: 'POST',
-      headers: {
-        apikey: SUPABASE_PUBLISHABLE_KEY,
-        Authorization: `Bearer ${accessToken}`,
-        'Content-Type': 'application/json',
-        Accept: 'application/json',
-      },
-      body: JSON.stringify(args),
-    });
-    const responseText = await response.text();
-    let data = null;
-    try { data = responseText ? JSON.parse(responseText) : null; }
-    catch { data = responseText; }
-    if (!response.ok) {
-      return { data: null, error: { message: data?.message || String(data || `Request failed (${response.status}).`), code: data?.code, details: data?.details, hint: data?.hint } };
-    }
-    return { data, error: null };
-  } catch (error) {
-    return { data: null, error: { message: error?.message || 'The access change could not reach Supabase.' } };
-  }
-}
 
 function featureCard(title, description, href, allowed) {
   if (!allowed) return '';
@@ -79,8 +33,8 @@ export function adminAccessPage() {
   const managerOptions = isDirector
     ? '<option value="executive">Executive</option><option value="manager">Manager</option><option value="director">Director</option>'
     : '<option value="executive">Executive</option>';
-  const teamManagement = isManager ? `<section class="admin-market-panel admin-team-panel"><div class="admin-market-panel-heading"><div><span>Team access</span><h2>Manage Portal Users</h2></div><p>${isDirector ? 'Add Executive, Manager, or Director access for existing Furgo accounts. You can edit and remove lower-level users. Removing a Director requires password verification and approval from every other Director.' : 'Add, change, or remove Executive access for existing Furgo accounts.'}</p></div><form class="admin-team-form" data-admin-team-form><label>Existing account email<input name="email" type="email" autocomplete="email" placeholder="person@example.com" required /></label><label>Portal level<select name="level" required>${managerOptions}</select></label><input type="hidden" name="action" value="add" /><div class="admin-market-form-actions"><button class="button button-primary" type="submit">Add user</button><button class="button button-light" type="button" data-cancel-team-edit hidden>Cancel edit</button><span data-admin-team-feedback role="status" aria-live="polite"></span></div></form><dialog class="admin-reauth-dialog" data-admin-reauth-dialog aria-labelledby="admin-reauth-title"><form method="dialog" data-admin-reauth-form><h2 id="admin-reauth-title" data-admin-reauth-title>Confirm Administrator Access</h2><p data-admin-reauth-description>Enter your account password to verify this access change.</p><label>Account password<input name="password" type="password" autocomplete="current-password" required /></label><div class="admin-reauth-actions"><button class="button button-light" value="cancel">Cancel</button><button class="button button-primary" value="confirm">Verify and continue</button></div></form></dialog><div class="admin-team-list" data-admin-team-list role="status" aria-live="polite">Loading team members…</div></section>` : '';
-  const directorApprovals = isDirector ? `<section class="admin-market-panel admin-director-approval-panel" data-director-approval-panel hidden><div class="admin-market-panel-heading"><div><span>Director governance</span><h2>Removal Approvals</h2></div><p>Every Director except the requester and the Director named in a request must approve it. One rejection stops the request. Password verification is required to vote.</p></div><div data-director-removal-requests role="status" aria-live="polite">Loading approval requests…</div></section>` : '';
+  const teamManagement = isManager ? `<section class="admin-market-panel admin-team-panel"><div class="admin-market-panel-heading"><div><span>Team access</span><h2>Manage Portal Users</h2></div><p>${isDirector ? 'Add Executive, Manager, or Director access for existing Furgo accounts. You can edit and remove lower-level users. Removing a Director requires approval from every other Director.' : 'Add, change, or remove Executive access for existing Furgo accounts.'}</p></div><form class="admin-team-form" data-admin-team-form><label>Existing account email<input name="email" type="email" autocomplete="email" placeholder="person@example.com" required /></label><label>Portal level<select name="level" required>${managerOptions}</select></label><input type="hidden" name="action" value="add" /><div class="admin-market-form-actions"><button class="button button-primary" type="submit">Add user</button><button class="button button-light" type="button" data-cancel-team-edit hidden>Cancel edit</button><span data-admin-team-feedback role="status" aria-live="polite"></span></div></form><div class="admin-team-list" data-admin-team-list role="status" aria-live="polite">Loading team members…</div></section>` : '';
+  const directorApprovals = isDirector ? `<section class="admin-market-panel admin-director-approval-panel" data-director-approval-panel hidden><div class="admin-market-panel-heading"><div><span>Director governance</span><h2>Removal Approvals</h2></div><p>Every Director except the requester and the Director named in a request must approve it. One rejection stops the request.</p></div><div data-director-removal-requests role="status" aria-live="polite">Loading approval requests…</div></section>` : '';
   return `<main class="admin-portal-page admin-access-page"><header class="admin-portal-header"><a class="admin-portal-brand" href="#admin-access"><img src="Image/Icon/Logo.png" alt="Furgo" /><span>Admin Portal</span></a><div class="admin-portal-account"><span>${escapeHTML(profile.name || '')}</span><button type="button" data-logout>Log out</button></div></header><header class="admin-market-heading"><a href="${isDirector ? '#admin' : '#admin-orders'}" aria-label="Back to portal">‹</a><div><span>Access level</span><h1>${level.name}</h1></div></header><section class="admin-access-level-summary"><span>YOUR ADMIN LEVEL</span><h2>${level.name}</h2></section><section class="admin-market-panel"><div class="admin-market-panel-heading"><div><span>Portal permissions</span><h2>Your Available Functions</h2></div><p>Your access follows the permissions assigned to your account.</p></div><div class="admin-access-feature-grid">${availableFeatures}</div></section>${directorApprovals}${teamManagement}</main>`;
 }
 
@@ -130,33 +84,6 @@ export function setupAdminAccess() {
     }, 30000);
   }
   if (!root || !team || !form) return;
-  const reauthDialog = root.querySelector('[data-admin-reauth-dialog]');
-  const reauthForm = reauthDialog?.querySelector('[data-admin-reauth-form]');
-  const reauthPassword = reauthForm?.elements.password;
-  const reauthTitle = reauthDialog?.querySelector('[data-admin-reauth-title]');
-  const reauthDescription = reauthDialog?.querySelector('[data-admin-reauth-description]');
-  let resolveReauth;
-  reauthDialog?.addEventListener('close', () => {
-    const password = reauthDialog.returnValue === 'confirm' ? reauthPassword.value : null;
-    reauthPassword.value = '';
-    resolveReauth?.(password);
-    resolveReauth = null;
-  });
-  const requestPasswordConfirmation = (level, action) => new Promise((resolve) => {
-    const titles = {
-      request_director_removal: 'Confirm request to remove a Director',
-      approve_director_removal: 'Verify to approve Director removal',
-      reject_director_removal: 'Verify to reject Director removal',
-    };
-    reauthTitle.textContent = titles[action] || `Confirm granting ${levels[level].name} access`;
-    if (reauthDescription) reauthDescription.textContent = action.includes('_director_removal')
-      ? 'Enter your account password to confirm this Director removal decision.'
-      : 'Enter your account password to verify this access change.';
-    reauthPassword.value = '';
-    resolveReauth = resolve;
-    reauthDialog.showModal();
-    reauthPassword.focus();
-  });
   const renderTeam = async () => {
     team.textContent = 'Loading team members…';
     const { data, error } = await supabase.rpc('get_admin_team');
@@ -178,26 +105,9 @@ export function setupAdminAccess() {
   const submitTeamAction = async (email, level, action) => {
     const feedback = form.querySelector('[data-admin-team-feedback]');
     const requestsDirectorRemoval = action === 'remove' && level === 'director';
-    const needsPasswordConfirmation = requestsDirectorRemoval
-      || (action !== 'remove' && ['manager', 'director'].includes(level));
-    let accessToken = null;
-    if (needsPasswordConfirmation) {
-      const password = await requestPasswordConfirmation(level, requestsDirectorRemoval ? 'request_director_removal' : action);
-      if (password === null) {
-        feedback.textContent = 'Access change cancelled.';
-        return false;
-      }
-      feedback.textContent = 'Verifying account password…';
-      const verification = await reauthenticateAdmin(password);
-      if (verification.error) {
-        feedback.textContent = verification.error;
-        return false;
-      }
-      accessToken = verification.accessToken;
-    }
     if (requestsDirectorRemoval) {
       feedback.textContent = 'Submitting approval request…';
-      const { error } = await runAdminRpc('request_director_removal', { p_target_email: email }, accessToken);
+      const { error } = await supabase.rpc('request_director_removal', { p_target_email: email });
       if (error) {
         feedback.textContent = error.message || 'The Director removal request could not be created.';
         return false;
@@ -207,7 +117,7 @@ export function setupAdminAccess() {
       return true;
     }
     feedback.textContent = 'Saving…';
-    const { error } = await runAdminRpc('manage_admin_team_member', { p_email: email, p_level: level || null, p_action: action }, accessToken);
+    const { error } = await supabase.rpc('manage_admin_team_member', { p_email: email, p_level: level || null, p_action: action });
     if (error) {
       feedback.textContent = error.message || 'The team access change could not be saved.';
       return false;
@@ -247,21 +157,10 @@ export function setupAdminAccess() {
     const decision = voteButton.dataset.directorRemovalVote;
     if (decision === 'reject' && !window.confirm('Reject this Director removal request? The request will close without removing access.')) return;
     voteButton.disabled = true;
-    const password = await requestPasswordConfirmation('director', `${decision}_director_removal`);
-    if (password === null) {
-      voteButton.disabled = false;
-      return;
-    }
-    const verification = await reauthenticateAdmin(password);
-    if (verification.error) {
-      voteButton.disabled = false;
-      approvals.insertAdjacentHTML('afterbegin', `<p class="admin-director-approval-error" role="alert">${escapeHTML(verification.error)}</p>`);
-      return;
-    }
-    const { data, error } = await runAdminRpc('vote_director_removal_request', {
+    const { data, error } = await supabase.rpc('vote_director_removal_request', {
       p_request_id: voteButton.dataset.requestId,
       p_decision: decision,
-    }, verification.accessToken);
+    });
     if (error) {
       voteButton.disabled = false;
       approvals.insertAdjacentHTML('afterbegin', `<p class="admin-director-approval-error" role="alert">${escapeHTML(error.message || 'Your vote could not be saved.')}</p>`);
