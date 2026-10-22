@@ -22,7 +22,7 @@ export function loadHelpCenterDetails() {
 
 // Builds the shared website header used by Login, Register, and onboarding.
 export function header() {
-  return `<header class="site-header"><a class="brand" href="#home" aria-label="Furgo home"><img class="brand-image" src="Image/Icon/Logo.png" alt="Furgo — Better Care For Every Pet" /></a><nav class="nav-links" aria-label="Main navigation"><a href="#services">Our services</a><a href="#about">Why Furgo</a></nav><div class="nav-actions"><a class="nav-login" href="#login">Log in</a><a class="button button-primary" href="#register">Get started <span aria-hidden="true">↗</span></a></div></header>`;
+  return `<header class="site-header"><a class="brand" href="#home" aria-label="Furgo home"><img class="brand-image" src="Image/Icon/Logo 3.png" alt="Furgo — Better Care For Every Pet" /></a><nav class="nav-links" aria-label="Main navigation"><a href="#services">Our services</a><a href="#about">Why Furgo</a></nav><div class="nav-actions"><a class="nav-login" href="#login">Log in</a><a class="button button-primary" href="#register">Get started <span aria-hidden="true">↗</span></a></div></header>`;
 }
 
 // Builds the shared mobile footer; only the Home page marks Home active, while service pages keep it neutral.
