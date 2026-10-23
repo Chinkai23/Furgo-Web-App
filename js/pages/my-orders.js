@@ -1,7 +1,12 @@
 import { bottomNavigation, escapeHTML } from '../shared.js';
 import { loadMarketplaceOrders } from './marketplace-data.js';
 import { loadGroomingBookings } from './grooming-data.js';
-import { driverLocationForOrder } from './driver.js';
+import { mountDriverLocation } from './driver-location.js';
+import { saveOrderRecords } from '../app-data-sync.js';
+import { marketplaceOrdersKey } from './marketplace-data.js';
+import { groomingBookingsKey } from './grooming-data.js';
+import { hotelBookingsKey } from './hotel-data.js';
+import { daycareBookingsKey } from './daycare-data.js';
 
 const orderServices = [
   { id: 'all', label: 'All' },
@@ -15,6 +20,7 @@ const orderStatuses = [
   { id: 'completed', label: 'Completed' },
   { id: 'canceled', label: 'Canceled' },
 ];
+let myOrderLocationCleanups = [];
 
 // Loads future Pet Hotel and Pet Daycare records from the local prototype storage keys.
 function loadLocalOrders(key, alternateKeys = []) {
@@ -49,6 +55,41 @@ function statusCategory(status = '') {
   return 'active';
 }
 
+function customerOrderStatus(order) {
+  const rawStatus = String(order.adminStatus || order.status || '').trim();
+  const taxiLifecycle = ['Pet Taxi Delivering...', 'Service Complete · Awaiting Pickup', 'Checked-In'];
+  const matchedTaxiLifecycle = taxiLifecycle.find((status) => status.toLowerCase() === rawStatus.toLowerCase());
+  if (matchedTaxiLifecycle) return matchedTaxiLifecycle;
+  const normalized = rawStatus.toLowerCase().replace(/[-_]/g, ' ');
+  if (/cancel/.test(normalized)) return 'Cancelled';
+  if (/complete|delivered|checked out/.test(normalized)) return 'Completed';
+  if (/checked in/.test(normalized)) return 'Checked-In';
+  if (/received order/.test(normalized) || order.receipt) return 'Received Order';
+  if (/pending payment/.test(normalized) || /pending|failed|declined|awaiting|unpaid/.test(String(order.paymentStatus || '').toLowerCase())) return 'Pending Payment';
+  if (/paid|successful|succeeded/.test(String(order.paymentStatus || '').toLowerCase()) && !/shipped|delivered/.test(normalized)) return 'New Order';
+  return order.status || 'Pending';
+}
+
+function cancellationDeadlineDate(order) {
+  const raw = order.serviceId === 'hotel' ? order.checkIn || order.startDate : order.date || order.bookingDate;
+  if (!raw) return null;
+  const match = String(raw).match(/^(\d{4})-(\d{2})-(\d{2})/);
+  const date = match ? new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3])) : new Date(raw);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function canCancelServiceOrder(order) {
+  if (!['grooming', 'hotel', 'daycare'].includes(order.serviceId) || order.type === 'pass-purchase') return false;
+  if ((order.includeTaxi || order.taxi?.pickup || order.taxi?.dropoff) && !['Scheduled', 'Assigned'].includes(order.taxiProgress?.status || 'Scheduled')) return false;
+  if (!/paid|successful|succeeded|credit/.test(String(order.paymentStatus || '').toLowerCase())) return false;
+  if (statusCategory(customerOrderStatus(order)) !== 'active') return false;
+  const serviceDate = cancellationDeadlineDate(order);
+  if (!serviceDate) return false;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return Math.floor((serviceDate.getTime() - today.getTime()) / 86400000) >= 7;
+}
+
 // Formats saved ISO timestamps and prototype date strings for compact order cards.
 function formatOrderDate(value = '') {
   if (!value) return '';
@@ -68,6 +109,7 @@ export function myOrdersPage(routeParams = new URLSearchParams()) {
   const marketplace = loadMarketplaceOrders().filter((order) => belongsToCurrentUser(order, profile)).map((order) => ({
     ...order,
     serviceId: 'marketplace',
+    _storageKey: marketplaceOrdersKey,
     serviceLabel: 'Marketplace',
     title: order.reference ? `Order ${order.reference}` : 'Marketplace order',
     summary: (order.items || []).map((item) => `${item.name || 'Product'} × ${Number(item.quantity) || 1}`).join(', ') || 'Marketplace purchase',
@@ -81,19 +123,19 @@ export function myOrdersPage(routeParams = new URLSearchParams()) {
     title: `${order.petName || 'Pet'} · ${order.packageName || 'Grooming'}`,
     summary: [order.date, order.time, order.outlet].filter(Boolean).join(' · '),
     dateLabel: order.createdAt || order.date || '',
-    _storageKey: 'furgo-demo-grooming-bookings',
+    _storageKey: groomingBookingsKey,
     totalAmount: Number(order.total) || 0,
   }));
   const hotels = loadLocalOrders('furgo-demo-hotel-bookings', ['furgo-demo-pet-hotel-bookings', 'furgo-demo-hotel-orders']).filter((order) => belongsToCurrentUser(order, profile)).map((order) => ({
     ...order, serviceId: 'hotel', serviceLabel: 'Pet Hotel',
-    _storageKey: 'furgo-demo-hotel-bookings',
+    _storageKey: hotelBookingsKey,
     title: order.petName ? `${order.petName} · Pet Hotel` : order.reference ? `Stay ${order.reference}` : 'Pet Hotel booking',
     summary: [order.checkIn || order.startDate, order.checkOut || order.endDate, order.outlet].filter(Boolean).join(' · '),
     dateLabel: order.createdAt || order.checkIn || order.startDate || '', totalAmount: Number(order.total) || 0,
   }));
   const daycare = loadLocalOrders('furgo-demo-daycare-bookings', ['furgo-demo-pet-daycare-bookings', 'furgo-demo-daycare-orders']).filter((order) => belongsToCurrentUser(order, profile)).map((order) => ({
     ...order, serviceId: 'daycare', serviceLabel: 'Pet Daycare',
-    _storageKey: 'furgo-demo-daycare-bookings',
+    _storageKey: daycareBookingsKey,
     title: order.type === 'pass-purchase' ? `${order.planName || 'Daycare Pass'} · ${order.petName || 'Pet'}` : order.petName ? `${order.petName} · Pet Daycare` : order.reference ? `Daycare ${order.reference}` : 'Pet Daycare booking',
     summary: order.type === 'pass-purchase' ? `${Number(order.sessions || 0)} sessions · valid through ${order.expiresOn || 'expiry not set'}` : [order.date, order.time, order.outlet, order.passName ? `Pass · ${order.passName}` : ''].filter(Boolean).join(' · '),
     dateLabel: order.createdAt || order.date || '', totalAmount: Number(order.total) || 0,
@@ -101,7 +143,7 @@ export function myOrdersPage(routeParams = new URLSearchParams()) {
 
   const allOrders = [...marketplace, ...grooming, ...hotels, ...daycare].sort((a, b) => new Date(b.createdAt || b.dateLabel) - new Date(a.createdAt || a.dateLabel));
   const serviceOrders = allOrders.filter((order) => service === 'all' || order.serviceId === service);
-  const visibleOrders = serviceOrders.filter((order) => status === 'all' || statusCategory(order.status) === status);
+  const visibleOrders = serviceOrders.filter((order) => status === 'all' || statusCategory(customerOrderStatus(order)) === status);
   const icon = (file) => `Image/Icon/${encodeURIComponent(file)}`;
   const tabHref = (nextService, nextStatus) => `#orders?service=${encodeURIComponent(nextService)}&status=${encodeURIComponent(nextStatus)}&from=${encodeURIComponent(returnTo)}`;
   const serviceTabs = orderServices.map((item) => {
@@ -113,7 +155,7 @@ export function myOrdersPage(routeParams = new URLSearchParams()) {
   const orderCard = (order) => {
     const serviceName = order.serviceLabel;
     const isCanceled = statusCategory(order.status) === 'canceled';
-    const statusLabel = order.status || 'Pending';
+    const statusLabel = customerOrderStatus(order);
     const summary = order.summary || order.description || 'Order details will appear here.';
     const marketplaceDetails = order.serviceId === 'marketplace' && order.trackingNumber
       ? `<p class="my-order-extra">${escapeHTML(order.courier || 'Courier')}: ${escapeHTML(order.trackingNumber)}</p>` : '';
@@ -123,15 +165,18 @@ export function myOrdersPage(routeParams = new URLSearchParams()) {
       ? `${order.roomName ? `<p class="my-order-extra">${escapeHTML(order.roomName)} · ${Number(order.nights || 0)} night(s) · ${escapeHTML(order.outlet || '')}</p>` : ''}${order.mediaLogs?.length ? `<div class="my-order-media-feed"><strong>My Stay · Care updates</strong>${order.mediaLogs.map((entry) => entry.type?.startsWith('video/') ? `<video controls preload="metadata" src="${escapeHTML(entry.data)}" aria-label="Pet Hotel update from ${escapeHTML(entry.date || '')}"></video>` : `<a href="${escapeHTML(entry.data)}" target="_blank" rel="noopener"><img src="${escapeHTML(entry.data)}" alt="Pet Hotel care update from ${escapeHTML(entry.date || '')}" loading="lazy" /><span>${escapeHTML(entry.date || '')} · ${escapeHTML(entry.name)}</span></a>`).join('')}</div>` : ''}` : '';
     const daycareDetails = order.serviceId === 'daycare' ? `<p class="my-order-extra">${order.type === 'pass-purchase' ? `${Number(order.sessions || 0)} sessions · valid through ${escapeHTML(order.expiresOn || '—')}` : `${Number(order.hours || 0)} hour visit · Drop-off ${escapeHTML(order.dropoffTime || '—')} · Pick-up ${escapeHTML(order.pickupTime || '—')}${order.passName ? ` · Pass ${escapeHTML(order.passName)}` : ''}`}</p>${order.addOns?.length ? `<p class="my-order-extra">Care: ${order.addOns.map((item) => escapeHTML(item.name)).join(', ')}</p>` : ''}` : '';
     const taxiEnabled = Boolean(order.includeTaxi || order.taxi?.pickup || order.taxi?.dropoff);
-    const taxiLocation = taxiEnabled && order._storageKey ? driverLocationForOrder(order._storageKey, order.id) : null;
-    const taxiMapLink = taxiLocation && Number.isFinite(Number(taxiLocation.latitude)) && Number.isFinite(Number(taxiLocation.longitude))
-      ? `https://www.openstreetmap.org/?mlat=${encodeURIComponent(taxiLocation.latitude)}&mlon=${encodeURIComponent(taxiLocation.longitude)}#map=16/${encodeURIComponent(taxiLocation.latitude)}/${encodeURIComponent(taxiLocation.longitude)}` : '';
     const taxiProgress = order.taxiProgress?.status || 'Scheduled';
     const taxiCheckInHref = `#check-in?order=${encodeURIComponent(`${order.serviceId}:${order.id}`)}`;
-    const taxiTracking = taxiEnabled ? `<section class="my-order-taxi-tracking"><strong>Pet Taxi · ${escapeHTML(taxiProgress)}</strong>${taxiMapLink ? `<a href="${taxiMapLink}" target="_blank" rel="noopener noreferrer">View driver’s latest location</a><small>Updated ${escapeHTML(new Date(taxiLocation.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }))}</small>` : '<small>Driver location will appear here after the trip starts.</small>'}${taxiProgress !== 'Dropped Off' ? `<a href="${taxiCheckInHref}">Open Pet Taxi QR code</a>` : ''}</section>` : '';
+    const inTransit = customerOrderStatus(order) === 'Pet Taxi Delivering...'
+      && ['Picked Up', 'Returning to Customer'].includes(taxiProgress);
+    const taxiLocationContent = inTransit
+      ? `<div class="live-driver-location" data-live-driver-location data-order-key="${escapeHTML(order._storageKey || '')}" data-order-id="${escapeHTML(order.id)}"><p class="live-driver-location-waiting">Waiting for the driver to share their location…</p></div>`
+      : '<small>Live map appears while the driver is travelling to or from the outlet.</small>';
+    const taxiTracking = taxiEnabled ? `<section class="my-order-taxi-tracking"><strong>Pet Taxi · ${escapeHTML(taxiProgress)}</strong>${taxiLocationContent}${taxiProgress !== 'Completed' ? `<a href="${taxiCheckInHref}">Open Pet Taxi QR code</a>` : ''}</section>` : '';
     const reference = order.reference || order.id || '';
     const date = formatOrderDate(order.dateLabel);
-    return `<article class="my-order-card"><div class="my-order-card-top"><span class="my-order-service-label">${escapeHTML(serviceName)}</span><b class="my-order-status ${isCanceled ? 'is-canceled' : statusCategory(statusLabel) === 'completed' ? 'is-complete' : ''}">${escapeHTML(statusLabel)}</b></div><h2>${escapeHTML(order.title)}</h2><p class="my-order-summary">${escapeHTML(summary)}</p><div class="my-order-card-bottom"><small>${[reference, date].filter(Boolean).map(escapeHTML).join(' · ')}</small><strong>MYR ${order.totalAmount.toFixed(2)}</strong></div>${marketplaceDetails}${groomingDetails}${hotelDetails}${daycareDetails}${taxiTracking}${order.receipt ? `<a class="my-order-tracking" href="${escapeHTML(order.receipt.data)}" download="${escapeHTML(order.receipt.name || 'receipt')}">View / download receipt or invoice</a>` : ''}${order.trackingUrl ? `<a class="my-order-tracking" href="${escapeHTML(order.trackingUrl)}" target="_blank" rel="noopener noreferrer">Track delivery</a>` : ''}</article>`;
+    const cancelAction = canCancelServiceOrder(order) ? `<button class="button button-light my-order-cancel" type="button" data-cancel-customer-order="${escapeHTML(order.serviceId)}|${escapeHTML(order._storageKey)}|${escapeHTML(order.id)}">Cancel Booking</button>` : '';
+    return `<article class="my-order-card"><div class="my-order-card-top"><span class="my-order-service-label">${escapeHTML(serviceName)}</span><b class="my-order-status ${isCanceled ? 'is-canceled' : statusCategory(statusLabel) === 'completed' ? 'is-complete' : ''}">${escapeHTML(statusLabel)}</b></div><h2>${escapeHTML(order.title)}</h2><p class="my-order-summary">${escapeHTML(summary)}</p><div class="my-order-card-bottom"><small>${[reference, date].filter(Boolean).map(escapeHTML).join(' · ')}</small><strong>MYR ${order.totalAmount.toFixed(2)}</strong></div>${marketplaceDetails}${groomingDetails}${hotelDetails}${daycareDetails}${taxiTracking}${order.receipt ? `<a class="my-order-tracking" href="${escapeHTML(order.receipt.data)}" download="${escapeHTML(order.receipt.name || 'receipt')}">View / download receipt or invoice</a>` : ''}${order.trackingUrl ? `<a class="my-order-tracking" href="${escapeHTML(order.trackingUrl)}" target="_blank" rel="noopener noreferrer">Track delivery</a>` : ''}${cancelAction}</article>`;
   };
 
   const groups = service === 'all'
@@ -142,4 +187,49 @@ export function myOrdersPage(routeParams = new URLSearchParams()) {
     : visibleOrders.length ? visibleOrders.map(orderCard).join('') : `<section class="my-orders-empty"><h2>No ${orderServices.find((item) => item.id === service)?.label || ''} Orders Found</h2><p>Try another service or status filter.</p></section>`;
 
   return `<main class="my-orders-page"><header class="my-orders-header"><a href="#${encodeURIComponent(returnTo)}" aria-label="Back">‹</a><h1>My Orders</h1><span aria-hidden="true"></span></header><nav class="my-orders-tabs" aria-label="Filter orders by service">${serviceTabs}</nav><nav class="my-orders-status-tabs" aria-label="Filter orders by status">${statusTabs}</nav><p class="my-orders-count">${visibleOrders.length} ${visibleOrders.length === 1 ? 'order' : 'orders'}</p><div class="my-orders-content">${groups}</div>${bottomNavigation('activity', icon)}</main>`;
+}
+
+// Customer cancellation follows the existing seven-day cutoff and refunds the paid total to Furgo Credit.
+export function setupMyOrders() {
+  myOrderLocationCleanups.forEach((cleanup) => cleanup());
+  myOrderLocationCleanups = document.querySelector('.my-orders-page')
+    ? [...document.querySelectorAll('[data-live-driver-location]')].map(mountDriverLocation)
+    : [];
+  if (document.documentElement.dataset.customerOrderCancellationReady === 'true') return;
+  document.documentElement.dataset.customerOrderCancellationReady = 'true';
+  document.addEventListener('click', async (event) => {
+    const button = event.target.closest('[data-cancel-customer-order]');
+    if (!button) return;
+    const [serviceId, key, id] = button.dataset.cancelCustomerOrder.split('|');
+    let records;
+    try { records = JSON.parse(localStorage.getItem(key) || '[]'); } catch { records = []; }
+    const order = Array.isArray(records) ? records.find((item) => String(item.id) === id) : null;
+    if (!order) { window.alert('This booking could not be found. Refresh My Orders and try again.'); return; }
+    const decorated = { ...order, serviceId };
+    if (!canCancelServiceOrder(decorated)) { window.alert('This booking can no longer be cancelled online. Cancellations are available at least 7 days before the service date.'); window.dispatchEvent(new Event('hashchange')); return; }
+    const refund = Number(order.total || order.totalAmount || 0);
+    if (!window.confirm(`Cancel this booking? MYR ${refund.toFixed(2)} will be returned to your Furgo Credit balance.`)) return;
+    const previousStatus = customerOrderStatus(order);
+    const changedAt = new Date().toISOString();
+    order.status = 'Cancelled';
+    order.adminStatus = 'Cancelled';
+    order.paymentStatus = 'Refunded to Furgo Credit';
+    order.cancelledAt = changedAt;
+    order.statusHistory = [...(order.statusHistory || []), { status: 'Cancelled', previousStatus, changedAt, changedBy: 'Customer', refundAmount: refund }];
+    button.disabled = true;
+    try {
+      await saveOrderRecords(key, order, records);
+      if (refund > 0) {
+        const balance = Number(localStorage.getItem('furgo-demo-credit-balance') || 0) + refund;
+        const transactions = (() => { try { return JSON.parse(localStorage.getItem('furgo-demo-credit-transactions') || '[]'); } catch { return []; } })();
+        transactions.unshift({ id: `refund-${order.id}-${Date.now()}`, type: 'Order cancellation refund', label: `Refund for ${order.reference || order.id}`, amount: refund, timestamp: changedAt, date: new Date(changedAt).toLocaleDateString() });
+        localStorage.setItem('furgo-demo-credit-balance', balance.toFixed(2));
+        localStorage.setItem('furgo-demo-credit-transactions', JSON.stringify(transactions));
+      }
+      window.dispatchEvent(new Event('hashchange'));
+    } catch (error) {
+      button.disabled = false;
+      window.alert(`The cancellation could not be synced: ${error.message}`);
+    }
+  });
 }

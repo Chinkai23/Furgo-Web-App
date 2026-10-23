@@ -2,6 +2,7 @@ import { escapeHTML } from '../shared.js';
 import { supabase } from '../supabase.js';
 
 const levels = {
+  driver: { name: 'Driver', order: 0, summary: 'Access the Pet Taxi driver portal.' },
   executive: { name: 'Executive', order: 1, summary: 'Manage orders and check-ins, and view service operations.' },
   manager: { name: 'Manager', order: 2, summary: 'Manage orders, promotions, Marketplace, Grooming, Pet Hotel, and Daycare.' },
   director: { name: 'Director', order: 3, summary: 'Full portal access, including customer records, search insights, and product and service reports.' },
@@ -31,9 +32,9 @@ export function adminAccessPage() {
   ].filter(Boolean).join('');
 
   const managerOptions = isDirector
-    ? '<option value="executive">Executive</option><option value="manager">Manager</option><option value="director">Director</option>'
-    : '<option value="executive">Executive</option>';
-  const teamManagement = isManager ? `<section class="admin-market-panel admin-team-panel"><div class="admin-market-panel-heading"><div><span>Team access</span><h2>Manage Portal Users</h2></div><p>${isDirector ? 'Add Executive, Manager, or Director access for existing Furgo accounts. You can edit and remove lower-level users. Removing a Director requires approval from every other Director.' : 'Add, change, or remove Executive access for existing Furgo accounts.'}</p></div><form class="admin-team-form" data-admin-team-form><label>Existing account email<input name="email" type="email" autocomplete="email" placeholder="person@example.com" required /></label><label>Portal level<select name="level" required>${managerOptions}</select></label><input type="hidden" name="action" value="add" /><div class="admin-market-form-actions"><button class="button button-primary" type="submit">Add user</button><button class="button button-light" type="button" data-cancel-team-edit hidden>Cancel edit</button><span data-admin-team-feedback role="status" aria-live="polite"></span></div></form><div class="admin-team-list" data-admin-team-list role="status" aria-live="polite">Loading team members…</div></section>` : '';
+    ? '<option value="executive">Executive</option><option value="manager">Manager</option><option value="director">Director</option><option value="driver">Driver</option>'
+    : '<option value="executive">Executive</option><option value="driver">Driver</option>';
+  const teamManagement = isManager ? `<section class="admin-market-panel admin-team-panel"><div class="admin-market-panel-heading"><div><span>Team access</span><h2>Manage Portal Users</h2></div><p>${isDirector ? 'Add Executive, Manager, Director, or Driver access for existing Furgo accounts. You can edit and remove lower-level users. Removing a Director requires approval from every other Director.' : 'Add, change, or remove Executive and Driver access for existing Furgo accounts.'}</p></div><form class="admin-team-form" data-admin-team-form><label>Existing account email<input name="email" type="email" autocomplete="email" placeholder="person@example.com" required /></label><label>Account level<select name="level" required>${managerOptions}</select></label><input type="hidden" name="action" value="add" /><div class="admin-market-form-actions"><button class="button button-primary" type="submit">Add user</button><button class="button button-light" type="button" data-cancel-team-edit hidden>Cancel edit</button><span data-admin-team-feedback role="status" aria-live="polite"></span></div></form><div class="admin-team-list" data-admin-team-list role="status" aria-live="polite">Loading team members…</div></section>` : '';
   const directorApprovals = isDirector ? `<section class="admin-market-panel admin-director-approval-panel" data-director-approval-panel hidden><div class="admin-market-panel-heading"><div><span>Director governance</span><h2>Removal Approvals</h2></div><p>Every Director except the requester and the Director named in a request must approve it. One rejection stops the request.</p></div><div data-director-removal-requests role="status" aria-live="polite">Loading approval requests…</div></section>` : '';
   return `<main class="admin-portal-page admin-access-page"><header class="admin-portal-header"><a class="admin-portal-brand" href="#admin-access"><img src="Image/Icon/Logo.png" alt="Furgo" /><span>Admin Portal</span></a><div class="admin-portal-account"><span>${escapeHTML(profile.name || '')}</span><button type="button" data-logout>Log out</button></div></header><header class="admin-market-heading"><a href="${isDirector ? '#admin' : '#admin-orders'}" aria-label="Back to portal">‹</a><div><span>Access level</span><h1>${level.name}</h1></div></header><section class="admin-access-level-summary"><span>YOUR ADMIN LEVEL</span><h2>${level.name}</h2></section><section class="admin-market-panel"><div class="admin-market-panel-heading"><div><span>Portal permissions</span><h2>Your Available Functions</h2></div><p>Your access follows the permissions assigned to your account.</p></div><div class="admin-access-feature-grid">${availableFeatures}</div></section>${directorApprovals}${teamManagement}</main>`;
 }
@@ -94,10 +95,11 @@ export function setupAdminAccess() {
     const members = Array.isArray(data) ? data : [];
     team.innerHTML = members.length ? members.map((member) => {
       const memberLevel = levels[member.level] || levels.executive;
-      const canManage = memberLevel.order < callerLevel.order;
+      const canManage = member.level !== 'driver' && memberLevel.order < callerLevel.order;
+      const canRemoveDriver = member.level === 'driver' && callerLevel.order >= 2;
       const canRemoveDirector = callerLevel.order === 3 && memberLevel.order === 3
         && member.email && member.email.toLowerCase() !== String(profile.email || '').toLowerCase();
-      const controls = `${canManage ? `<button class="button button-light" type="button" data-edit-team-member data-email="${escapeHTML(member.email || '')}" data-level="${escapeHTML(member.level || '')}">Edit</button>` : ''}${canManage || canRemoveDirector ? `<button class="button button-light" type="button" data-remove-team-member data-email="${escapeHTML(member.email || '')}" data-level="${escapeHTML(member.level || '')}">Remove</button>` : '<span class="admin-team-readonly">Same level · Read only</span>'}`;
+      const controls = `${canManage ? `<button class="button button-light" type="button" data-edit-team-member data-email="${escapeHTML(member.email || '')}" data-level="${escapeHTML(member.level || '')}">Edit</button>` : ''}${canManage || canRemoveDirector || canRemoveDriver ? `<button class="button button-light" type="button" data-remove-team-member data-email="${escapeHTML(member.email || '')}" data-level="${escapeHTML(member.level || '')}">Remove</button>` : '<span class="admin-team-readonly">Same level · Read only</span>'}`;
       return `<article class="admin-team-member"><div><strong>${escapeHTML(member.display_name || 'Furgo user')}</strong><small>${escapeHTML(member.email || 'Email unavailable')} · ${escapeHTML(memberLevel.name)}</small></div>${controls}</article>`;
     }).join('') : '<p class="admin-market-empty">No portal users yet.</p>';
   };
@@ -138,6 +140,8 @@ export function setupAdminAccess() {
     if (edit) {
       form.elements.email.value = edit.dataset.email || '';
       form.elements.level.value = edit.dataset.level || 'executive';
+      const driverOption = form.elements.level.querySelector('option[value="driver"]');
+      if (driverOption) driverOption.disabled = true;
       form.elements.action.value = 'update';
       form.querySelector('[type="submit"]').textContent = 'Save changes';
       form.querySelector('[data-cancel-team-edit]').hidden = false;
@@ -172,6 +176,8 @@ export function setupAdminAccess() {
   form.querySelector('[data-cancel-team-edit]')?.addEventListener('click', resetTeamForm);
   function resetTeamForm() {
     form.reset();
+    const driverOption = form.elements.level.querySelector('option[value="driver"]');
+    if (driverOption) driverOption.disabled = false;
     form.elements.action.value = 'add';
     form.querySelector('[type="submit"]').textContent = 'Add user';
     form.querySelector('[data-cancel-team-edit]').hidden = true;

@@ -28,6 +28,8 @@ export const defaultGroomingSettings = {
     { id: 'full-groom', name: 'Full Grooming', description: 'Bath and breed-appropriate haircut with finishing trim.', small: 88, medium: 128, large: 178, durationMinutes: 150, active: true },
     { id: 'spa-groom', name: 'Spa Grooming', description: 'Full groom with coat-conditioning treatment and paw care.', small: 118, medium: 168, large: 228, durationMinutes: 180, active: true },
   ],
+  // Optional fixed-price grooming extras. Daycare and Pet Taxi remain configured separately.
+  addOns: [],
 };
 
 // Reads editable demo settings, merging new defaults into older browser saves safely.
@@ -39,6 +41,7 @@ export function loadGroomingSettings() {
       ...(saved && typeof saved === 'object' ? saved : {}),
       voucher: { ...defaultGroomingSettings.voucher, ...(saved?.voucher || {}) },
       packages: Array.isArray(saved?.packages) ? saved.packages : defaultGroomingSettings.packages,
+      addOns: Array.isArray(saved?.addOns) ? saved.addOns : defaultGroomingSettings.addOns,
       outlets: Array.isArray(saved?.outlets) && saved.outlets.length ? saved.outlets : defaultGroomingSettings.outlets,
       timeSlots: Array.isArray(saved?.timeSlots) && saved.timeSlots.length ? saved.timeSlots : defaultGroomingSettings.timeSlots,
       availableWeekdays: Array.isArray(saved?.availableWeekdays) && saved.availableWeekdays.length ? saved.availableWeekdays : defaultGroomingSettings.availableWeekdays,

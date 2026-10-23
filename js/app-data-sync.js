@@ -5,6 +5,8 @@ import { supabase } from './supabase.js';
 const sharedKeys = new Set([
   'furgo-demo-hotel-settings',
   'furgo-demo-daycare-settings',
+  'furgo-demo-pet-taxi-settings',
+  'furgo-demo-service-banners',
   'furgo-demo-marketplace-products',
   'furgo-demo-marketplace-offers',
   'furgo-demo-promotions',
@@ -40,6 +42,8 @@ const fullAdminRoles = new Set(['admin', 'director']);
 const managerSharedSettingsKeys = new Set([
   'furgo-demo-hotel-settings',
   'furgo-demo-daycare-settings',
+  'furgo-demo-pet-taxi-settings',
+  'furgo-demo-service-banners',
   'furgo-demo-marketplace-products',
   'furgo-demo-marketplace-offers',
   'furgo-demo-promotions',
@@ -224,6 +228,38 @@ export async function saveDedicatedBooking(key, booking, records) {
   window.dispatchEvent(new StorageEvent('storage', { key }));
 }
 
+// Writes order status/receipt changes to the shared order source before refreshing this browser's cache.
+export async function saveOrderRecords(key, order, records) {
+  if (!key || !order?.id || !Array.isArray(records)) throw new Error('This order update cannot be synchronized.');
+  if (activeUserId) {
+    if (key === 'furgo-demo-grooming-bookings') {
+      const { error } = await supabase.from('grooming_bookings').update({ status: order.status, details: order }).eq('id', order.id);
+      if (error) throw error;
+    } else {
+      await writeRemote(key, records);
+    }
+  }
+  const serialized = JSON.stringify(records);
+  applyingRemoteData = true;
+  try {
+    if (originalSetItem) originalSetItem.call(localStorage, key, serialized);
+    else localStorage.setItem(key, serialized);
+  } finally {
+    applyingRemoteData = false;
+  }
+  window.dispatchEvent(new StorageEvent('storage', { key }));
+}
+
+// Updates a browser cache from a trusted RPC/realtime response without mirroring it back as a new client write.
+export function cacheSyncedRecords(key, records) {
+  if (!key || !Array.isArray(records)) return;
+  if (!originalSetItem) originalSetItem = Storage.prototype.setItem;
+  applyingRemoteData = true;
+  try { originalSetItem.call(localStorage, key, JSON.stringify(records)); }
+  finally { applyingRemoteData = false; }
+  window.dispatchEvent(new StorageEvent('storage', { key }));
+}
+
 function dedicatedRecordFromRow(key, row, items = []) {
   const record = { ...(row.details || {}), id: row.id, userId: row.user_id, reference: row.reference, status: row.status, createdAt: row.created_at };
   if (key === 'furgo-demo-marketplace-orders') {
@@ -248,7 +284,8 @@ function dedicatedRecordFromRow(key, row, items = []) {
 
 async function loadDedicatedOperations(userId, role) {
   const localValues = new Map([...dedicatedOperationKeys].map((key) => [key, readLocal(key)]));
-  const ownQuery = (query) => elevatedOrderRoles.has(role) ? query : query.eq('user_id', userId);
+  // Driver SELECT policies expose only Pet Taxi bookings; let Postgres apply that filter.
+  const ownQuery = (query) => elevatedOrderRoles.has(role) || role === 'driver' ? query : query.eq('user_id', userId);
   const [marketResult, hotelResult, daycareResult] = await Promise.all([
     ownQuery(supabase.from('marketplace_orders').select('*').order('created_at', { ascending: false })),
     ownQuery(supabase.from('pet_hotel_bookings').select('*').order('created_at', { ascending: false })),

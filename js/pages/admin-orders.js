@@ -3,11 +3,13 @@ import { marketplaceOrdersKey, loadMarketplaceOrders } from './marketplace-data.
 import { groomingBookingsKey, loadGroomingBookings } from './grooming-data.js';
 import { hotelBookingsKey, loadHotelBookings } from './hotel-data.js';
 import { applyCheckInScan, extractCheckInCode, formatCheckInToken, previewCheckInScan, refreshCheckInTokens, setupCheckInCodeInput } from './check-in.js';
-import { driverLocationForOrder } from './driver.js';
+import { mountDriverLocation } from './driver-location.js';
 import { recordAdminAction } from '../admin-audit.js';
 import { startQRScanner } from '../qr-scanner.js';
+import { saveOrderRecords } from '../app-data-sync.js';
 
 const daycareKeys = ['furgo-demo-daycare-bookings', 'furgo-demo-pet-daycare-bookings', 'furgo-demo-daycare-orders'];
+let adminOrderLocationCleanups = [];
 const orderSources = [
   { id: 'marketplace', label: 'Marketplace', key: marketplaceOrdersKey, load: loadMarketplaceOrders },
   { id: 'grooming', label: 'Grooming', key: groomingBookingsKey, load: loadGroomingBookings },
@@ -23,6 +25,10 @@ function getAdminStatus(order) {
   const rawStatus = String(order.status || order.adminStatus || '').trim();
   const normalized = rawStatus.toLowerCase().replace(/[-_]/g, ' ');
   const paymentStatus = String(order.paymentStatus || '').toLowerCase();
+  const taxiLifecycle = ['Pet Taxi Delivering...', 'Service Complete · Awaiting Pickup', 'Checked-In'];
+  const matchedTaxiLifecycle = taxiLifecycle.find((status) => status.toLowerCase() === rawStatus.toLowerCase());
+  if (matchedTaxiLifecycle) return matchedTaxiLifecycle;
+  if (/^completed$/i.test(rawStatus)) return 'Completed';
   if (/cancel/.test(normalized)) return 'Cancelled';
   if (/complete|delivered|checked out/.test(normalized)) return 'Completed';
   if (/checked in/.test(normalized)) return 'Checked-In';
@@ -118,22 +124,32 @@ export function adminOrdersPage() {
   const newCount = orders.filter((order) => ['New Order', 'New'].includes(order.adminStatus)).length;
   const cards = orders.map((order) => {
     const receipt = order.receipt;
-    const driverLocation = driverLocationForOrder(order.storageKey, order.id);
-    const locationHref = driverLocation && Number.isFinite(Number(driverLocation.latitude)) && Number.isFinite(Number(driverLocation.longitude))
-      ? `https://www.openstreetmap.org/?mlat=${encodeURIComponent(driverLocation.latitude)}&mlon=${encodeURIComponent(driverLocation.longitude)}#map=16/${encodeURIComponent(driverLocation.latitude)}/${encodeURIComponent(driverLocation.longitude)}` : '';
-    const taxiTracking = locationHref ? `<div class="admin-orders-driver-location"><strong>Pet Taxi driver location</strong><a href="${locationHref}" target="_blank" rel="noopener noreferrer">View latest location</a><small>Shared by ${escapeHTML(driverLocation.driverEmail || 'driver')} · ${escapeHTML(new Date(driverLocation.timestamp).toLocaleString())}</small></div>` : '';
+    const taxiStage = order.taxiProgress?.status || 'Scheduled';
+    const isTaxiInTransit = order.status === 'Pet Taxi Delivering...' && ['Picked Up', 'Returning to Customer'].includes(taxiStage);
+    const taxiTracking = isTaxiInTransit
+      ? `<div class="admin-orders-driver-location"><strong>Pet Taxi Driver Location</strong><div class="live-driver-location" data-live-driver-location data-order-key="${escapeHTML(order.storageKey)}" data-order-id="${escapeHTML(order.id)}"><p class="live-driver-location-waiting">Waiting for the driver to share their location…</p></div></div>`
+      : '';
     const reference = order.reference || order.id || 'Order';
     const customer = order.customerName || order.name || order.customer?.name || 'Customer';
     const date = order.createdAt || order.date || order.checkIn || '';
-    const statuses = ['New Order', 'Pending Payment', 'Received Order', 'Checked-In', 'Completed', 'Cancelled'];
-    const statusButtons = statuses.map((status) => `<button class="button ${order.adminStatus === status ? 'button-primary is-active' : 'button-light'}" type="button" data-order-lifecycle-status="${escapeHTML(status)}" ${order.adminStatus === status ? 'aria-current="step"' : ''} disabled aria-pressed="${order.adminStatus === status}">${escapeHTML(status)}</button>`).join('');
-    return `<details class="admin-orders-card" data-order-key="${escapeHTML(order.storageKey)}" data-order-id="${escapeHTML(order.id)}"><summary><span class="admin-orders-reference"><strong>${escapeHTML(reference)}</strong><small>${escapeHTML(order.serviceLabel)} · ${escapeHTML(customer)}${date ? ` · ${escapeHTML(new Date(date).toLocaleDateString('en-MY'))}` : ''}</small></span><span class="admin-orders-status-pill">${escapeHTML(order.adminStatus)}</span><span class="admin-orders-receipt ${receipt ? 'has-receipt' : 'missing-receipt'}" aria-label="${receipt ? 'Receipt uploaded' : 'Receipt not uploaded'}" title="${receipt ? 'Receipt uploaded' : 'Receipt not uploaded'}">${receipt ? '✓' : '×'}</span></summary><div class="admin-orders-detail"><div class="admin-orders-actions"><div class="admin-order-status-control"><strong>Order Status</strong><div class="admin-order-status-buttons" role="group" aria-label="Order status lifecycle">${statusButtons}</div><small>Status updates automatically from payment, receipt upload, customer cancellation, and QR check-in/check-out.</small></div><label class="admin-orders-upload">Upload Receipt / Invoice<input type="file" accept="image/png,image/jpeg,image/webp,application/pdf" data-admin-order-receipt="${escapeHTML(order.storageKey)}|${escapeHTML(order.id)}" /></label></div><div class="admin-orders-receipt-preview">${receipt ? `<a href="${escapeHTML(receipt.data)}" target="_blank" rel="noopener" download="${escapeHTML(receipt.name || 'receipt')}">Current receipt: ${escapeHTML(receipt.name || 'View receipt')}</a>` : '<span>No receipt uploaded yet.</span>'}</div><dl>${detailRows(order)}</dl>${taxiTracking}</div></details>`;
+    const taxiAction = taxiStage === 'Picked Up' ? 'Checked-In'
+      : taxiStage === 'Checked-In' ? 'Done'
+        : taxiStage === 'Service Complete · Awaiting Pickup' ? 'Check Out' : '';
+    const taxiActionMarkup = taxiAction
+      ? `<div class="admin-order-taxi-actions"><strong>Pet Taxi Progress</strong><button class="button button-primary" type="button" data-admin-taxi-action="${escapeHTML(taxiAction)}">${escapeHTML(taxiAction)}</button><small data-admin-taxi-feedback role="status"></small></div>`
+      : '';
+    const receiptIcon = receipt
+      ? '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 4 4L19 6" /></svg>'
+      : '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16V4m0 0L7 9m5-5 5 5M5 14v5h14v-5" /></svg>';
+    return `<details class="admin-orders-card" data-order-key="${escapeHTML(order.storageKey)}" data-order-id="${escapeHTML(order.id)}"><summary><span class="admin-orders-reference"><strong>${escapeHTML(reference)}</strong><small>${escapeHTML(order.serviceLabel)} · ${escapeHTML(customer)}${date ? ` · ${escapeHTML(new Date(date).toLocaleDateString('en-MY'))}` : ''}</small></span><span class="admin-orders-status-pill">${escapeHTML(order.adminStatus)}</span><button class="admin-orders-receipt ${receipt ? 'has-receipt' : 'missing-receipt'}" type="button" data-open-order-receipt ${receipt ? 'disabled' : ''} aria-label="${receipt ? 'Receipt uploaded' : 'Upload receipt'}" title="${receipt ? 'Receipt uploaded' : 'Click to upload receipt'}">${receiptIcon}</button></summary><div class="admin-orders-detail"><div class="admin-orders-actions"><div class="admin-order-status-control"><strong>Order Status</strong><span class="admin-order-current-status">${escapeHTML(order.adminStatus)}</span><small>Status updates automatically from payment, receipt upload, customer cancellation, and QR check-in/check-out.</small></div><label class="admin-orders-upload">Upload / Replace Receipt<input type="file" accept="image/png,image/jpeg,image/webp,application/pdf" data-admin-order-receipt="${escapeHTML(order.storageKey)}|${escapeHTML(order.id)}" /></label></div>${taxiActionMarkup}<div class="admin-orders-receipt-preview">${receipt ? `<a href="${escapeHTML(receipt.data)}" target="_blank" rel="noopener" download="${escapeHTML(receipt.name || 'receipt')}">Current receipt: ${escapeHTML(receipt.name || 'View receipt')}</a><button class="admin-orders-delete-receipt" type="button" data-delete-order-receipt>Delete receipt</button>` : '<span>No receipt uploaded yet.</span>'}</div><dl>${detailRows(order)}</dl>${taxiTracking}</div></details>`;
   }).join('');
   return `<main class="admin-portal-page admin-orders-page"><header class="admin-portal-header"><a class="admin-portal-brand" href="${homeHref}"><img src="Image/Icon/Logo.png" alt="Furgo" /><span>${portalName}</span></a><div class="admin-portal-account"><a href="${homeHref}">${isDirector ? 'Dashboard' : 'Admin'}</a><button type="button" data-logout>Log out</button></div></header><header class="admin-market-heading"><a href="${homeHref}" aria-label="Back to ${portalName}">‹</a><div><span>Customer operations</span><h1>Orders</h1></div></header><section class="admin-market-stats"><article><span>New orders</span><strong>${newCount}</strong></article><article><span>All orders</span><strong>${orders.length}</strong></article><article><span>Receipts uploaded</span><strong>${orders.filter((order) => order.receipt).length}</strong></article></section><section class="admin-market-panel admin-checkin-scan-panel"><div class="admin-market-panel-heading"><div><span>Visit check-in</span><h2>Scan Customer QR Code</h2></div><p>Scan a QR code or enter its manual code to review the matching order. The order updates only after you confirm.</p></div><div class="admin-checkin-scan-controls"><button class="button button-light" type="button" data-start-checkin-scan>Start camera scan</button><video class="admin-checkin-video" data-checkin-video playsinline muted hidden></video><p class="admin-checkin-scan-feedback" data-checkin-scan-feedback role="status" aria-live="polite">Camera access requires HTTPS and permission. You can also enter the scanned code below.</p><form class="admin-checkin-manual-form" data-checkin-manual-form><label>QR code<input name="token" inputmode="text" autocomplete="off" autocapitalize="characters" maxlength="17" minlength="10" pattern="[2-9A-HJ-NP-Z]{5}-?[2-9A-HJ-NP-Z]{5}|[2-9A-HJ-NP-Z]{17}" placeholder="e.g. 7K4MR-9TX2C" required /></label><button class="button button-primary" type="submit">Review Order</button></form></div></section><section class="admin-market-panel"><div class="admin-market-panel-heading"><div><span>Order management</span><h2>All Customer Orders</h2></div><p>Open an order to review its saved customer, service, pet, payment, and booking details. Update its status or upload a receipt/invoice for the customer.</p></div><div class="admin-orders-columns"><span>Order</span><span>Status</span><span>Receipt</span></div><div class="admin-orders-list">${cards || '<p class="admin-market-empty">No customer orders have been placed yet.</p>'}</div></section><dialog class="admin-checkin-preview-dialog" data-checkin-preview-dialog aria-labelledby="checkin-preview-title"></dialog></main>`;
 }
 
 // Saves admin status changes and receipt files into the same storage records read by My Orders.
 export function setupAdminOrders() {
+  adminOrderLocationCleanups.forEach((cleanup) => cleanup());
+  adminOrderLocationCleanups = [...document.querySelectorAll('[data-live-driver-location]')].map(mountDriverLocation);
   const scanStatus = document.querySelector('[data-checkin-scan-feedback]');
   const video = document.querySelector('[data-checkin-video]');
   const startScanButton = document.querySelector('[data-start-checkin-scan]');
@@ -154,7 +170,7 @@ export function setupAdminOrders() {
     cameraScanner = null;
     if (video) { video.pause(); video.srcObject = null; video.hidden = true; }
   };
-  const showScanResult = (rawCode) => {
+  const showScanResult = async (rawCode) => {
     const result = applyCheckInScan(rawCode);
     if (scanStatus) scanStatus.textContent = result.message;
     if (!result.ok) return false;
@@ -164,21 +180,19 @@ export function setupAdminOrders() {
     if (card) {
       const pill = card.querySelector('.admin-orders-status-pill');
       if (pill) pill.textContent = result.nextStatus;
-      card.querySelectorAll('[data-order-lifecycle-status]').forEach((button) => {
-        const active = button.dataset.orderLifecycleStatus === result.nextStatus;
-        button.classList.toggle('button-primary', active);
-        button.classList.toggle('button-light', !active);
-        button.classList.toggle('is-active', active);
-        button.setAttribute('aria-pressed', String(active));
-        if (active) button.setAttribute('aria-current', 'step');
-        else button.removeAttribute('aria-current');
-      });
+      const currentStatus = card.querySelector('.admin-order-current-status');
+      if (currentStatus) currentStatus.textContent = result.nextStatus;
       const statusRow = [...card.querySelectorAll('.admin-orders-detail dt')].find((label) => label.textContent.trim().toLowerCase() === 'status')?.parentElement;
       if (statusRow?.querySelector('dd')) statusRow.querySelector('dd').textContent = result.nextStatus;
     }
-    // Grooming bookings are synced through a dedicated Supabase table, so include the
-    // source key expected by the shared cloud-update listener.
-    document.dispatchEvent(new CustomEvent('furgo-order-status-updated', { detail: { ...result.order, orderKey: result.orderKey } }));
+    try {
+      const records = readOrders(result.orderKey);
+      const updatedOrder = records.find((item) => String(item.id) === String(result.order.id)) || result.order;
+      await saveOrderRecords(result.orderKey, updatedOrder, records);
+    } catch (error) {
+      if (scanStatus) scanStatus.textContent = `Order marked ${result.nextStatus}, but the shared status could not be updated: ${error.message}`;
+      return false;
+    }
     return true;
   };
   const showPreviewForCode = async (rawCode) => {
@@ -241,12 +255,12 @@ export function setupAdminOrders() {
     event.preventDefault();
     await showPreviewForCode(new FormData(event.currentTarget).get('token'));
   });
-  previewDialog?.addEventListener('click', (event) => {
+  previewDialog?.addEventListener('click', async (event) => {
     if (event.target.closest('[data-cancel-checkin-preview]')) previewDialog.close();
     if (!event.target.closest('[data-confirm-checkin-preview]')) return;
     const confirmButton = event.target.closest('[data-confirm-checkin-preview]');
     confirmButton.disabled = true;
-    if (showScanResult(previewDialog.dataset.checkinCode)) {
+    if (await showScanResult(previewDialog.dataset.checkinCode)) {
       previewDialog.close();
       if (codeInput) codeInput.value = '';
     } else {
@@ -258,6 +272,56 @@ export function setupAdminOrders() {
   });
   if (scannedCode) void showPreviewForCode(scannedCode);
 
+  document.querySelectorAll('[data-admin-taxi-action]').forEach((button) => button.addEventListener('click', async () => {
+    const card = button.closest('.admin-orders-card');
+    if (!card) return;
+    const key = card.dataset.orderKey;
+    const id = card.dataset.orderId;
+    const records = readOrders(key);
+    const order = records.find((item) => String(item.id) === id);
+    if (!order) return;
+    const action = button.dataset.adminTaxiAction;
+    const expectedProgress = { 'Checked-In': 'Picked Up', Done: 'Checked-In', 'Check Out': 'Service Complete · Awaiting Pickup' }[action];
+    if (!expectedProgress || (order.taxiProgress?.status || 'Scheduled') !== expectedProgress) {
+      window.alert('The Pet Taxi status changed. Refresh the order and try again.');
+      return;
+    }
+    const now = new Date().toISOString();
+    const nextStatus = action === 'Checked-In' ? 'Checked-In'
+      : action === 'Done' ? 'Service Complete · Awaiting Pickup' : 'Pet Taxi Delivering...';
+    const nextTaxiProgress = action === 'Checked-In' ? 'Checked-In'
+      : action === 'Done' ? 'Service Complete · Awaiting Pickup' : 'Returning to Customer';
+    const previousStatus = order.status || order.adminStatus || 'Pet Taxi Delivering...';
+    order.status = nextStatus;
+    order.adminStatus = nextStatus;
+    order.taxiProgress = { ...(order.taxiProgress || {}), status: nextTaxiProgress,
+      ...(action === 'Checked-In' ? { checkedInAt: now } : {}),
+      ...(action === 'Done' ? { serviceCompletedAt: now } : {}),
+      ...(action === 'Check Out' ? { returningAt: now } : {}),
+    };
+    order.statusHistory = [...(order.statusHistory || []), { status: nextStatus, previousStatus, changedAt: now, changedBy: 'Admin' }];
+    button.disabled = true;
+    const feedback = card.querySelector('[data-admin-taxi-feedback]');
+    try {
+      await saveOrderRecords(key, order, records);
+      void recordAdminAction('order_status_updated', 'order', order.reference || id, { status: nextStatus });
+      if (feedback) feedback.textContent = `Status updated to ${nextStatus}.`;
+      window.dispatchEvent(new Event('hashchange'));
+    } catch (error) {
+      button.disabled = false;
+      if (feedback) feedback.textContent = `Could not update status: ${error.message}`;
+      window.alert(`Could not update the Pet Taxi status: ${error.message}`);
+    }
+  }));
+
+  document.querySelectorAll('[data-open-order-receipt]').forEach((button) => button.addEventListener('click', (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const card = button.closest('.admin-orders-card');
+    if (card) card.open = true;
+    card?.querySelector('[data-admin-order-receipt]')?.click();
+  }));
+
   document.querySelectorAll('[data-admin-order-receipt]').forEach((input) => input.addEventListener('change', async () => {
     const file = input.files?.[0];
     if (!file) return;
@@ -267,15 +331,46 @@ export function setupAdminOrders() {
     const orders = readOrders(key);
     const order = orders.find((item) => String(item.id) === id);
     if (!order || !data) { window.alert('The receipt could not be read. Please choose it again.'); return; }
-    const previousStatus = getAdminStatus(order);
-    order.receipt = { name: file.name, data, uploadedAt: new Date().toISOString() };
-    if (!['Checked-In', 'Completed', 'Cancelled'].includes(previousStatus)) {
+    const previousStatus = order.receipt?.previousStatus || getAdminStatus(order);
+    const previousPaymentStatus = order.receipt?.previousPaymentStatus ?? order.paymentStatus;
+    const uploadedAt = new Date().toISOString();
+    order.receipt = { name: file.name, data, uploadedAt, previousStatus, previousPaymentStatus };
+    const taxiTripStarted = Boolean(order.includeTaxi || order.taxi?.pickup || order.taxi?.dropoff)
+      && !['Scheduled', 'Assigned'].includes(order.taxiProgress?.status || 'Scheduled');
+    if (!taxiTripStarted && !['Checked-In', 'Completed', 'Cancelled'].includes(previousStatus)) {
       order.status = 'Received Order';
       order.adminStatus = 'Received Order';
       order.statusHistory = [...(order.statusHistory || []), { status: 'Received Order', previousStatus, changedAt: order.receipt.uploadedAt, changedBy: 'Admin receipt upload' }];
     }
-    localStorage.setItem(key, JSON.stringify(orders));
+    try { await saveOrderRecords(key, order, orders); }
+    catch (error) { window.alert(`The receipt could not be saved or synced: ${error.message}`); return; }
     void recordAdminAction('receipt_uploaded', 'order', order.reference || id);
     window.dispatchEvent(new Event('hashchange'));
+  }));
+
+  document.querySelectorAll('[data-delete-order-receipt]').forEach((button) => button.addEventListener('click', async () => {
+    const card = button.closest('.admin-orders-card');
+    if (!card || !window.confirm('Delete the uploaded receipt for this order?')) return;
+    const key = card.dataset.orderKey;
+    const id = card.dataset.orderId;
+    const orders = readOrders(key);
+    const order = orders.find((item) => String(item.id) === id);
+    if (!order?.receipt) return;
+    const previousStatus = order.receipt.previousStatus;
+    const previousPaymentStatus = order.receipt.previousPaymentStatus;
+    delete order.receipt;
+    if (previousPaymentStatus !== undefined) order.paymentStatus = previousPaymentStatus;
+    if (getAdminStatus({ ...order, receipt: null }) === 'Received Order' && previousStatus) {
+      order.status = previousStatus;
+      order.adminStatus = previousStatus;
+      order.statusHistory = [...(order.statusHistory || []), { status: previousStatus, previousStatus: 'Received Order', changedAt: new Date().toISOString(), changedBy: 'Admin receipt removal' }];
+    }
+    try {
+      await saveOrderRecords(key, order, orders);
+      void recordAdminAction('receipt_removed', 'order', order.reference || id);
+      window.dispatchEvent(new Event('hashchange'));
+    } catch (error) {
+      window.alert(`The receipt could not be synced: ${error.message}`);
+    }
   }));
 }

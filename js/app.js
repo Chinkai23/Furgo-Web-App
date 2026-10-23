@@ -23,8 +23,14 @@ import { petHotelPage, setupHotelBooking } from './pages/hotel.js';
 import { adminHotelPage, setupAdminHotel } from './pages/admin-hotel.js';
 import { petDaycarePage, setupDaycareBooking } from './pages/daycare.js';
 import { adminDaycarePage, setupAdminDaycare } from './pages/admin-daycare.js';
+import { adminAddOnsPage, setupAdminAddOns } from './pages/admin-addons.js';
+import { adminPetTaxiPage, setupAdminPetTaxi } from './pages/admin-pet-taxi.js';
+import { setupAdminServiceBanners } from './pages/admin-service-banners.js';
+import { setupServiceBannerCarousel } from './pages/service-banners.js';
+import { loadPetTaxiSettings, matchPetTaxiRoute, petTaxiSettingsKey } from './pages/pet-taxi-data.js';
+import { setupPetTaxiAddressPicker } from './pages/pet-taxi-addresses.js';
 import { defaultGroomingSettings, groomingBookingsKey, groomingSettingsKey, groomingWeightTier, loadGroomingBookings, loadGroomingSettings } from './pages/grooming-data.js';
-import { myOrdersPage } from './pages/my-orders.js';
+import { myOrdersPage, setupMyOrders } from './pages/my-orders.js';
 import { adminOrdersPage, setupAdminOrders } from './pages/admin-orders.js';
 import { checkInPage, extractCheckInCode, formatCheckInToken, refreshCheckInTokens } from './pages/check-in.js';
 import { adminBottomNavigation, escapeHTML } from './shared.js';
@@ -36,7 +42,7 @@ import { adminProductServiceInsightsPage, setupAdminProductServiceInsights } fro
 import { recordAdminAction } from './admin-audit.js';
 import { recentSearchesKey, searchPage } from './pages/search.js';
 import { supabase, toMalaysianE164 } from './supabase.js';
-import { loadCloudAppData } from './app-data-sync.js';
+import { cacheSyncedRecords, loadCloudAppData } from './app-data-sync.js';
 import { startQRScanner } from './qr-scanner.js';
 
 // Section: Supabase-backed authentication state
@@ -238,7 +244,7 @@ async function saveCloudGroomingSettings(settings, userId) {
 }
 
 async function loadCloudGroomingData(userId, role) {
-  const hasOperationsAccess = ['admin', 'staff', 'director', 'manager', 'executive'].includes(role);
+  const hasOperationsAccess = ['admin', 'staff', 'director', 'manager', 'executive', 'driver'].includes(role);
   const [{ data: settingRow, error: settingsError }, bookingsResult] = await Promise.all([
     supabase.from('service_settings').select('settings').eq('service_key', 'grooming').maybeSingle(),
     hasOperationsAccess
@@ -286,7 +292,7 @@ async function loadCloudGroomingData(userId, role) {
     status: row.status,
     createdAt: row.created_at,
   }));
-  localStorage.setItem(groomingBookingsKey, JSON.stringify(bookings));
+  cacheSyncedRecords(groomingBookingsKey, bookings);
   return bookings;
 }
 
@@ -1501,29 +1507,77 @@ function toastAdmin(message) {
   window.setTimeout(() => toast.classList.remove('visible'), 2600);
 }
 
-// Saves admin banner settings in local browser storage for this customer-portal prototype.
+// Crops and compresses Home promotion artwork to a predictable 2:1 image size.
+async function preparePromotionBanner(file, width, height) {
+  const objectUrl = URL.createObjectURL(file);
+  try {
+    const image = new Image();
+    image.src = objectUrl;
+    await image.decode();
+    const targetRatio = width / height;
+    let sourceX = 0;
+    let sourceY = 0;
+    let sourceWidth = image.naturalWidth;
+    let sourceHeight = image.naturalHeight;
+    if (sourceWidth / sourceHeight > targetRatio) {
+      sourceWidth = sourceHeight * targetRatio;
+      sourceX = (image.naturalWidth - sourceWidth) / 2;
+    } else {
+      sourceHeight = sourceWidth / targetRatio;
+      sourceY = (image.naturalHeight - sourceHeight) / 2;
+    }
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    const context = canvas.getContext('2d');
+    if (!context) throw new Error('Image processing is unavailable in this browser.');
+    context.fillStyle = '#ffffff';
+    context.fillRect(0, 0, width, height);
+    context.drawImage(image, sourceX, sourceY, sourceWidth, sourceHeight, 0, 0, width, height);
+    return canvas.toDataURL('image/jpeg', 0.82);
+  } finally {
+    URL.revokeObjectURL(objectUrl);
+  }
+}
+
+// Saves mobile-first Home promotion banners in a compact, fixed-size format.
 function setupAdminPromotionsForm() {
   const form = document.querySelector('[data-admin-promo-form]');
   if (!form) return;
   const bannerInput = form.querySelector('[data-promo-banner]');
+  const mobileInput = form.querySelector('[data-promo-mobile-banner]');
   const preview = form.querySelector('[data-promo-preview]');
+  const mobilePreview = form.querySelector('[data-promo-mobile-preview]');
   const feedback = form.querySelector('[data-admin-promo-feedback]');
-  let previewUrl = '';
-
-  bannerInput.addEventListener('change', () => {
-    const file = bannerInput.files?.[0];
+  const previewUrls = new Map();
+  const maximumImageSize = 2 * 1024 * 1024;
+  const supportedImageTypes = new Set(['image/png', 'image/jpeg', 'image/webp']);
+  const setupPreview = (input, image) => input.addEventListener('change', () => {
+    const file = input.files?.[0];
     if (!file) return;
-    if (!file.type.startsWith('image/')) {
-      feedback.textContent = 'Choose an image file for the banner.';
+    if (!supportedImageTypes.has(file.type)) {
+      feedback.textContent = 'Choose a PNG, JPG, or WebP banner image.';
       feedback.classList.add('visible');
-      bannerInput.value = '';
+      input.value = '';
       return;
     }
-    if (previewUrl) URL.revokeObjectURL(previewUrl);
-    previewUrl = URL.createObjectURL(file);
-    preview.src = previewUrl;
-    preview.hidden = false;
+    if (file.size > maximumImageSize) {
+      feedback.textContent = 'Each banner image must be 2 MB or smaller.';
+      feedback.classList.add('visible');
+      input.value = '';
+      return;
+    }
+    const oldUrl = previewUrls.get(input);
+    if (oldUrl) URL.revokeObjectURL(oldUrl);
+    const nextUrl = URL.createObjectURL(file);
+    previewUrls.set(input, nextUrl);
+    image.src = nextUrl;
+    image.hidden = false;
+    feedback.textContent = '';
+    feedback.classList.remove('visible');
   });
+  setupPreview(bannerInput, preview);
+  setupPreview(mobileInput, mobilePreview);
 
   form.addEventListener('submit', async (event) => {
     event.preventDefault();
@@ -1541,52 +1595,30 @@ function setupAdminPromotionsForm() {
       return;
     }
     const file = bannerInput.files?.[0];
-    if (!file || !file.type.startsWith('image/')) {
-      feedback.textContent = 'Choose an image file for the banner.';
+    const mobileFile = mobileInput.files?.[0];
+    if (!file || !supportedImageTypes.has(file.type) || file.size > maximumImageSize || mobileFile && (!supportedImageTypes.has(mobileFile.type) || mobileFile.size > maximumImageSize)) {
+      feedback.textContent = 'Choose PNG, JPG, or WebP images no larger than 2 MB each.';
       feedback.classList.add('visible');
       return;
     }
 
-    let objectUrl = '';
     try {
-      objectUrl = URL.createObjectURL(file);
-      const image = new Image();
-      image.src = objectUrl;
-      await image.decode();
-      const targetRatio = 2;
-      let sourceX = 0;
-      let sourceY = 0;
-      let sourceWidth = image.naturalWidth;
-      let sourceHeight = image.naturalHeight;
-      if (sourceWidth / sourceHeight > targetRatio) {
-        sourceWidth = sourceHeight * targetRatio;
-        sourceX = (image.naturalWidth - sourceWidth) / 2;
-      } else {
-        sourceHeight = sourceWidth / targetRatio;
-        sourceY = (image.naturalHeight - sourceHeight) / 2;
-      }
-      const canvas = document.createElement('canvas');
-      canvas.width = 1200;
-      canvas.height = 600;
-      const context = canvas.getContext('2d');
-      context.fillStyle = '#ffffff';
-      context.fillRect(0, 0, canvas.width, canvas.height);
-      context.drawImage(image, sourceX, sourceY, sourceWidth, sourceHeight, 0, 0, 1200, 600);
+      const image = await preparePromotionBanner(file, 1200, 600);
+      const mobileImage = mobileFile ? await preparePromotionBanner(mobileFile, 900, 450) : '';
       const promotion = {
         id: `promotion-${Date.now()}`,
         title: form.elements.title.value.trim(),
         destination,
-        image: canvas.toDataURL('image/jpeg', 0.84),
+        image,
+        ...(mobileImage ? { mobileImage } : {}),
       };
       localStorage.setItem(promotionStorageKey, JSON.stringify([...promotions, promotion]));
       void recordAdminAction('promotion_uploaded', 'promotion', promotion.id, { title: promotion.title });
-      if (previewUrl) URL.revokeObjectURL(previewUrl);
+      previewUrls.forEach((url) => URL.revokeObjectURL(url));
       render();
     } catch {
-      feedback.textContent = 'The banner could not be processed or saved. Try a smaller image.';
+      feedback.textContent = 'The banner could not be processed or saved. Try a supported image under 2 MB.';
       feedback.classList.add('visible');
-    } finally {
-      if (objectUrl) URL.revokeObjectURL(objectUrl);
     }
   });
 
@@ -1623,8 +1655,11 @@ function setupGroomingBooking() {
     const daycareTotal = daycareOn ? Number(form.elements.daycareHours.value) * Number(settings.daycareHourlyRate) : 0;
     const taxiOn = form.elements.includeTaxi.checked;
     const taxiDistance = Number(form.elements.taxiDistance.value || 0);
-    const taxiTotal = taxiOn && taxiDistance > 0 ? Number(liveSettings.taxiBaseFare) + taxiDistance * Number(liveSettings.taxiPerKm) : 0;
-    const subtotal = packagePrice + daycareTotal + taxiTotal;
+    const petTaxiSettings = loadPetTaxiSettings();
+    const taxiTotal = taxiOn && taxiDistance > 0 ? Number(petTaxiSettings.baseFare) + taxiDistance * Number(petTaxiSettings.farePerKm) : 0;
+    const customAddOns = [...form.querySelectorAll('[data-grooming-custom-addon]:checked')].map((input) => liveSettings.addOns?.find((item) => item.id === input.value)).filter(Boolean);
+    const customAddOnTotal = customAddOns.reduce((sum, item) => sum + Number(item.price || 0), 0);
+    const subtotal = packagePrice + daycareTotal + taxiTotal + customAddOnTotal;
     if (appliedVoucher && subtotal < Number(settings.voucher.minimumSpend || 0)) {
       voucherDiscount = 0;
       appliedVoucher = '';
@@ -1636,11 +1671,13 @@ function setupGroomingBooking() {
     form.querySelector('[data-daycare-summary]').hidden = !daycareOn;
     form.querySelector('[data-taxi-total]').textContent = money(taxiTotal);
     form.querySelector('[data-taxi-summary]').hidden = !taxiOn;
+    form.querySelector('[data-custom-addons-total]').textContent = money(customAddOnTotal);
+    form.querySelector('[data-custom-addons-summary]').hidden = customAddOns.length === 0;
     form.querySelector('[data-grooming-discount]').textContent = `− ${money(voucherDiscount)}`;
     form.querySelector('[data-grooming-discount-row]').hidden = voucherDiscount <= 0;
     form.querySelector('[data-grooming-total]').textContent = money(total);
     form.dataset.quotedTotal = String(total);
-    return { pet, tier, packageItem, packagePrice, daycareTotal, taxiTotal, taxiDistance, total };
+    return { pet, tier, packageItem, packagePrice, daycareTotal, taxiTotal, taxiDistance, customAddOns, customAddOnTotal, total };
   };
 
   const refreshWeightTier = () => {
@@ -1776,17 +1813,17 @@ function setupGroomingBooking() {
     if (!quote || !distanceInput) return;
     const pickupSelect = form.querySelector('[name="pickup"]');
     let address = null;
-    if (pickupSelect && pickupSelect.value !== 'manual') {
+    if (pickupSelect && pickupSelect.value !== 'new') {
       try { address = JSON.parse(localStorage.getItem('furgo-demo-addresses') || '[]')[Number(pickupSelect.value)] || null; } catch { address = null; }
     }
     const locationText = [address?.city, address?.state, address?.postcode, address?.street, form.elements.pickupManual?.value].filter(Boolean).join(' ').toLowerCase();
     const outlet = form.querySelector('[data-taxi-outlet]')?.value || form.elements.outlet.value;
-    const latestSettings = loadGroomingSettings();
-    const route = latestSettings.taxiRouteEstimates.find((item) => item && item.outlet === outlet && item.city && locationText.includes(String(item.city).toLowerCase()));
+    const latestSettings = loadPetTaxiSettings();
+    const route = matchPetTaxiRoute(locationText, outlet, latestSettings);
     const distanceKm = route ? Number(route.distanceKm) : 0;
     distanceInput.value = String(distanceKm);
     quote.innerHTML = route
-      ? `<strong>Estimated taxi fare: ${money(Number(latestSettings.taxiBaseFare) + distanceKm * Number(latestSettings.taxiPerKm))}</strong><span>${escapeHTML(route.city)} to ${escapeHTML(outlet)} · ${distanceKm} km · one way</span>`
+      ? `<strong>Estimated taxi fare: ${money(Number(latestSettings.baseFare) + distanceKm * Number(latestSettings.farePerKm))}</strong><span>${escapeHTML(route.city)} to ${escapeHTML(outlet)} · ${distanceKm} km · one way</span>`
       : '<strong>Route estimate unavailable</strong><span>Choose an address in a configured city, or ask Admin to add this city and outlet route.</span>';
     renderQuote();
   };
@@ -1795,7 +1832,7 @@ function setupGroomingBooking() {
   const refreshTaxiSchedules = () => {
     const container = form.querySelector('[data-taxi-schedules]');
     const currentSchedule = form.elements.taxiSchedule.value;
-    const slots = loadGroomingSettings().taxiScheduleSlots;
+    const slots = loadPetTaxiSettings().scheduleSlots;
     if (!slots.includes(currentSchedule)) form.elements.taxiSchedule.value = '';
     container.innerHTML = slots.map((time) => {
       const [hour, minute] = String(time).split(':').map(Number);
@@ -1810,15 +1847,8 @@ function setupGroomingBooking() {
     const taxiFields = form.querySelector('[data-grooming-taxi-fields]');
     daycareFields.hidden = !form.elements.includeDaycare.checked;
     taxiFields.hidden = !form.elements.includeTaxi.checked;
-    form.querySelectorAll('[data-grooming-address]').forEach((select) => {
-      const manual = form.querySelector('[data-pickup-manual]');
-      const input = manual.querySelector('input');
-      const isManual = select.value === 'manual';
-      manual.hidden = !isManual || !form.elements.includeTaxi.checked;
-      input.required = isManual && form.elements.includeTaxi.checked;
-    });
-    const manualPickup = form.querySelector('[data-pickup-manual] input');
-    manualPickup.required = form.elements.includeTaxi.checked && (!form.querySelector('[name="pickup"]') || form.querySelector('[name="pickup"]')?.value === 'manual');
+    const addressSelect = form.querySelector('[data-pet-taxi-address-select]');
+    if (addressSelect) addressSelect.required = form.elements.includeTaxi.checked;
     const transferField = form.querySelector('[data-grooming-transfer]');
     const transferInput = form.elements.transferSlip;
     const needsTransferSlip = form.elements.paymentMethod.value === 'bank-transfer';
@@ -1882,7 +1912,7 @@ function setupGroomingBooking() {
   });
   window.addEventListener('storage', (event) => {
     if ([groomingSettingsKey, groomingBookingsKey].includes(event.key)) refreshSlots();
-    if (event.key === groomingSettingsKey) {
+    if ([groomingSettingsKey, petTaxiSettingsKey].includes(event.key)) {
       refreshTaxiEstimate();
       refreshTaxiSchedules();
     }
@@ -1902,8 +1932,9 @@ function setupGroomingBooking() {
   });
   form.querySelector('[data-grooming-daycare]')?.addEventListener('change', updateOptionalFields);
   form.querySelector('[data-grooming-taxi]')?.addEventListener('change', updateOptionalFields);
+  form.querySelectorAll('[data-grooming-custom-addon]').forEach((input) => input.addEventListener('change', renderQuote));
   form.querySelectorAll('[data-grooming-daycare-hours]').forEach((input) => input.addEventListener('input', renderQuote));
-  form.querySelectorAll('[data-grooming-address]').forEach((input) => input.addEventListener('change', updateOptionalFields));
+  setupPetTaxiAddressPicker(form, refreshTaxiEstimate);
   form.querySelector('[name="pickupManual"]')?.addEventListener('input', refreshTaxiEstimate);
   form.querySelector('[data-taxi-outlet]')?.addEventListener('change', refreshTaxiEstimate);
   form.querySelector('[data-taxi-schedules]')?.addEventListener('click', (event) => {
@@ -1920,7 +1951,7 @@ function setupGroomingBooking() {
   form.querySelector('[data-apply-grooming-voucher]')?.addEventListener('click', () => {
     const code = form.elements.voucherCode.value.trim().toUpperCase();
     const quote = renderQuote();
-    const subtotal = quote.packagePrice + quote.daycareTotal + quote.taxiTotal;
+    const subtotal = quote.packagePrice + quote.daycareTotal + quote.taxiTotal + quote.customAddOnTotal;
     const voucher = settings.voucher;
     const message = form.querySelector('[data-grooming-voucher-feedback]');
     if (!voucher.enabled || !code || code !== String(voucher.code).toUpperCase()) {
@@ -2017,7 +2048,7 @@ function setupGroomingBooking() {
     const remarks = Array.isArray(quote.pet.remarks) ? quote.pet.remarks : [quote.pet.redFlagRemark].filter(Boolean);
     const pickupSelect = form.querySelector('[name="pickup"]');
     const savedAddresses = (() => { try { return JSON.parse(localStorage.getItem('furgo-demo-addresses') || '[]'); } catch { return []; } })();
-    const selectedPickupAddress = pickupSelect && pickupSelect.value !== 'manual' ? savedAddresses[Number(pickupSelect.value)] : null;
+    const selectedPickupAddress = pickupSelect && pickupSelect.value !== 'new' ? savedAddresses[Number(pickupSelect.value)] : null;
     const pickup = selectedPickupAddress ? [selectedPickupAddress.label, selectedPickupAddress.street, selectedPickupAddress.city, selectedPickupAddress.state, selectedPickupAddress.postcode].filter(Boolean).join(', ') : form.elements.pickupManual.value.trim();
     const dropoff = form.querySelector('[data-taxi-outlet]').value;
     const booking = {
@@ -2030,6 +2061,8 @@ function setupGroomingBooking() {
       date: appointmentDate.value, time: appointmentTime.value, outlet: form.elements.outlet.value,
       daycareHours: form.elements.includeDaycare.checked ? Number(form.elements.daycareHours.value) : 0,
       daycareTiming: form.elements.daycareTiming.value, daycareTotal: quote.daycareTotal,
+      addOns: quote.customAddOns.map((item) => ({ id: item.id, name: item.name, description: item.description || '', price: Number(item.price || 0) })),
+      addOnTotal: quote.customAddOnTotal,
       includeTaxi: form.elements.includeTaxi.checked, pickup, dropoff, taxiDistance: quote.taxiDistance, taxiTotal: quote.taxiTotal, taxiSchedule: form.elements.taxiSchedule.value,
       voucherCode: appliedVoucher, discount: voucherDiscount, total: quote.total,
       paymentMethod, paymentStatus: paymentMethod === 'wallet' ? 'Paid with Furgo Credit' : paymentMethod === 'bank-transfer' ? 'Awaiting verification' : 'Pending online payment',
@@ -2092,17 +2125,11 @@ function setupAdminGrooming() {
       const timeSlots = settingsForm.elements.timeSlots.value.split(',').map((value) => value.trim()).filter(Boolean);
       const availableWeekdays = [...settingsForm.querySelectorAll('[name="availableWeekdays"]:checked')].map((input) => Number(input.value));
       const closedDates = [...new Set(settingsForm.elements.closedDates.value.split(',').map((value) => value.trim()).filter(Boolean))];
-      const taxiScheduleSlots = [...new Set(settingsForm.elements.taxiScheduleSlots.value.split(',').map((value) => value.trim()).filter(Boolean))];
-      const routeLines = settingsForm.elements.taxiRouteEstimates.value.split('\n').filter((line) => line.trim());
-      const taxiRouteEstimates = routeLines.map((line) => {
-        const [city, outlet, distance] = line.split('|').map((value) => value.trim());
-        return { city, outlet, distanceKm: Number(distance) };
-      });
       const updated = {
         ...settings, outlets, timeSlots,
         bookingHorizonDays: Number(settingsForm.elements.bookingHorizonDays.value), availableWeekdays, closedDates,
         slotCapacity: 1, smallMaxKg, mediumMaxKg,
-        daycareHourlyRate: Number(settingsForm.elements.daycareHourlyRate.value), taxiBaseFare: Number(settingsForm.elements.taxiBaseFare.value), taxiPerKm: Number(settingsForm.elements.taxiPerKm.value), taxiScheduleSlots, taxiRouteEstimates, packages,
+        daycareHourlyRate: Number(settingsForm.elements.daycareHourlyRate.value), packages,
         voucher: { code: settingsForm.elements.voucherCode.value.trim().toUpperCase(), type: settingsForm.elements.voucherType.value, value: Number(settingsForm.elements.voucherValue.value), minimumSpend: Number(settingsForm.elements.voucherMinimumSpend.value), enabled: settingsForm.elements.voucherEnabled.checked },
       };
       if (!updated.outlets.length || !updated.timeSlots.length || !packages.length) {
@@ -2115,14 +2142,6 @@ function setupAdminGrooming() {
       }
       if (timeSlots.some((slot) => !/^([01]?\d|2[0-3]):[0-5]\d$/.test(slot))) {
         settingsForm.querySelector('[data-admin-grooming-settings-feedback]').textContent = 'Enter time slots in 24-hour format, such as 09:00 or 14:30.';
-        return;
-      }
-      if (!taxiScheduleSlots.length || taxiScheduleSlots.some((slot) => !/^([01]?\d|2[0-3]):[0-5]\d$/.test(slot))) {
-        settingsForm.querySelector('[data-admin-grooming-settings-feedback]').textContent = 'Enter pet taxi pickup times in 24-hour format, such as 09:00, 12:00, and 15:00.';
-        return;
-      }
-      if (taxiRouteEstimates.some((route) => !route.city || !outlets.includes(route.outlet) || !Number.isFinite(route.distanceKm) || route.distanceKm <= 0)) {
-        settingsForm.querySelector('[data-admin-grooming-settings-feedback]').textContent = 'Check each taxi route line. Use: City | Outlet name | distance in km.';
         return;
       }
       if (closedDates.some((date) => !/^\d{4}-\d{2}-\d{2}$/.test(date) || Number.isNaN(Date.parse(`${date}T00:00:00`)))) {
@@ -2167,8 +2186,13 @@ function setupAdminGrooming() {
     const booking = bookings.find((item) => item.id === button.dataset.saveGroomingStatus);
     const select = document.querySelector(`[data-grooming-status="${button.dataset.saveGroomingStatus}"]`);
     if (!booking || !select) return;
+    if (booking.includeTaxi) {
+      window.alert('Use Admin Order Management to update Pet Taxi bookings. This keeps pickup, check-in, service completion, and return delivery in order.');
+      return;
+    }
     const previousStatus = booking.status;
     booking.status = select.value;
+    booking.adminStatus = select.value;
     booking.statusHistory = [...(booking.statusHistory || []), { status: select.value, previousStatus, changedAt: new Date().toISOString(), changedBy: 'Admin' }];
     if (select.value === 'Cancelled') booking.paymentStatus = booking.paymentMethod === 'wallet' ? 'Refund review required' : 'Cancelled';
     try {
@@ -2202,8 +2226,13 @@ function setupAdminGrooming() {
     const bookings = loadGroomingBookings();
     const booking = bookings.find((item) => item.id === form.dataset.groomingReceiptForm);
     if (!booking) return;
-    booking.receipt = { type: form.elements.receiptType.value, name: file.name, data, uploadedAt: new Date().toISOString() };
+    const previousStatus = booking.receipt?.previousStatus || booking.adminStatus || booking.status || 'New Order';
+    const previousPaymentStatus = booking.receipt?.previousPaymentStatus ?? booking.paymentStatus;
+    booking.receipt = { type: form.elements.receiptType.value, name: file.name, data, uploadedAt: new Date().toISOString(), previousStatus, previousPaymentStatus };
     booking.paymentStatus = `${booking.receipt.type} receipt uploaded`;
+    const taxiTripStarted = Boolean(booking.includeTaxi || booking.taxi?.pickup || booking.taxi?.dropoff)
+      && !['Scheduled', 'Assigned'].includes(booking.taxiProgress?.status || 'Scheduled');
+    if (!taxiTripStarted && !/checked in|complete|cancel/i.test(previousStatus)) booking.adminStatus = 'Received Order';
     try {
       await updateCloudGroomingBooking(booking);
       localStorage.setItem(groomingBookingsKey, JSON.stringify(bookings));
@@ -2526,7 +2555,12 @@ function wireForms() {
   setupAdminHotel();
   setupDaycareBooking();
   setupAdminDaycare();
+  setupAdminAddOns();
+  setupAdminPetTaxi();
+  setupAdminServiceBanners();
+  setupServiceBannerCarousel();
   setupAdminOrders();
+  setupMyOrders();
   setupAdminAccess();
   setupAdminAuditPage();
   setupAdminEnquiries();
@@ -2807,7 +2841,7 @@ function render() {
     } catch { /* Keep the current page usable if local demo profile data is malformed. */ }
   }
   const directorPages = ['admin-customers', 'admin-product-insights'];
-  const managerPages = ['admin-promotions'];
+  const managerPages = ['admin-promotions', 'admin-addons', 'admin-pet-taxi'];
   const serviceAdminPages = ['admin-marketplace', 'admin-grooming', 'admin-hotel', 'admin-daycare'];
   const portalPages = ['admin', 'admin-orders', 'admin-access', 'admin-enquiries', 'admin-audit', ...managerPages, ...serviceAdminPages, ...directorPages];
   const driverPages = ['driver'];
@@ -2906,6 +2940,8 @@ function render() {
     'admin-grooming': () => adminGroomingPage({ settingsOnly: routeParams.get('manage') === '1' }),
     'admin-hotel': () => adminHotelPage({ settingsOnly: routeParams.get('manage') === '1' }),
     'admin-daycare': () => adminDaycarePage({ settingsOnly: routeParams.get('manage') === '1' }),
+    'admin-addons': adminAddOnsPage,
+    'admin-pet-taxi': adminPetTaxiPage,
     'admin-enquiries': adminEnquiriesPage,
     'admin-customers': () => adminCustomersPage(routeParams),
     'admin-access': adminAccessPage,
@@ -2944,6 +2980,8 @@ function render() {
     'admin-grooming': 'Grooming — Furgo Admin',
     'admin-hotel': 'Pet Hotel — Furgo Admin',
     'admin-daycare': 'Pet Daycare — Furgo Admin',
+    'admin-addons': 'Manage Add-on — Furgo Admin',
+    'admin-pet-taxi': 'Manage Pet Taxi — Furgo Admin',
     'admin-enquiries': 'Customer Enquiries — Furgo Admin',
     'admin-customers': 'Customer Profiles — Furgo Admin',
     'admin-access': 'Admin Access — Furgo',
@@ -3014,7 +3052,7 @@ document.addEventListener('click', (event) => {
 
 // Refresh customer and admin screens when a related order changes in another tab.
 window.addEventListener('storage', (event) => {
-  if (/furgo-demo-(grooming-bookings|hotel-bookings|hotel-settings|pet-hotel-bookings|daycare-bookings|daycare-settings|pet-daycare-bookings|daycare-orders|check-in-tokens|driver-locations|customer-records|help-center-details|support-requests|marketplace-orders|marketplace-products|marketplace-offers|promotions|marketplace-cart|marketplace-favorites|addresses|payment-methods|credit-balance|credit-transactions|daycare-passes)/.test(event.key || '')) render();
+  if (/furgo-demo-(grooming-bookings|hotel-bookings|hotel-settings|pet-hotel-bookings|daycare-bookings|daycare-settings|pet-daycare-bookings|daycare-orders|check-in-tokens|driver-locations|customer-records|help-center-details|support-requests|marketplace-orders|marketplace-products|marketplace-offers|promotions|service-banners|marketplace-cart|marketplace-favorites|addresses|payment-methods|credit-balance|credit-transactions|daycare-passes)/.test(event.key || '')) render();
 });
 
 void initializeSupabaseSession();

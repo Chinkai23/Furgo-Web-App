@@ -65,7 +65,7 @@ export function homePage() {
     ? promotions.map((promotion) => {
       const destination = normalizePromotionDestination(promotion.destination) || '#home';
       const external = destination.startsWith('https://');
-      return `<a class="promo-banner" href="${escapeHTML(destination)}" ${external ? 'target="_blank" rel="noopener noreferrer"' : ''} aria-label="Open promotion: ${escapeHTML(promotion.title)}"><img src="${escapeHTML(promotion.image)}" alt="${escapeHTML(promotion.title)}" loading="lazy" /></a>`;
+      return `<a class="promo-banner" href="${escapeHTML(destination)}" ${external ? 'target="_blank" rel="noopener noreferrer"' : ''} aria-label="Open promotion: ${escapeHTML(promotion.title)}"><picture>${promotion.mobileImage ? `<source media="(max-width: 640px)" srcset="${escapeHTML(promotion.mobileImage)}" />` : ''}<img src="${escapeHTML(promotion.image)}" alt="${escapeHTML(promotion.title)}" loading="lazy" /></picture></a>`;
     }).join('')
     : '<p class="promo-empty">Promotions will appear here.</p>';
   return `<main class="mobile-home">

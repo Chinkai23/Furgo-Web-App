@@ -36,12 +36,13 @@ export function adminPromotionsPage() {
     <header class="admin-promotions-heading"><a href="#admin" aria-label="Back to Admin Portal">‹</a><div><span>Admin tools</span><h1>Home Promotions</h1></div></header>
     <section class="admin-promotions-panel">
       <h2>Promotion Banners <span data-promotion-count>${promotions.length} / ${maximumPromotions}</span></h2>
-      <p class="admin-promo-guidance">Upload a banner image. It will be center-cropped and saved at the standard size of 1200 × 600 px (2:1). Add a destination page or secure URL. A maximum of eight promotions can be active.</p>
+      <p class="admin-promo-guidance">For a sharp mobile display, use 1200 × 600 px for the website image and 900 × 450 px for an optional mobile image. Both are center-cropped to a 2:1 ratio. PNG, JPG, or WebP only; each file can be up to 2 MB. Images are resized and compressed before saving. A maximum of eight promotions can be active.</p>
       <form class="admin-promo-form" data-admin-promo-form>
         <label>Promotion title<input name="title" required maxlength="80" placeholder="e.g. 20% off grooming" /></label>
         <label>Destination page or URL<input name="destination" required placeholder="e.g. #profile or https://example.com" /></label>
-        <label class="admin-promo-file">Banner image <span>1200 × 600 px output</span><input name="banner" type="file" accept="image/*" required data-promo-banner /></label>
-        <img class="admin-promo-preview" data-promo-preview alt="Promotion banner preview" hidden />
+        <label class="admin-promo-file">Website banner <span>Recommended 1200 × 600 px · max 2 MB</span><input name="banner" type="file" accept="image/png,image/jpeg,image/webp" required data-promo-banner /></label>
+        <label class="admin-promo-file">Mobile banner (optional) <span>Recommended 900 × 450 px · max 2 MB</span><input name="mobileBanner" type="file" accept="image/png,image/jpeg,image/webp" data-promo-mobile-banner /></label>
+        <div class="admin-promo-previews"><img class="admin-promo-preview" data-promo-preview alt="Website promotion banner preview" hidden /><img class="admin-promo-preview" data-promo-mobile-preview alt="Mobile promotion banner preview" hidden /></div>
         <div class="form-feedback" data-admin-promo-feedback role="status" aria-live="polite"></div>
         <button class="button button-primary" type="submit" data-add-promotion ${isFull ? 'disabled' : ''}>${isFull ? 'Promotion limit reached' : 'Add Promotion'}</button>
       </form>

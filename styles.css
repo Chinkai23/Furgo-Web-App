@@ -479,6 +479,7 @@ h1, h2, h3, p { margin-top: 0; }
 .promo-track::-webkit-scrollbar { display: none; }
 .promo-banner { width: min(89%, 610px); min-width: min(89%, 610px); aspect-ratio: 2 / 1; flex: 0 0 min(89%, 610px); display: block; overflow: hidden; border: 1px solid #f6d5ba; border-radius: 21px; background: #fff1e5; box-shadow: 0 7px 13px #8d4e2718; scroll-snap-align: start; }
 .promo-banner img { width: 100%; height: 100%; display: block; object-fit: cover; }
+.promo-banner picture { display: block; width: 100%; height: 100%; }
 .promo-empty { width: min(100%, 610px); margin: 0; padding: 24px; border-radius: 18px; color: var(--muted); background: #fff5eb; text-align: center; font-size: 13px; }
 .promo-card { width: 89%; min-width: 89%; min-height: 164px; flex: 0 0 89%; display: flex; justify-content: space-between; overflow: hidden; position: relative; border: 1px solid #f6d5ba; border-radius: 21px; background: linear-gradient(110deg, #ff7900 0%, #ff9c37 48%, #ffead7 100%); box-shadow: 0 7px 13px #8d4e2718; scroll-snap-align: start; }
 .referral-card { background: linear-gradient(115deg, #fff1e5 0%, #ffdfc3 100%); }.referral-card .promo-copy { color: var(--ink); }.referral-card .promo-label { color: white; background: var(--orange); }.referral-card .promo-art-placeholder { color: #be5a16; border-color: #d5834c88; background: #fff6; }
@@ -773,6 +774,8 @@ h1, h2, h3, p { margin-top: 0; }
 .admin-promo-file span { color: var(--muted); font-size: 11px; font-weight: 500; }
 .admin-promo-file input { max-width: 60%; font-size: 12px; }
 .admin-promo-preview { width: min(100%, 480px); aspect-ratio: 2 / 1; object-fit: cover; border-radius: 14px; background: #fff1e5; }
+.admin-promo-previews { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.admin-promo-previews .admin-promo-preview { width: 100%; }
 .admin-promo-form .button { min-height: 48px; }
 .admin-promo-form .button:disabled { opacity: .55; cursor: not-allowed; }
 .admin-promo-list { display: grid; gap: 10px; margin: 24px 0 0; padding: 0; list-style: none; }
@@ -890,7 +893,24 @@ h1, h2, h3, p { margin-top: 0; }
 .admin-manage-service-heading p { margin: 0; color: #827b77; font-size: 12px; }
 .admin-manage-service-grid { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 10px; }
 .admin-manage-service-grid .button { min-height: 48px; }
+.admin-manage-service-grid .button { display: flex; align-items: center; justify-content: center; text-align: center; }
 @media (max-width: 700px) { .admin-manage-service-grid { grid-template-columns: 1fr; } }
+.admin-addon-intro { margin: -7px 0 16px; color: #827b77; font-size: 13px; line-height: 1.55; }
+.admin-addons-page form { display: grid; gap: 15px; }
+.admin-addon-catalog { margin-top: 0; }
+.admin-addon-list { display: grid; gap: 10px; }
+.admin-addon-item { display: grid; grid-template-columns: minmax(0,1fr) 150px minmax(0,1.4fr) auto auto; gap: 10px; align-items: end; padding: 12px; border: 1px solid #eee4dd; border-radius: 13px; background: #fffdfa; }
+.admin-addon-item > label, .admin-addon-new-grid > label { display: grid; gap: 6px; color: #403a37; font-size: 11px; font-weight: 700; }
+.admin-addon-item input:not([type="checkbox"]), .admin-addon-new-grid input { width: 100%; min-width: 0; min-height: 43px; padding: 0 12px; border: 1px solid #e8dfd8; border-radius: 10px; background: white; color: #29272c; font: inherit; }
+.admin-addon-item .admin-addon-active { display: flex; align-items: center; gap: 7px; white-space: nowrap; }
+.admin-addon-active input { width: 16px; min-height: 0; accent-color: #ff7800; }
+.admin-addon-item .button { min-height: 42px; padding: 0 13px; }
+.admin-addon-new { margin-top: 14px; padding: 14px; border-radius: 13px; background: #fff7ef; }
+.admin-addon-new h3 { margin: 0 0 10px; font-size: 14px; }
+.admin-addon-new-grid { display: grid; grid-template-columns: minmax(0,1fr) 150px minmax(0,1.4fr); gap: 10px; }
+.admin-addon-empty { margin: 0; padding: 12px; color: #827b77; font-size: 12px; }
+.admin-addons-page [data-admin-addons-feedback] { color: #527851; font-size: 12px; }
+@media (max-width: 800px) { .admin-addon-item { grid-template-columns: minmax(0,1fr) minmax(100px,.55fr); } .admin-addon-item .admin-addon-description { grid-column: 1 / -1; } .admin-addon-item .admin-addon-active { min-height: 42px; } .admin-addon-new-grid { grid-template-columns: minmax(0,1fr) minmax(100px,.55fr); } .admin-addon-new-grid .admin-addon-description { grid-column: 1 / -1; } }
 .admin-enquiry-list { display: grid; gap: 12px; }
 .admin-enquiry-card { padding: 18px; border: 1px solid #f1dfd0; border-radius: 16px; background: #fff; }
 .admin-enquiry-card header { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; margin-bottom: 12px; }
@@ -1055,6 +1075,9 @@ h1, h2, h3, p { margin-top: 0; }
 .grooming-section-heading > span { display: grid; flex: 0 0 30px; width: 30px; height: 30px; place-items: center; border-radius: 50%; background: #fff0e1; color: #e96800; font-size: 12px; font-weight: 700; }
 .grooming-section-heading h2 { margin: 1px 0 4px; font-size: 18px; }
 .grooming-section-heading p, .grooming-prototype-note { margin: 0; color: #817d7c; font-size: 12px; line-height: 1.5; }
+.grooming-section-heading > span:has(.pet-taxi-service-icon) { flex: 0 0 44px; width: 44px; height: 44px; border-radius: 0; background: transparent; }
+.pet-taxi-service-icon { display: block; width: 44px; height: 44px; object-fit: contain; }
+.pet-taxi-service-section .hotel-addon-toggle small, .hotel-pet-taxi-section .hotel-addon-toggle small, .daycare-pet-taxi-section .hotel-addon-toggle small { display: block; margin-top: 4px; color: #827b77; font-size: 11px; }
 .grooming-field { display: grid; gap: 7px; color: #353238; font-size: 13px; font-weight: 700; }
 .grooming-field input, .grooming-field select, .grooming-addon-fields input, .grooming-addon-fields select, .admin-grooming-page input:not([type="checkbox"]), .admin-grooming-page select { width: 100%; min-height: 48px; padding: 0 14px; border: 1px solid #e8dfd8; border-radius: 12px; background: #fff; color: #29272c; font: inherit; }
 .grooming-pet-snapshot { display: grid; gap: 12px; margin-top: 12px; padding: 14px; border: 1px solid #f5ddcb; border-radius: 14px; background: #fff7f0; }
@@ -1260,6 +1283,7 @@ h1, h2, h3, p { margin-top: 0; }
 .my-order-card-bottom small { color: #89827d; font-size: 10px; overflow-wrap: anywhere; }
 .my-order-card-bottom strong { flex: 0 0 auto; color: #28242a; font-size: 13px; }
 .my-order-tracking { width: fit-content; color: #d85f00; font-size: 11px; font-weight: 700; text-decoration: none; }
+.my-order-cancel { justify-self: start; min-height: 34px; padding: 0 12px; border-color: #f0d6d2; color: #a93c35; background: #fff; font-size: 11px; }
 .my-orders-empty-category { margin: 0; padding: 11px 13px; border-radius: 12px; color: #827a75; background: #fff; font-size: 11px; }
 .my-orders-empty { text-align: center; }
 .my-orders-empty h2 { margin: 3px 0 6px; font: 700 17px 'Avenir Next'; }
@@ -1590,15 +1614,18 @@ select::-ms-expand { display: none; }
 .admin-portal-stat-link strong { color: var(--orange-dark); font: 700 30px/1 'Avenir Next'; }
 .admin-orders-list { display: grid; gap: 10px; }
 .admin-orders-card { overflow: hidden; border: 1px solid #eee3db; border-radius: 14px; background: #fffdfa; }
-.admin-orders-card > summary { display: grid; grid-template-columns: minmax(0, 1fr) auto 34px; align-items: center; gap: 12px; min-height: 66px; padding: 12px 14px; cursor: pointer; list-style: none; }
+.admin-orders-card > summary { display: grid; grid-template-columns: minmax(0, 1fr) minmax(110px, auto) 34px; align-items: center; gap: 12px; min-height: 66px; padding: 12px 14px; cursor: pointer; list-style: none; }
 .admin-orders-card > summary::-webkit-details-marker { display: none; }
 .admin-orders-reference { min-width: 0; display: grid; gap: 4px; }
 .admin-orders-reference strong { overflow-wrap: anywhere; font-size: 13px; }
 .admin-orders-reference small { color: #827a75; font-size: 10px; line-height: 1.4; }
-.admin-orders-status-pill { padding: 6px 9px; border-radius: 99px; color: #9a4d0c; background: #fff0dc; font-size: 10px; font-weight: 700; white-space: nowrap; }
-.admin-orders-receipt { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 50%; font-size: 15px; font-weight: 700; }
-.admin-orders-receipt.has-receipt { color: #fff; background: #31945a; }
-.admin-orders-receipt.missing-receipt { color: #fff; background: #d84a45; }
+.admin-orders-status-pill { justify-self: center; padding: 6px 9px; border-radius: 99px; color: #9a4d0c; background: #fff0dc; font-size: 10px; font-weight: 700; white-space: nowrap; }
+.admin-orders-receipt { display: grid; place-items: center; justify-self: center; width: 28px; height: 28px; padding: 0; border: 0; border-radius: 50%; cursor: pointer; }
+.admin-orders-receipt svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-width: 2.5; stroke-linecap: round; stroke-linejoin: round; }
+.admin-orders-receipt.has-receipt { color: #31945a; background: transparent; cursor: default; }
+.admin-orders-receipt:disabled { opacity: 1; }
+.admin-orders-receipt.missing-receipt { color: #d84a45; background: transparent; }
+.admin-orders-receipt.missing-receipt:hover { color: #bd3935; background: #fff3f0; }
 .admin-orders-detail { display: grid; gap: 14px; padding: 14px; border-top: 1px solid #eee5df; background: #fff; }
 .admin-orders-detail dl { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; margin: 0; }
 .admin-orders-detail dl > div { min-width: 0; padding: 9px; border-radius: 10px; background: #fff8f2; }
@@ -1611,22 +1638,29 @@ select::-ms-expand { display: none; }
 .admin-orders-actions select, .admin-orders-actions input { width: 100%; min-height: 40px; padding: 8px 10px; border: 1px solid #e8dfd8; border-radius: 9px; background: #fff; color: #29272c; font: inherit; }
 .admin-orders-actions .button { min-height: 36px; padding: 0 11px; font-size: 10px; }
 .admin-order-status-control { display: grid; gap: 8px; color: #625953; font-size: 10px; font-weight: 700; }
+.admin-order-current-status { justify-self: start; padding: 7px 10px; border-radius: 99px; color: #9a4d0c; background: #fff0dc; font-size: 11px; }
 .admin-order-status-buttons { display: flex; flex-wrap: wrap; gap: 6px; }
 .admin-order-status-buttons .button-light { color: #5f5751; background: #fff; border: 1px solid #e8dfd8; }
 .admin-order-status-buttons .button-primary.is-active { color: #fff; background: #ff7900; border-color: #ff7900; }
 .admin-order-status-buttons button:disabled { cursor: default; opacity: 1; }
 .admin-order-status-control > small { color: #8b817a; font-size: 10px; font-weight: 400; line-height: 1.5; }
+.admin-order-taxi-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 9px; padding: 11px 12px; border: 1px solid #f2dfcf; border-radius: 12px; background: #fff8f2; }
+.admin-order-taxi-actions > strong { margin-right: auto; color: #625953; font-size: 11px; }
+.admin-order-taxi-actions .button { min-height: 36px; padding: 0 14px; font-size: 11px; }
+.admin-order-taxi-actions > small { flex: 1 0 100%; color: #8b817a; font-size: 10px; line-height: 1.4; }
+.admin-order-taxi-actions > small:empty { display: none; }
 .admin-orders-upload { min-width: 0; }
+.admin-orders-delete-receipt { margin-left: 10px; padding: 0; border: 0; color: #b53d37; background: transparent; font: inherit; font-weight: 700; cursor: pointer; }
 .admin-executive-locked { min-width: 0; margin: 0; padding: 0; border: 0; opacity: .62; }
 .admin-executive-locked :disabled { cursor: not-allowed; }
 @media (max-width: 600px) {
-  .admin-orders-card > summary { grid-template-columns: minmax(0, 1fr) auto 28px; gap: 7px; padding: 11px; }
+  .admin-orders-card > summary { grid-template-columns: minmax(0, 1fr) minmax(104px, auto) 28px; gap: 7px; padding: 11px; }
   .admin-orders-detail dl { grid-template-columns: 1fr; }
   .admin-orders-actions { grid-template-columns: 1fr; }
 }
-.admin-orders-columns { display: grid; grid-template-columns: minmax(0, 1fr) auto 34px; gap: 12px; padding: 0 14px 7px; color: #8b827d; font-size: 9px; font-weight: 700; text-transform: uppercase; }
+.admin-orders-columns { display: grid; grid-template-columns: minmax(0, 1fr) minmax(110px, auto) 34px; gap: 12px; padding: 0 14px 7px; color: #8b827d; font-size: 9px; font-weight: 700; text-transform: uppercase; }
 .admin-orders-columns span:nth-child(2), .admin-orders-columns span:nth-child(3) { text-align: center; }
-@media (max-width: 600px) { .admin-orders-columns { grid-template-columns: minmax(0, 1fr) auto 28px; gap: 7px; padding-right: 11px; padding-left: 11px; } }
+@media (max-width: 600px) { .admin-orders-columns { grid-template-columns: minmax(0, 1fr) minmax(104px, auto) 28px; gap: 7px; padding-right: 11px; padding-left: 11px; } }
 
 /* Customer Check In page: active bookings, their pet details, and a stage-specific QR code. */
 .check-in-page { min-height: 100vh; padding: 24px 18px 105px; color: var(--ink); background: #fff8ef; }
@@ -1910,6 +1944,11 @@ select::-ms-expand { display: none; }
 .admin-orders-driver-location strong { font-size: 11px; }
 .admin-orders-driver-location a { color: var(--orange-dark); font-size: 11px; font-weight: 700; }
 .admin-orders-driver-location small { color: var(--muted); font-size: 10px; }
+.live-driver-location { display: grid; width: 100%; min-width: 0; gap: 7px; margin-top: 7px; }
+.live-driver-location-map { display: block; width: 100%; min-height: 190px; aspect-ratio: 16 / 10; border: 0; border-radius: 12px; background: #f4eee8; }
+.live-driver-location-meta { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 12px; color: var(--muted); font-size: 10px; }
+.live-driver-location-meta a { color: var(--orange-dark); font-weight: 700; }
+.live-driver-location-waiting { margin: 0; padding: 12px; border-radius: 10px; color: var(--muted); background: #fff; font-size: 11px; }
 @media (max-width: 560px) {
   .driver-portal-page { padding-right: 14px; padding-left: 14px; }
   .driver-portal-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -2185,4 +2224,68 @@ select::-ms-expand { display: none; }
   .admin-search-tables { grid-template-columns: 1fr; }
   .admin-search-clicked { overflow-x: auto; }
   .admin-search-clicked .admin-search-table { min-width: 360px; }
+}
+
+/* Customer Pet Taxi saved-address picker and highlighted payment panels. */
+.pet-taxi-address-picker { display: grid; gap: 11px; }
+.pet-taxi-address-editor { display: grid; gap: 11px; padding: 13px; border: 1px solid #f2dfce; border-radius: 14px; background: #fffaf5; }
+.pet-taxi-address-editor[hidden] { display: none; }
+.pet-taxi-address-note, .pet-taxi-address-saved { margin: 0; color: #746d69; font-size: 11px; line-height: 1.5; }
+.pet-taxi-address-saved:not(:empty) { color: #247448; font-weight: 700; }
+.grooming-section.grooming-payment-section { border-color: #f47708; background: #f47708; color: #fff; }
+.grooming-payment-section .grooming-section-heading h2,
+.grooming-payment-section .grooming-section-heading p,
+.grooming-payment-section .grooming-prototype-note,
+.grooming-payment-section .grooming-voucher-feedback,
+.grooming-payment-section .hotel-voucher-feedback { color: #fff; }
+.grooming-payment-section .grooming-field { color: #fff; }
+.grooming-payment-section .grooming-section-heading > span { background: #ff9b3e; color: #fff; }
+.grooming-payment-section .grooming-booking-summary,
+.grooming-payment-section .hotel-booking-summary { color: #302d2a; }
+.grooming-payment-section .button-primary { border-color: #fff; background: #fff; color: #e96800; }
+.grooming-payment-section .grooming-transfer-slip,
+.grooming-payment-section .hotel-transfer-upload,
+.grooming-payment-section .daycare-transfer { color: #fff; }
+.grooming-payment-section .grooming-payment-options label,
+.grooming-payment-section .grooming-payment-options label strong,
+.grooming-payment-section .hotel-payment-options > label,
+.grooming-payment-section .hotel-payment-options > label strong { color: #29272c; }
+.grooming-payment-section .grooming-payment-options label small,
+.grooming-payment-section .hotel-payment-options > label small { color: #746d69; }
+.grooming-section [data-grooming-taxi-fields]:not([hidden]) { margin: 15px 0 13px; }
+.hotel-taxi-fields:not([hidden]), .daycare-taxi-fields:not([hidden]) { margin-top: 15px; }
+
+/* Responsive promotion banners align with the booking form on all service pages. */
+.service-promo-banners { position: relative; width: min(100%, 760px); height: clamp(112px, 19vw, 168px); margin: 0 auto 15px; overflow: hidden; border-radius: 16px; background: #fff2e6; }
+.service-promo-banner-track { display: flex; width: 100%; height: 100%; overflow-x: auto; scroll-snap-type: x mandatory; scrollbar-width: none; }
+.service-promo-banner-track::-webkit-scrollbar { display: none; }
+.service-promo-banner { position: relative; flex: 0 0 100%; width: 100%; height: 100%; scroll-snap-align: start; }
+.service-promo-banner picture, .service-promo-banner img { display: block; width: 100%; height: 100%; }
+.service-promo-banner img { object-fit: cover; }
+.service-promo-banner-caption { position: absolute; right: 0; bottom: 0; left: 0; padding: 20px 15px 13px; color: #fff; background: linear-gradient(transparent, rgb(0 0 0 / 58%)); font-weight: 700; }
+.service-promo-banner-arrow { position: absolute; top: 50%; z-index: 1; display: grid; width: 34px; height: 34px; place-items: center; transform: translateY(-50%); border: 0; border-radius: 50%; color: #29272c; background: rgb(255 255 255 / 88%); font-size: 25px; cursor: pointer; }
+.service-promo-banner-arrow.is-previous { left: 10px; }
+.service-promo-banner-arrow.is-next { right: 10px; }
+.service-promo-banner-dots { position: absolute; right: 0; bottom: 8px; left: 0; display: flex; justify-content: center; gap: 6px; }
+.service-promo-banner-dots button { width: 7px; height: 7px; padding: 0; border: 0; border-radius: 50%; background: rgb(255 255 255 / 62%); }
+.service-promo-banner-dots button[aria-current="true"] { background: #f47708; box-shadow: 0 0 0 2px #fff; }
+.admin-service-banner-intro { max-width: 760px; margin: 0 auto 16px; color: var(--muted); font-size: 12px; line-height: 1.55; }
+.admin-service-banner-size-guide { margin: 0 0 12px; padding: 10px 12px; border-radius: 10px; color: #625953; background: #fff5ec; font-size: 11px; line-height: 1.5; }
+.admin-service-banner-panel { max-width: 900px; margin-right: auto; margin-left: auto; }
+.admin-service-banner-list { display: grid; gap: 12px; }
+.admin-service-banner-item { min-width: 0; padding: 14px; border: 1px solid #f1dfd0; border-radius: 14px; background: #fffaf6; }
+.admin-service-banner-item-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 10px; }
+.admin-service-banner-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.admin-service-banner-fields label { display: grid; gap: 5px; min-width: 0; color: #403b39; font-size: 11px; font-weight: 700; }
+.admin-service-banner-fields input { width: 100%; min-width: 0; min-height: 40px; padding: 8px 10px; border: 1px solid #e8dfd8; border-radius: 9px; background: #fff; color: #29272c; font: inherit; font-weight: 500; }
+.admin-service-banner-fields small { color: #817a75; font-size: 9px; font-weight: 500; line-height: 1.45; }
+.admin-service-banner-preview { grid-column: 1 / -1; width: 100%; max-height: 130px; border-radius: 10px; object-fit: cover; }
+.admin-service-banner-actions { display: flex; flex-wrap: wrap; gap: 9px; margin-top: 12px; }
+.admin-service-banner-actions .button { min-height: 40px; }
+@media (max-width: 640px) {
+  .service-promo-banners { width: min(100%, 760px); height: clamp(96px, 31vw, 138px); margin-bottom: 13px; border-radius: 13px; }
+  .service-promo-banner-arrow { width: 30px; height: 30px; }
+  .admin-service-banner-fields { grid-template-columns: minmax(0, 1fr); }
+  .admin-service-banner-preview { grid-column: 1; }
+  .admin-promo-previews { grid-template-columns: minmax(0, 1fr); }
 }
