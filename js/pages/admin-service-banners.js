@@ -1,5 +1,6 @@
 import { escapeHTML } from '../shared.js';
 import { recordAdminAction } from '../admin-audit.js';
+import { saveSharedAppData } from '../app-data-sync.js';
 import { supabase } from '../supabase.js';
 import { bannerServices, loadServiceBanners, serviceBannerBucket, serviceBannersKey } from './service-banners.js';
 
@@ -11,7 +12,7 @@ function bannerRow(service, banner = {}) {
     <div class="admin-service-banner-item-heading"><strong>${exists ? 'Service Banner' : 'New Service Banner'}</strong><button class="button button-light" type="button" data-remove-service-banner>${exists ? 'Remove' : 'Discard'}</button></div>
     <div class="admin-service-banner-fields"><label>Banner title (for accessibility)<input name="bannerTitle" value="${escapeHTML(banner.title || '')}" maxlength="100" placeholder="e.g. October Grooming Offer" /></label><label>Short caption (optional)<input name="bannerCaption" value="${escapeHTML(banner.caption || '')}" maxlength="120" placeholder="Shown over the banner" /></label>
       <label>Website image (optional)<input name="bannerDesktop" type="file" accept="image/png,image/jpeg,image/webp" /><small>Recommended 1520 × 336 px · PNG, JPG, or WebP · max 2 MB${banner.desktopUrl ? ` · Current: ${escapeHTML(banner.desktopUrl.split('/').pop())}` : ''}</small></label>
-      <label>Mobile-first image<input name="bannerMobile" type="file" accept="image/png,image/jpeg,image/webp" ${exists ? '' : 'required'} /><small>Recommended 750 × 270 px · PNG, JPG, or WebP · max 2 MB. This image also fills in for the website image when one is not uploaded.${banner.mobileUrl ? ` Current: ${escapeHTML(banner.mobileUrl.split('/').pop())}` : ''}</small></label>
+      <label>Mobile-first image<input name="bannerMobile" type="file" accept="image/png,image/jpeg,image/webp" /><small>Recommended 750 × 270 px · PNG, JPG, or WebP · max 2 MB. This image also fills in for the website image when one is not uploaded.${banner.mobileUrl ? ` Current: ${escapeHTML(banner.mobileUrl.split('/').pop())}` : ''}</small></label>
       ${banner.desktopUrl ? `<img class="admin-service-banner-preview" src="${escapeHTML(banner.desktopUrl)}" alt="Current ${escapeHTML(service)} banner" />` : ''}
     </div>
   </article>`;
@@ -76,13 +77,22 @@ export function setupAdminServiceBanners() {
     form.addEventListener('submit', async (event) => {
       event.preventDefault();
       feedback.textContent = '';
+      const saveButton = form.querySelector('button[type="submit"]');
+      saveButton.disabled = true;
+      saveButton.textContent = 'Saving…';
       const serviceId = form.dataset.serviceBannerForm;
       const priorConfig = loadServiceBanners();
       const priorBanners = priorConfig[serviceId] || [];
       const removedPaths = [];
       const banners = [];
+      const uploadedPaths = [];
       const rows = [...list.querySelectorAll('[data-service-banner-item]')];
-      if (rows.length > 5) { feedback.textContent = 'A service can have up to five banners.'; return; }
+      if (rows.length > 5) {
+        feedback.textContent = 'A service can have up to five banners.';
+        saveButton.disabled = false;
+        saveButton.textContent = `Save ${bannerServices.find((item) => item.id === serviceId)?.label || 'Service'} Banners`;
+        return;
+      }
       try {
         for (const row of rows) {
           const desktopFile = row.querySelector('[name="bannerDesktop"]').files?.[0];
@@ -92,11 +102,15 @@ export function setupAdminServiceBanners() {
           const id = row.dataset.bannerId || `banner-${crypto.randomUUID()}`;
           const desktop = await uploadBannerImage(serviceId, id, 'desktop', desktopFile);
           const mobile = await uploadBannerImage(serviceId, id, 'mobile', mobileFile);
+          if (desktop?.path) uploadedPaths.push(desktop.path);
+          if (mobile?.path) uploadedPaths.push(mobile.path);
           const desktopUrl = desktop?.url || row.dataset.desktopUrl || mobile?.url;
           const desktopPath = desktop?.path || row.dataset.desktopPath || mobile?.path;
           if (!desktopUrl) {
-            if (!title && !desktopFile && !mobileFile) continue;
-            throw new Error('Choose a mobile-first image for each banner.');
+            if (!title && !desktopFile && !mobileFile) {
+              throw new Error('Add an image to this banner or remove the empty banner row before saving.');
+            }
+            throw new Error('Choose a mobile-first image or website image for each banner before saving.');
           }
           banners.push({ id, title, caption, desktopUrl, desktopPath, mobileUrl: mobile?.url || row.dataset.mobileUrl || desktopUrl, mobilePath: mobile?.path || row.dataset.mobilePath || desktopPath });
           if (desktop && row.dataset.desktopPath) removedPaths.push(row.dataset.desktopPath);
@@ -106,7 +120,7 @@ export function setupAdminServiceBanners() {
         for (const old of priorBanners) {
           if (!retained.has(old.id)) { if (old.desktopPath) removedPaths.push(old.desktopPath); if (old.mobilePath) removedPaths.push(old.mobilePath); }
         }
-        localStorage.setItem(serviceBannersKey, JSON.stringify({ ...priorConfig, [serviceId]: banners }));
+        await saveSharedAppData(serviceBannersKey, { ...priorConfig, [serviceId]: banners });
         if (removedPaths.length) {
           const { error } = await supabase.storage.from(serviceBannerBucket).remove([...new Set(removedPaths)]);
           if (error) console.warn('Old service banner images could not be removed:', error);
@@ -115,7 +129,20 @@ export function setupAdminServiceBanners() {
         feedback.textContent = `${banners.length} ${bannerServices.find((item) => item.id === serviceId)?.label || 'service'} banner${banners.length === 1 ? '' : 's'} saved.`;
         window.setTimeout(() => window.location.reload(), 500);
       } catch (error) {
-        feedback.textContent = error.message || 'The banners could not be saved. Check the service-banners storage setup and try again.';
+        if (uploadedPaths.length) {
+          try {
+            const { error: cleanupError } = await supabase.storage.from(serviceBannerBucket).remove(uploadedPaths);
+            if (cleanupError) console.warn('New service banner uploads could not be rolled back:', cleanupError);
+          } catch (cleanupError) {
+            console.warn('New service banner uploads could not be rolled back:', cleanupError);
+          }
+        }
+        const message = error.message || 'The banners could not be saved.';
+        feedback.textContent = /bucket|storage|row-level security|permission|policy/i.test(message)
+          ? `${message} Confirm that Supabase migration 0025 is applied and that your account is Manager or Director level.`
+          : message;
+        saveButton.disabled = false;
+        saveButton.textContent = `Save ${bannerServices.find((item) => item.id === serviceId)?.label || 'Service'} Banners`;
       }
     });
   });

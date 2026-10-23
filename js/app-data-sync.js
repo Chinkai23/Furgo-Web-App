@@ -547,3 +547,20 @@ export async function loadCloudAppData(userId, role) {
   realtimeChannel.subscribe();
   return { recordsLoaded: rows.length };
 }
+
+// Explicit Save actions need to await the shared Supabase write. The generic
+// localStorage mirror is intentionally fire-and-forget for prototype settings.
+export async function saveSharedAppData(key, value) {
+  if (!sharedKeys.has(key)) throw new Error('This is not a shared setting.');
+  if (!activeUserId) throw new Error('Please sign in again before saving.');
+  if (!canManageSharedKey(activeRole, key)) throw new Error('Manager or Director access is required to save these settings.');
+  await writeRemote(key, value);
+  if (!originalSetItem) originalSetItem = Storage.prototype.setItem;
+  applyingRemoteData = true;
+  try {
+    originalSetItem.call(localStorage, key, JSON.stringify(value));
+  } finally {
+    applyingRemoteData = false;
+  }
+  window.dispatchEvent(new StorageEvent('storage', { key }));
+}
