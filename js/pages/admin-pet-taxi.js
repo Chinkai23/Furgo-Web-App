@@ -7,7 +7,7 @@ const settings = () => loadPetTaxiSettings();
 
 export function adminPetTaxiPage() {
   const role = JSON.parse(sessionStorage.getItem('furgo-demo-user-profile') || '{}').role;
-  if (!['manager', 'director'].includes(role)) return '<main class="admin-portal-page"><h1>Manager or Director access is required to manage Pet Taxi.</h1><a class="button button-primary" href="#admin">Back to Admin Home</a></main>';
+  if (!['executive', 'staff', 'manager', 'director'].includes(role)) return '<main class="admin-portal-page"><h1>Admin access is required to manage Pet Taxi.</h1><a class="button button-primary" href="#admin">Back to Admin Home</a></main>';
   const taxi = settings();
   return `<main class="admin-portal-page admin-pet-taxi-settings-page">
     <header class="admin-portal-header"><a class="admin-portal-brand" href="#admin"><img src="Image/Icon/Logo.png" alt="Furgo" /><span>Admin Portal</span></a><div class="admin-portal-account"><a href="#admin">Dashboard</a><button type="button" data-logout>Log out</button></div></header>

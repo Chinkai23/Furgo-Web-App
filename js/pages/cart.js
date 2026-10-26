@@ -1,5 +1,6 @@
 import { bottomNavigation, escapeHTML } from '../shared.js';
 import { loadMarketplaceCart, loadMarketplaceOfferSettings, loadMarketplaceProducts, marketplaceLine } from './marketplace-data.js';
+import { customerOrderStatus } from '../order-status.js';
 
 // Shopping Cart: multi-item quantity management and free-shipping progress calculation.
 export function marketplaceCartPage() {
@@ -41,8 +42,9 @@ export function marketplaceOrdersPage() {
   const email = String(profile.email || '').toLowerCase();
   const phone = String(profile.phone || '').replace(/\D/g, '');
   const orders = (() => { try { return JSON.parse(localStorage.getItem('furgo-demo-marketplace-orders') || '[]').filter((order) => email ? String(order.customerEmail || '').toLowerCase() === email : phone && String(order.customerPhone || '').replace(/\D/g, '') === phone); } catch { return []; } })();
-  const rows = orders.map((order) => {
-    const progress = order.status === 'Delivered' || order.status === 'Completed' ? 3 : order.status === 'Shipped' ? 2 : order.status === 'Paid / Processing' || order.status === 'Paid' ? 1 : 0;
+  const rows = orders.map((record) => {
+    const order = { ...record, status: customerOrderStatus({ ...record, serviceId: 'marketplace' }) };
+    const progress = order.status === 'Completed' ? 3 : order.status === 'In Progress' ? 2 : order.status === 'New Order' ? 1 : 0;
     const items = order.items.map((item) => `${escapeHTML(item.name)} × ${item.quantity}`).join(', ');
     return `<article class="market-order-card"><div class="market-order-card-heading"><div><span>Order ${escapeHTML(order.reference)}</span><small>${escapeHTML(order.date)}</small></div><b class="market-order-status status-${String(order.status).toLowerCase().replace(/[^a-z]+/g, '-')}">${escapeHTML(order.status)}</b></div><p>${items}</p><div class="market-order-total">Total <strong>MYR ${Number(order.total).toFixed(2)}</strong></div><ol class="market-order-timeline"><li class="${progress >= 0 ? 'complete' : ''}">Order placed</li><li class="${progress >= 1 ? 'complete' : ''}">Processing</li><li class="${progress >= 2 ? 'complete' : ''}">Shipped</li><li class="${progress >= 3 ? 'complete' : ''}">Delivered</li></ol>${order.trackingNumber ? `<p class="market-tracking">${escapeHTML(order.courier || 'Courier')}: <a href="${escapeHTML(order.trackingUrl || '#orders')}" target="_blank" rel="noopener noreferrer">${escapeHTML(order.trackingNumber)}</a></p>` : ''}${order.receipt ? `<a class="market-receipt-link" href="${escapeHTML(order.receipt.data)}" download="${escapeHTML(order.receipt.name)}">Download receipt</a>` : ''}${order.paymentStatus === 'Pending Payment Verification' ? '<p class="market-checkout-note">Your transfer slip is awaiting verification.</p>' : ''}${order.paymentRejectionReason ? `<p class="market-checkout-note">Payment was rejected: ${escapeHTML(order.paymentRejectionReason)}</p>` : ''}</article>`;
   }).join('');

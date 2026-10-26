@@ -25,7 +25,7 @@ function addonRows(catalog) {
 
 export function adminAddOnsPage() {
   const role = JSON.parse(sessionStorage.getItem('furgo-demo-user-profile') || '{}').role;
-  if (!['manager', 'director'].includes(role)) return '<main class="admin-portal-page"><h1>Manager or Director access is required to manage add-ons.</h1><a class="button button-primary" href="#admin">Back to Admin Home</a></main>';
+  if (!['executive', 'staff', 'manager', 'director'].includes(role)) return '<main class="admin-portal-page"><h1>Admin access is required to manage add-ons.</h1><a class="button button-primary" href="#admin">Back to Admin Home</a></main>';
   const sections = catalogs.map((catalog) => `<section class="admin-market-panel admin-addon-catalog" data-addon-catalog="${catalog.key}">
     <div class="admin-market-panel-heading"><div><span>Manage Add-on</span><h2>${catalog.title}</h2></div><p>Edit the customer-facing name, details, price, and availability. Existing orders keep their saved add-on details.</p></div>
     <div class="admin-addon-list">${addonRows(catalog)}</div>

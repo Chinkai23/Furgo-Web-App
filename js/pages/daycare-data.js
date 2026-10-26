@@ -1,4 +1,5 @@
 // Keeps daycare catalog, capacity, pass, and booking records in the local prototype store.
+import { getSharedOutletNames } from './outlet-directory.js';
 export const daycareSettingsKey = 'furgo-demo-daycare-settings';
 export const daycareBookingsKey = 'furgo-demo-daycare-bookings';
 export const daycarePassesKey = 'furgo-demo-daycare-passes';
@@ -45,7 +46,7 @@ export function loadDaycareSettings() {
       voucher: { ...defaultDaycareSettings.voucher, ...(saved.voucher || {}) },
       passes: Array.isArray(saved.passes) ? saved.passes : structuredClone(defaultDaycareSettings.passes),
       addOns: Array.isArray(saved.addOns) ? saved.addOns : structuredClone(defaultDaycareSettings.addOns),
-      outlets: Array.isArray(saved.outlets) && saved.outlets.length ? saved.outlets : [...defaultDaycareSettings.outlets],
+      outlets: getSharedOutletNames([...defaultDaycareSettings.outlets]),
       closedDates: Array.isArray(saved.closedDates) ? saved.closedDates : [],
       taxiRoutes: Array.isArray(saved.taxiRoutes) ? saved.taxiRoutes : [...defaultDaycareSettings.taxiRoutes],
     };

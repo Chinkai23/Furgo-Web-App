@@ -7,8 +7,6 @@ export const defaultPetTaxiSettings = {
   scheduleSlots: ['09:00', '12:00', '15:00'],
   routes: [
     { city: 'Petaling Jaya', outlet: 'Furgo Pet Care - Petaling Jaya', distanceKm: 8 },
-    { city: 'Bangsar', outlet: 'Furgo Pet Care - Bangsar', distanceKm: 6 },
-    { city: 'Kuala Lumpur', outlet: 'Furgo Pet Care - Bangsar', distanceKm: 10 },
     { city: 'Kuala Lumpur', outlet: 'Furgo Pet Care - Petaling Jaya', distanceKm: 16 },
     { city: 'Petaling Jaya', outlet: '*', distanceKm: 8 },
     { city: 'Kuala Lumpur', outlet: '*', distanceKm: 18 },

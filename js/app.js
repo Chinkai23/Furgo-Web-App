@@ -12,7 +12,7 @@ import { paymentMethodPage } from './pages/payment-method.js';
 import { creditPage } from './pages/credit.js';
 import { marketplaceFavoritesPage, marketplacePage, marketplaceProductPage } from './pages/marketplace.js';
 import { marketplaceCartPage, marketplaceCheckoutPage } from './pages/cart.js';
-import { adminMarketplacePage } from './pages/admin-marketplace.js';
+import { adminMarketplaceManagePage, adminMarketplacePage } from './pages/admin-marketplace.js';
 import { loadMarketplaceCart, loadMarketplaceFavorites, loadMarketplaceOfferSettings, loadMarketplaceOrders, loadMarketplaceProducts, marketplaceCartKey, marketplaceFavoritesKey, marketplaceLine, marketplaceOfferSettingsKey, marketplaceOrdersKey, marketplaceProductsKey, safeMarketplaceImage } from './pages/marketplace-data.js';
 import { petProfilePage } from './pages/pet-profile.js';
 import { adminPromotionsPage, loadPromotions, maximumPromotions, normalizePromotionDestination, promotionStorageKey } from './pages/admin-promotions.js';
@@ -42,6 +42,7 @@ import { adminProductServiceInsightsPage, setupAdminProductServiceInsights } fro
 import { recordAdminAction } from './admin-audit.js';
 import { recentSearchesKey, searchPage } from './pages/search.js';
 import { supabase, toMalaysianE164 } from './supabase.js';
+import { refreshSharedOutlets } from './pages/outlet-directory.js';
 import { cacheSyncedRecords, loadCloudAppData } from './app-data-sync.js';
 import { startQRScanner } from './qr-scanner.js';
 
@@ -2160,7 +2161,7 @@ function setupAdminGrooming() {
       });
       const newName = settingsForm.elements.newPackageName.value.trim();
       if (newName) packages.push({ id: `package-${Date.now()}`, name: newName, description: settingsForm.elements.newPackageDescription.value.trim(), small: Number(settingsForm.elements.newPackageSmall.value), medium: Number(settingsForm.elements.newPackageMedium.value), large: Number(settingsForm.elements.newPackageLarge.value), durationMinutes: Number(settingsForm.elements.newPackageDuration.value), active: true });
-      const outlets = settingsForm.elements.outlets.value.split(',').map((value) => value.trim()).filter(Boolean);
+      const outlets = settings.outlets;
       const timeSlots = settingsForm.elements.timeSlots.value.split(',').map((value) => value.trim()).filter(Boolean);
       const availableWeekdays = [...settingsForm.querySelectorAll('[name="availableWeekdays"]:checked')].map((input) => Number(input.value));
       const closedDates = [...new Set(settingsForm.elements.closedDates.value.split(',').map((value) => value.trim()).filter(Boolean))];
@@ -2220,30 +2221,6 @@ function setupAdminGrooming() {
     });
   }
 
-  document.querySelectorAll('[data-save-grooming-status]').forEach((button) => button.addEventListener('click', async () => {
-    const bookings = loadGroomingBookings();
-    const booking = bookings.find((item) => item.id === button.dataset.saveGroomingStatus);
-    const select = document.querySelector(`[data-grooming-status="${button.dataset.saveGroomingStatus}"]`);
-    if (!booking || !select) return;
-    if (booking.includeTaxi) {
-      window.alert('Use Admin Order Management to update Pet Taxi bookings. This keeps pickup, check-in, service completion, and return delivery in order.');
-      return;
-    }
-    const previousStatus = booking.status;
-    booking.status = select.value;
-    booking.adminStatus = select.value;
-    booking.statusHistory = [...(booking.statusHistory || []), { status: select.value, previousStatus, changedAt: new Date().toISOString(), changedBy: 'Admin' }];
-    if (select.value === 'Cancelled') booking.paymentStatus = booking.paymentMethod === 'wallet' ? 'Refund review required' : 'Cancelled';
-    try {
-      await updateCloudGroomingBooking(booking);
-      localStorage.setItem(groomingBookingsKey, JSON.stringify(bookings));
-      void recordAdminAction('order_status_updated', 'grooming_booking', booking.reference || booking.id, { status: select.value });
-      render();
-    } catch (error) {
-      window.alert(`Could not update the booking status: ${friendlyAuthError(error)}`);
-    }
-  }));
-
   document.querySelectorAll('[data-grooming-receipt-form]').forEach((form) => form.addEventListener('submit', async (event) => {
     event.preventDefault();
     if (!form.reportValidity()) return;
@@ -2271,7 +2248,11 @@ function setupAdminGrooming() {
     booking.paymentStatus = `${booking.receipt.type} receipt uploaded`;
     const taxiTripStarted = Boolean(booking.includeTaxi || booking.taxi?.pickup || booking.taxi?.dropoff)
       && !['Scheduled', 'Assigned'].includes(booking.taxiProgress?.status || 'Scheduled');
-    if (!taxiTripStarted && !/checked in|complete|cancel/i.test(previousStatus)) booking.adminStatus = 'Received Order';
+    if (!taxiTripStarted && !/checked in|complete|cancel/i.test(previousStatus)) {
+      booking.adminStatus = 'Received Order';
+      booking.status = 'Received Order';
+      booking.statusHistory = [...(booking.statusHistory || []), { status: 'Received Order', previousStatus, changedAt: booking.receipt.uploadedAt, changedBy: 'Admin receipt upload' }];
+    }
     try {
       await updateCloudGroomingBooking(booking);
       localStorage.setItem(groomingBookingsKey, JSON.stringify(bookings));
@@ -2867,8 +2848,14 @@ function wireForms() {
 }
 
 // Chooses the screen module for the current route and applies the Supabase authentication gate.
-function render() {
+async function render() {
   if (!supabaseAuthReady) return;
+  const requestedHash = window.location.hash;
+  const requestedPage = requestedHash.slice(1).split('?')[0];
+  if (['grooming', 'hotel', 'daycare', 'admin-access', 'admin-grooming', 'admin-hotel', 'admin-daycare'].includes(requestedPage)) {
+    await refreshSharedOutlets();
+    if (window.location.hash !== requestedHash) return render();
+  }
   const [routeName = '', routeQuery = ''] = window.location.hash.slice(1).split('?');
   const page = routeName || 'home';
   const routeParams = new URLSearchParams(routeQuery);
@@ -2881,7 +2868,7 @@ function render() {
     } catch { /* Keep the current page usable if local demo profile data is malformed. */ }
   }
   const directorPages = ['admin-customers', 'admin-product-insights'];
-  const managerPages = ['admin-promotions', 'admin-addons', 'admin-pet-taxi'];
+  const managerPages = ['admin-promotions', 'admin-addons', 'admin-pet-taxi', 'admin-marketplace-manage'];
   const serviceAdminPages = ['admin-marketplace', 'admin-grooming', 'admin-hotel', 'admin-daycare'];
   const portalPages = ['admin', 'admin-orders', 'admin-access', 'admin-enquiries', 'admin-audit', ...managerPages, ...serviceAdminPages, ...directorPages];
   const driverPages = ['driver'];
@@ -2903,11 +2890,11 @@ function render() {
     window.location.hash = currentRole === 'manager' ? '#admin-access' : currentRole === 'executive' ? '#admin-orders' : '#login';
     return;
   }
-  if (managerPages.includes(page) && !['manager', 'director'].includes(currentRole)) {
-    window.location.hash = currentRole === 'executive' ? '#admin-access' : '#login';
+  if (managerPages.includes(page) && !['executive', 'manager', 'director'].includes(currentRole)) {
+    window.location.hash = '#login';
     return;
   }
-  if (serviceAdminPages.includes(page) && routeParams.get('manage') === '1' && !['manager', 'director'].includes(currentRole)) {
+  if (serviceAdminPages.includes(page) && routeParams.get('manage') === '1' && !['executive', 'manager', 'director'].includes(currentRole)) {
     window.location.hash = '#admin-access';
     return;
   }
@@ -2974,12 +2961,13 @@ function render() {
     daycare: petDaycarePage,
     'pet-profile': () => petProfilePage({ petId: routeParams.get('id') || '', mode: routeParams.get('mode') || '', returnTo: routeParams.get('from') || 'home' }),
     admin: adminPortalPage,
-    'admin-orders': adminOrdersPage,
+    'admin-orders': () => adminOrdersPage(routeParams),
     'admin-promotions': adminPromotionsPage,
     'admin-marketplace': adminMarketplacePage,
-    'admin-grooming': () => adminGroomingPage({ settingsOnly: routeParams.get('manage') === '1' }),
-    'admin-hotel': () => adminHotelPage({ settingsOnly: routeParams.get('manage') === '1' }),
-    'admin-daycare': () => adminDaycarePage({ settingsOnly: routeParams.get('manage') === '1' }),
+    'admin-marketplace-manage': adminMarketplaceManagePage,
+    'admin-grooming': () => adminGroomingPage({ settingsOnly: routeParams.get('manage') === '1', stage: routeParams.get('stage') || 'new' }),
+    'admin-hotel': () => adminHotelPage({ settingsOnly: routeParams.get('manage') === '1', stage: routeParams.get('stage') || 'new' }),
+    'admin-daycare': () => adminDaycarePage({ settingsOnly: routeParams.get('manage') === '1', stage: routeParams.get('stage') || 'new' }),
     'admin-addons': adminAddOnsPage,
     'admin-pet-taxi': adminPetTaxiPage,
     'admin-enquiries': adminEnquiriesPage,
@@ -3017,6 +3005,7 @@ function render() {
     admin: 'Admin Portal — Furgo',
     'admin-promotions': 'Home Promotions — Furgo Admin',
     'admin-marketplace': 'Marketplace — Furgo Admin',
+    'admin-marketplace-manage': 'Manage Marketplace — Furgo Admin',
     'admin-grooming': 'Grooming — Furgo Admin',
     'admin-hotel': 'Pet Hotel — Furgo Admin',
     'admin-daycare': 'Pet Daycare — Furgo Admin',
@@ -3083,6 +3072,7 @@ document.addEventListener('click', (event) => {
   }
 
   const destination = link.getAttribute('href') || '';
+  if (link.getAttribute('aria-label') === 'Admin Home') return;
   if (!destination.startsWith('#admin') || destination === currentHash) return;
   let returnStack = [];
   try { returnStack = JSON.parse(sessionStorage.getItem('furgo-admin-return-stack') || '[]'); } catch { returnStack = []; }

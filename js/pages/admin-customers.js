@@ -1,4 +1,5 @@
 import { escapeHTML } from '../shared.js';
+import { customerOrderStatus } from '../order-status.js';
 import { marketplaceOrdersKey, loadMarketplaceOrders } from './marketplace-data.js';
 import { groomingBookingsKey, loadGroomingBookings } from './grooming-data.js';
 import { hotelBookingsKey, loadHotelBookings } from './hotel-data.js';
@@ -122,7 +123,8 @@ function collectCustomerData() {
       const customer = register({ name: order.customerName || order.name, email, phone });
       if (!customer) continue;
       const amount = Number(order.total ?? order.packagePrice ?? order.amount ?? 0) || 0;
-      const record = { ...order, service: source.service, customerId: customer.id, amount };
+      const serviceId = source.service === 'Marketplace' ? 'marketplace' : source.service === 'Grooming' ? 'grooming' : source.service === 'Pet Hotel' ? 'hotel' : 'daycare';
+      const record = { ...order, status: customerOrderStatus({ ...order, serviceId }), service: source.service, customerId: customer.id, amount };
       customer.orders ||= [];
       customer.orders.push(record);
       orders.push(record);

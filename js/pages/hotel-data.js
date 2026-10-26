@@ -1,11 +1,12 @@
 // Pet Hotel reservations and room inventory are shared between the customer and Admin Portal prototypes.
+import { getSharedOutletNames } from './outlet-directory.js';
 export const hotelSettingsKey = 'furgo-demo-hotel-settings';
 export const hotelBookingsKey = 'furgo-demo-hotel-bookings';
 
 export const defaultHotelSettings = {
   bookingHorizonDays: 180,
   closedDates: [],
-  outlets: ['Furgo Pet Care - Petaling Jaya', 'Furgo Pet Care - Bangsar'],
+  outlets: ['Furgo Pet Care - Petaling Jaya'],
   rooms: [
     { id: 'standard', name: 'Standard Room', description: 'A comfortable private space for a restful stay.', amenities: 'Fresh bedding, daily updates, supervised play', dimensions: '1.2m × 1.5m', nightlyRate: 65, capacity: 8, active: true, photo: '' },
     { id: 'vip-suite', name: 'VIP Suite', description: 'An extra spacious suite with added comfort.', amenities: 'Premium bedding, quiet space, daily updates', dimensions: '1.8m × 2m', nightlyRate: 110, capacity: 3, active: true, photo: '' },
@@ -24,8 +25,6 @@ export const defaultHotelSettings = {
   taxiPerKm: 2.2,
   taxiRouteEstimates: [
     { city: 'Petaling Jaya', outlet: 'Furgo Pet Care - Petaling Jaya', distanceKm: 8 },
-    { city: 'Bangsar', outlet: 'Furgo Pet Care - Bangsar', distanceKm: 6 },
-    { city: 'Kuala Lumpur', outlet: 'Furgo Pet Care - Bangsar', distanceKm: 10 },
     { city: 'Kuala Lumpur', outlet: 'Furgo Pet Care - Petaling Jaya', distanceKm: 16 },
   ],
   voucher: { code: 'HOTEL10', type: 'percent', value: 10, minimumSpend: 100, enabled: true },
@@ -41,7 +40,7 @@ export function loadHotelSettings() {
       rooms: Array.isArray(saved?.rooms) ? saved.rooms : defaultHotelSettings.rooms,
       addOns: Array.isArray(saved?.addOns) ? saved.addOns : defaultHotelSettings.addOns,
       groomingPackages: Array.isArray(saved?.groomingPackages) ? saved.groomingPackages : defaultHotelSettings.groomingPackages,
-      outlets: Array.isArray(saved?.outlets) && saved.outlets.length ? saved.outlets : defaultHotelSettings.outlets,
+      outlets: getSharedOutletNames(defaultHotelSettings.outlets),
       closedDates: Array.isArray(saved?.closedDates) ? saved.closedDates : defaultHotelSettings.closedDates,
       groomingTimeSlots: Array.isArray(saved?.groomingTimeSlots) && saved.groomingTimeSlots.length ? saved.groomingTimeSlots : defaultHotelSettings.groomingTimeSlots,
       taxiRouteEstimates: Array.isArray(saved?.taxiRouteEstimates) ? saved.taxiRouteEstimates : defaultHotelSettings.taxiRouteEstimates,

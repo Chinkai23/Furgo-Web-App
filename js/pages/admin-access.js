@@ -1,9 +1,10 @@
 import { escapeHTML } from '../shared.js';
 import { supabase } from '../supabase.js';
+import { cacheSharedOutlets } from './outlet-directory.js';
 
 const levels = {
   driver: { name: 'Driver', order: 0, summary: 'Access the Pet Taxi driver portal.' },
-  executive: { name: 'Executive', order: 1, summary: 'Manage orders and check-ins, and view service operations.' },
+  executive: { name: 'Executive', order: 1, summary: 'Manage orders, check-ins, service settings, and the marketplace.' },
   manager: { name: 'Manager', order: 2, summary: 'Manage orders, promotions, Marketplace, Grooming, Pet Hotel, and Daycare.' },
   director: { name: 'Director', order: 3, summary: 'Full portal access, including customer records, search insights, and product and service reports.' },
 };
@@ -20,9 +21,10 @@ export function adminAccessPage() {
   const isManager = level.order >= 2;
   const isDirector = level.order >= 3;
   const availableFeatures = [
-    featureCard('Orders & check-in', 'Review orders, update status, upload receipts, and check customers in.', '#admin-orders', true),
-    featureCard('Promotions', 'Create, update, and remove home page promotions.', '#admin-promotions', isManager),
-    featureCard('Marketplace', isManager ? 'Manage products, offers, supplier information, and marketplace orders.' : 'View products, supplier information, and marketplace orders.', '#admin-marketplace', true),
+    featureCard('Current Order & Check-In', 'Review current orders and check customers in.', '#admin-orders', true),
+    featureCard('Promotions', 'Create, update, and remove home page promotions.', '#admin-promotions', true),
+    featureCard('Marketplace', 'View and manage marketplace orders, payments, and fulfillment.', '#admin-marketplace', true),
+    featureCard('Manage Marketplace', 'Manage product listings, product details, and supplier mapping.', '#admin-marketplace-manage', true),
     featureCard('Grooming', isManager ? 'Manage appointment settings, bookings, and grooming operations.' : 'View bookings, safety notes, and grooming operations.', '#admin-grooming', true),
     featureCard('Pet Hotel', isManager ? 'Manage rooms, pricing, availability, and reservations.' : 'View room availability, care notes, and reservations.', '#admin-hotel', true),
     featureCard('Pet Daycare', isManager ? 'Manage rates, capacity, add-ons, and bookings.' : 'View the daily roster, care notes, and bookings.', '#admin-daycare', true),
@@ -104,6 +106,7 @@ export function setupAdminAccess() {
       return;
     }
     outlets = Array.isArray(data) ? data : [];
+    cacheSharedOutlets(outlets);
     const selector = form.elements.outletId;
     if (selector?.tagName === 'SELECT') {
       const current = selector.value;

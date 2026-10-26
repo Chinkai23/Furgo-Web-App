@@ -1,9 +1,10 @@
 // Shared grooming booking records and outlet pricing used by customer and Admin Portal views.
+import { getSharedOutletNames } from './outlet-directory.js';
 export const groomingSettingsKey = 'furgo-demo-grooming-settings';
 export const groomingBookingsKey = 'furgo-demo-grooming-bookings';
 
 export const defaultGroomingSettings = {
-  outlets: ['Furgo Pet Care - Petaling Jaya', 'Furgo Pet Care - Bangsar'],
+  outlets: ['Furgo Pet Care - Petaling Jaya'],
   timeSlots: ['09:00', '10:30', '12:00', '14:00', '15:30', '17:00'],
   bookingHorizonDays: 60,
   availableWeekdays: [0, 1, 2, 3, 4, 5, 6],
@@ -18,8 +19,6 @@ export const defaultGroomingSettings = {
   // Demo route estimates use a saved address city and selected outlet; Admin can edit these values.
   taxiRouteEstimates: [
     { city: 'Petaling Jaya', outlet: 'Furgo Pet Care - Petaling Jaya', distanceKm: 8 },
-    { city: 'Bangsar', outlet: 'Furgo Pet Care - Bangsar', distanceKm: 6 },
-    { city: 'Kuala Lumpur', outlet: 'Furgo Pet Care - Bangsar', distanceKm: 10 },
     { city: 'Kuala Lumpur', outlet: 'Furgo Pet Care - Petaling Jaya', distanceKm: 16 },
   ],
   voucher: { code: 'GROOM10', type: 'percent', value: 10, minimumSpend: 50, enabled: true },
@@ -42,7 +41,7 @@ export function loadGroomingSettings() {
       voucher: { ...defaultGroomingSettings.voucher, ...(saved?.voucher || {}) },
       packages: Array.isArray(saved?.packages) ? saved.packages : defaultGroomingSettings.packages,
       addOns: Array.isArray(saved?.addOns) ? saved.addOns : defaultGroomingSettings.addOns,
-      outlets: Array.isArray(saved?.outlets) && saved.outlets.length ? saved.outlets : defaultGroomingSettings.outlets,
+      outlets: getSharedOutletNames(defaultGroomingSettings.outlets),
       timeSlots: Array.isArray(saved?.timeSlots) && saved.timeSlots.length ? saved.timeSlots : defaultGroomingSettings.timeSlots,
       availableWeekdays: Array.isArray(saved?.availableWeekdays) && saved.availableWeekdays.length ? saved.availableWeekdays : defaultGroomingSettings.availableWeekdays,
       closedDates: Array.isArray(saved?.closedDates) ? saved.closedDates : defaultGroomingSettings.closedDates,

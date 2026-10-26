@@ -7,6 +7,7 @@ import { marketplaceOrdersKey } from './marketplace-data.js';
 import { groomingBookingsKey } from './grooming-data.js';
 import { hotelBookingsKey } from './hotel-data.js';
 import { daycareBookingsKey } from './daycare-data.js';
+import { customerOrderStatus, statusCategory } from '../order-status.js';
 
 const orderServices = [
   { id: 'all', label: 'All' },
@@ -19,6 +20,7 @@ const orderStatuses = [
   { id: 'all', label: 'All statuses' },
   { id: 'completed', label: 'Completed' },
   { id: 'canceled', label: 'Canceled' },
+  { id: 'no-show', label: 'No-Show' },
 ];
 let myOrderLocationCleanups = [];
 
@@ -48,28 +50,6 @@ function belongsToCurrentUser(order, profile) {
 }
 
 // Provides a consistent status category for completed and canceled records across services.
-function statusCategory(status = '') {
-  const normalized = String(status).trim().toLowerCase();
-  if (['completed', 'delivered'].includes(normalized)) return 'completed';
-  if (['canceled', 'cancelled'].includes(normalized)) return 'canceled';
-  return 'active';
-}
-
-function customerOrderStatus(order) {
-  const rawStatus = String(order.adminStatus || order.status || '').trim();
-  const taxiLifecycle = ['Pet Taxi Delivering...', 'Service Complete · Awaiting Pickup', 'Checked-In'];
-  const matchedTaxiLifecycle = taxiLifecycle.find((status) => status.toLowerCase() === rawStatus.toLowerCase());
-  if (matchedTaxiLifecycle) return matchedTaxiLifecycle;
-  const normalized = rawStatus.toLowerCase().replace(/[-_]/g, ' ');
-  if (/cancel/.test(normalized)) return 'Cancelled';
-  if (/complete|delivered|checked out/.test(normalized)) return 'Completed';
-  if (/checked in/.test(normalized)) return 'Checked-In';
-  if (/received order/.test(normalized) || order.receipt) return 'Received Order';
-  if (/pending payment/.test(normalized) || /pending|failed|declined|awaiting|unpaid/.test(String(order.paymentStatus || '').toLowerCase())) return 'Pending Payment';
-  if (/paid|successful|succeeded/.test(String(order.paymentStatus || '').toLowerCase()) && !/shipped|delivered/.test(normalized)) return 'New Order';
-  return order.status || 'Pending';
-}
-
 function cancellationDeadlineDate(order) {
   const raw = order.serviceId === 'hotel' ? order.checkIn || order.startDate : order.date || order.bookingDate;
   if (!raw) return null;
@@ -224,6 +204,7 @@ export function myOrdersPage(routeParams = new URLSearchParams()) {
     const serviceName = order.serviceLabel;
     const statusLabel = customerOrderStatus(order);
     const isCanceled = statusCategory(statusLabel) === 'canceled';
+    const isNoShow = statusCategory(statusLabel) === 'no-show';
     const summary = order.summary || order.description || 'Order details will appear here.';
     const marketplaceDetails = order.serviceId === 'marketplace' && order.trackingNumber
       ? `<p class="my-order-extra">${escapeHTML(order.courier || 'Courier')}: ${escapeHTML(order.trackingNumber)}</p>` : '';
@@ -249,7 +230,7 @@ export function myOrdersPage(routeParams = new URLSearchParams()) {
     const receiptAction = order.receipt?.data
       ? `<a class="button button-primary my-order-receipt-button" href="${escapeHTML(order.receipt.data)}" download="${escapeHTML(order.receipt.name || 'receipt')}">Download Receipt</a>`
       : `<button class="button button-light my-order-receipt-button" type="button" data-show-receipt-message>Download Receipt</button><p class="my-order-receipt-empty" data-receipt-unavailable-message hidden>Your receipt will be available to download once the outlet has received your order.</p>`;
-    return `<details class="my-order-card"><summary class="my-order-card-summary"><div class="my-order-card-top"><span class="my-order-service-label">${escapeHTML(serviceName)}</span><b class="my-order-status ${isCanceled ? 'is-canceled' : statusCategory(statusLabel) === 'completed' ? 'is-complete' : ''}">${escapeHTML(statusLabel)}</b></div><h2>${escapeHTML(order.title)}</h2><p class="my-order-summary">${escapeHTML(summary)}</p><div class="my-order-card-bottom"><small>${[reference, date].filter(Boolean).map(escapeHTML).join(' · ')}</small><strong>MYR ${order.totalAmount.toFixed(2)}</strong></div><span class="my-order-expand-hint">View Order Details <span aria-hidden="true">⌄</span></span></summary><div class="my-order-expanded"><dl class="my-order-detail-list">${orderDetails}</dl>${petsDetails}${marketplaceDetails}${groomingDetails}${hotelDetails}${daycareDetails}${taxiTracking}${receiptAction}${order.trackingUrl ? `<a class="my-order-tracking" href="${escapeHTML(order.trackingUrl)}" target="_blank" rel="noopener noreferrer">Track Delivery</a>` : ''}${cancelAction}</div></details>`;
+    return `<details class="my-order-card"><summary class="my-order-card-summary"><div class="my-order-card-top"><span class="my-order-service-label">${escapeHTML(serviceName)}</span><b class="my-order-status ${isCanceled ? 'is-canceled' : isNoShow ? 'is-no-show' : statusCategory(statusLabel) === 'completed' ? 'is-complete' : ''}">${escapeHTML(statusLabel)}</b></div><h2>${escapeHTML(order.title)}</h2><p class="my-order-summary">${escapeHTML(summary)}</p><div class="my-order-card-bottom"><small>${[reference, date].filter(Boolean).map(escapeHTML).join(' · ')}</small><strong>MYR ${order.totalAmount.toFixed(2)}</strong></div><span class="my-order-expand-hint">View Order Details <span aria-hidden="true">⌄</span></span></summary><div class="my-order-expanded"><dl class="my-order-detail-list">${orderDetails}</dl>${petsDetails}${marketplaceDetails}${groomingDetails}${hotelDetails}${daycareDetails}${taxiTracking}${receiptAction}${order.trackingUrl ? `<a class="my-order-tracking" href="${escapeHTML(order.trackingUrl)}" target="_blank" rel="noopener noreferrer">Track Delivery</a>` : ''}${cancelAction}</div></details>`;
   };
 
   const groups = service === 'all'

@@ -691,7 +691,7 @@ h1, h2, h3, p { margin-top: 0; }
 
 /* Admin Marketplace keeps supplier, cost, transfer review, and fulfillment data internal. */
 .admin-market-heading { display: flex; align-items: center; gap: 15px; margin: 34px 0 22px; }
-.admin-market-heading > a { color: var(--ink); font: 400 45px/1 'Avenir Next'; }
+.admin-market-heading > a[aria-label] { color: var(--ink); font: 400 45px/1 'Avenir Next'; }
 .admin-market-heading span, .admin-market-panel-heading > div > span { color: var(--orange-dark); font-size: 10px; font-weight: 700; letter-spacing: .09em; text-transform: uppercase; }
 .admin-market-heading h1 { margin: 3px 0 0; font: 700 32px 'Avenir Next'; }
 .admin-market-stats { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 12px; }
@@ -707,6 +707,10 @@ h1, h2, h3, p { margin-top: 0; }
 .admin-market-table th, .admin-market-table td { padding: 10px 8px; border-bottom: 1px solid #f0e9e3; white-space: nowrap; }
 .admin-market-table th { color: var(--muted); font-size: 9px; text-transform: uppercase; }
 .admin-market-table td small { display: block; margin-top: 4px; color: var(--muted); }
+.admin-market-table td.admin-market-product-cell { display: flex; align-items: center; gap: 10px; white-space: normal; }
+.admin-market-product-cell > span:last-child { display: grid; gap: 2px; }
+.admin-market-product-thumb, .admin-market-order-thumb { width: 44px; height: 44px; flex: 0 0 44px; object-fit: contain; border: 1px solid #f1e8df; border-radius: 10px; background: #fff8f1; }
+.admin-market-product-thumb.is-placeholder, .admin-market-order-thumb.is-placeholder { display: grid; place-items: center; font-size: 25px; }
 .admin-market-add { margin-top: 16px; padding: 14px; border-radius: 13px; background: #fff7ef; }
 .admin-market-add summary { color: var(--orange-dark); font-size: 12px; font-weight: 700; cursor: pointer; }
 .admin-market-product-form { padding-top: 14px; }
@@ -741,7 +745,13 @@ h1, h2, h3, p { margin-top: 0; }
 .admin-market-customer { display: grid; gap: 4px; margin: 12px 0; color: var(--muted); font-size: 10px; line-height: 1.5; }
 .admin-market-customer strong { color: var(--ink); font-size: 12px; }
 .admin-market-order > ul { display: grid; gap: 9px; margin: 0; padding: 12px 0; border-top: 1px solid #f2ebe5; border-bottom: 1px solid #f2ebe5; list-style: none; }
-.admin-market-order > ul li { display: grid; gap: 4px; font-size: 11px; }
+.admin-market-order > ul li { display: grid; grid-template-columns: 44px minmax(0, 1fr); align-items: center; gap: 10px; font-size: 11px; }
+.admin-market-order-item > div { display: grid; gap: 4px; min-width: 0; }
+.admin-market-order-summary { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; }
+.admin-market-order-summary-item { display: inline-flex; align-items: center; gap: 6px; }
+.admin-market-summary-thumb { width: 30px; height: 30px; flex: 0 0 30px; object-fit: contain; border: 1px solid #f1e8df; border-radius: 8px; background: #fff8f1; }
+.admin-market-summary-thumb.is-placeholder { display: grid; place-items: center; font-size: 18px; }
+.admin-market-order-summary-area { color: var(--muted); }
 .admin-market-order > ul small { color: var(--muted); font-size: 9px; }
 .admin-market-order-total { display: flex; justify-content: space-between; margin: 12px 0; font-size: 11px; }
 .admin-market-order > .button { min-height: 38px; font-size: 10px; }
@@ -1214,6 +1224,13 @@ h1, h2, h3, p { margin-top: 0; }
 .admin-grooming-order-grid .admin-grooming-red-flag { color: #b54025; font-weight: 700; }
 .admin-grooming-order-actions { display: grid; grid-template-columns: 1fr auto; gap: 9px; align-items: end; }
 .admin-grooming-order-actions form { display: grid; grid-column: 1 / -1; grid-template-columns: 1fr 1fr; gap: 9px; padding-top: 10px; border-top: 1px solid #f1ebe6; }
+.admin-grooming-order-actions .admin-grooming-receipt-form { min-width: 0; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.admin-grooming-receipt-form > label { min-width: 0; overflow: hidden; }
+.admin-grooming-receipt-form select,
+.admin-grooming-receipt-form input[type="file"] { display: block; width: 100%; min-width: 0; max-width: 100%; box-sizing: border-box; }
+.admin-grooming-receipt-form select { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.admin-grooming-receipt-form input[type="file"] { overflow: hidden; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.admin-grooming-receipt-form input[type="file"]::file-selector-button { max-width: 55%; margin-right: 4px; padding: 5px 7px; font-size: 10px; }
 .admin-grooming-order-actions form button { grid-column: 1 / -1; }
 .admin-grooming-order-actions .button { min-height: 40px; padding: 0 12px; font-size: 11px; }
 .admin-grooming-receipt-status { color: #527851; font-size: 11px; }
@@ -1233,9 +1250,11 @@ h1, h2, h3, p { margin-top: 0; }
   .admin-grooming-package-fields > button { grid-column: auto; }
   .admin-grooming-order-grid { grid-template-columns: repeat(2,minmax(0,1fr)); }
   .admin-grooming-order-actions { grid-template-columns: 220px auto 1fr; }
-  .admin-grooming-order-actions form { grid-column: auto; grid-template-columns: 1fr 1fr; padding: 0 0 0 12px; border-top: 0; border-left: 1px solid #f1ebe6; }
+  .admin-grooming-order-actions form { grid-column: auto; grid-template-columns: repeat(2, minmax(0, 1fr)); padding: 0 0 0 12px; border-top: 0; border-left: 1px solid #f1ebe6; }
   .admin-grooming-order-actions form button { grid-column: 1 / -1; }
 }
+.admin-grooming-order-actions.admin-grooming-receipt-actions { grid-template-columns: minmax(0, 1fr); }
+.admin-grooming-order-actions.admin-grooming-receipt-actions .admin-grooming-receipt-form { grid-column: 1 / -1; padding: 0; border: 0; }
 
 /* Grooming pet chooser: selectable profile cards match the Home pet-card carousel treatment. */
 .grooming-pet-carousel { display: flex; gap: 11px; overflow-x: auto; padding: 3px 2px 11px; scroll-snap-type: x mandatory; scrollbar-width: none; }
@@ -1320,6 +1339,20 @@ h1, h2, h3, p { margin-top: 0; }
 .my-order-card-bottom { padding-top: 5px; border-top: 1px solid #f1e9e2; }
 .my-order-card-bottom small { color: #89827d; font-size: 10px; overflow-wrap: anywhere; }
 .my-order-card-bottom strong { flex: 0 0 auto; color: #28242a; font-size: 13px; }
+.admin-service-order-card { min-width: 0; }
+.admin-service-order-details > article { margin: 0; padding: 0; border: 0; border-radius: 0; background: transparent; box-shadow: none; }
+.admin-service-order-details .admin-grooming-order-top,
+.admin-service-order-details .admin-hotel-booking-top,
+.admin-service-order-details .admin-daycare-order-heading,
+.admin-service-order-details .admin-market-order > header { display: none; }
+.admin-service-order-details .admin-grooming-order-actions > div:first-child,
+.admin-service-order-details .admin-hotel-booking-actions > div:first-child,
+.admin-service-order-details .admin-daycare-order-actions > div:first-child { display: none; }
+.admin-service-order-details .admin-grooming-order-grid,
+.admin-service-order-details .admin-hotel-booking-grid,
+.admin-service-order-details .admin-daycare-order-grid { margin-top: 0; }
+.admin-service-order-details .admin-market-order { display: grid; gap: 12px; }
+.admin-service-order-details .admin-market-order .admin-market-customer { margin-top: 0; }
 .my-order-tracking { width: fit-content; color: #d85f00; font-size: 11px; font-weight: 700; text-decoration: none; }
 .my-order-cancel { justify-self: start; min-height: 34px; padding: 0 12px; border-color: #f0d6d2; color: #a93c35; background: #fff; font-size: 11px; }
 .my-orders-empty-category { margin: 0; padding: 11px 13px; border-radius: 12px; color: #827a75; background: #fff; font-size: 11px; }
@@ -1588,6 +1621,38 @@ select::-ms-expand { display: none; }
 .admin-hotel-settings-grid small { color: #827b77; font-size: 10px; font-weight: 500; line-height: 1.5; }
 .admin-hotel-settings [data-admin-hotel-feedback] { color: #9b4214; font-size: 11px; }
 .admin-hotel-booking-list { display: grid; gap: 12px; }
+.admin-hotel-availability-panel { display: grid; gap: 14px; }
+.admin-hotel-calendar-toolbar { display: flex; flex-wrap: wrap; align-items: end; gap: 10px; padding: 12px; border-radius: 14px; background: #fff8f2; }
+.admin-hotel-calendar-toolbar > label { display: grid; min-width: 150px; gap: 5px; color: #74675f; font-size: 10px; font-weight: 700; }
+.admin-hotel-calendar-toolbar select, .admin-hotel-calendar-toolbar input { min-height: 38px; padding: 7px 10px; border: 1px solid #ead9ca; border-radius: 10px; color: #29272c; background: #fff; font: 600 11px 'Avenir Next'; }
+.admin-hotel-calendar-view, .admin-hotel-calendar-navigation { display: flex; align-items: center; gap: 5px; min-height: 38px; padding: 3px; border: 1px solid #ead9ca; border-radius: 11px; background: #fff; }
+.admin-hotel-calendar-view button, .admin-hotel-calendar-navigation button { min-height: 30px; padding: 5px 10px; border: 0; border-radius: 8px; color: #6c625d; background: transparent; font: 700 10px 'Avenir Next'; cursor: pointer; }
+.admin-hotel-calendar-view button.is-active { color: #fff; background: #ff7900; }
+.admin-hotel-calendar-navigation { margin-left: auto; }
+.admin-hotel-calendar-navigation strong { min-width: 145px; color: #302b28; font-size: 11px; text-align: center; }
+.admin-hotel-calendar-legend { display: flex; flex-wrap: wrap; gap: 13px; color: #6c625d; font-size: 10px; }
+.admin-hotel-calendar-legend span { display: inline-flex; align-items: center; gap: 6px; }
+.admin-hotel-calendar-legend i { width: 10px; height: 10px; border-radius: 3px; background: #e8f5eb; }
+.admin-hotel-calendar-legend i.is-reserved { background: #ffe2c8; }
+.admin-hotel-calendar-scroll { overflow: auto; border: 1px solid #f0e2d7; border-radius: 12px; }
+.admin-hotel-calendar { width: 100%; min-width: 760px; border-collapse: separate; border-spacing: 0; background: #fff; }
+.admin-hotel-calendar th, .admin-hotel-calendar td { min-width: 86px; padding: 7px; border-right: 1px solid #f2e9e2; border-bottom: 1px solid #f2e9e2; text-align: center; }
+.admin-hotel-calendar thead th { position: sticky; top: 0; z-index: 1; color: #554a43; background: #fff8f2; font-size: 10px; }
+.admin-hotel-calendar thead th:first-child, .admin-hotel-calendar tbody th { position: sticky; left: 0; z-index: 2; min-width: 145px; text-align: left; background: #fffdfa; }
+.admin-hotel-calendar thead th:first-child { z-index: 3; }
+.admin-hotel-calendar thead th span, .admin-hotel-calendar thead th strong, .admin-hotel-calendar tbody th span, .admin-hotel-calendar tbody th small { display: block; }
+.admin-hotel-calendar thead th span, .admin-hotel-calendar tbody th small { color: #8b817a; font-size: 9px; font-weight: 500; }
+.admin-hotel-calendar thead th strong, .admin-hotel-calendar tbody th span { margin-top: 3px; font-size: 10px; font-weight: 700; }
+.admin-hotel-calendar-cell { display: block; max-width: 124px; margin: auto; padding: 7px 5px; overflow: hidden; border-radius: 7px; font-size: 9px; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
+.admin-hotel-calendar-cell.is-available { color: #32734a; background: #eaf6ed; }
+.admin-hotel-calendar-cell.is-reserved { color: #a94f08; background: #fff0e2; }
+.admin-hotel-calendar tr:last-child th, .admin-hotel-calendar tr:last-child td { border-bottom: 0; }
+.admin-hotel-calendar th:last-child, .admin-hotel-calendar td:last-child { border-right: 0; }
+@media (max-width: 600px) {
+  .admin-hotel-calendar-toolbar > label { flex: 1 1 135px; min-width: 0; }
+  .admin-hotel-calendar-navigation { flex: 1 1 100%; justify-content: space-between; margin-left: 0; }
+  .admin-hotel-calendar-navigation strong { flex: 1; }
+}
 .admin-hotel-booking { display: grid; gap: 12px; padding: 14px; border: 1px solid #eee4dd; border-radius: 15px; background: #fff; }
 .admin-hotel-booking-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 9px; }
 .admin-hotel-booking-top span { color: #827b77; font-size: 10px; }
@@ -1663,6 +1728,53 @@ select::-ms-expand { display: none; }
 .admin-orders-reference strong { overflow-wrap: anywhere; font-size: 13px; }
 .admin-orders-reference small { color: #827a75; font-size: 10px; line-height: 1.4; }
 .admin-orders-status-pill { justify-self: center; padding: 6px 9px; border-radius: 99px; color: #9a4d0c; background: #fff0dc; font-size: 10px; font-weight: 700; white-space: nowrap; }
+.admin-orders-card > summary.my-order-card-summary { display: grid; grid-template-columns: minmax(0, 1fr); align-items: stretch; justify-items: stretch; gap: 8px; min-height: 0; padding: 15px; }
+.admin-orders-card > summary.my-order-card-summary .my-order-card-top { margin: 0; }
+.admin-orders-card > summary.my-order-card-summary h2 { margin: 0; font: 700 15px/1.35 'Avenir Next'; }
+.admin-orders-card > summary.my-order-card-summary .admin-orders-status-pill { justify-self: auto; }
+.admin-order-service-tabs { margin: 14px 0; }
+.admin-order-stage-tabs { width: 100%; justify-content: flex-start; margin: 0 0 14px; }
+.admin-current-order-card { padding: 0; }
+.admin-current-order-card .my-order-card-summary { cursor: default; }
+.admin-order-receipt-summary { margin: -2px 0 0; color: #756e69; font-size: 11px; font-weight: 600; }
+.admin-order-receipt-section,
+.admin-order-status-section { display: grid; gap: 10px; min-width: 0; padding: 13px; border: 1px solid #f0e4da; border-radius: 13px; background: #fffdfa; }
+.admin-order-receipt-section h3,
+.admin-order-status-section h3 { margin: 0; font-size: 14px; }
+.admin-order-receipt-controls { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.admin-order-receipt-controls > label,
+.admin-order-receipt-controls .admin-orders-upload { display: grid; min-width: 0; gap: 6px; color: #403a37; font-size: 11px; font-weight: 700; }
+.admin-order-receipt-controls select,
+.admin-order-receipt-controls input[type="file"] { display: block; width: 100%; min-width: 0; max-width: 100%; min-height: 42px; box-sizing: border-box; padding: 8px; border: 1px solid #e8dfd8; border-radius: 10px; color: #29272c; background: #fff; font: 12px 'Avenir Next'; }
+.admin-order-receipt-controls input[type="file"] { overflow: hidden; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.admin-order-receipt-controls input[type="file"]::file-selector-button { max-width: 55%; margin-right: 4px; padding: 5px 7px; font-size: 10px; }
+.admin-order-payment-status { margin: 0; color: #403a36; font-size: 12px; font-weight: 700; line-height: 1.5; }
+.admin-order-receipt-status { margin: -7px 0 0; color: #756e69; font-size: 11px; line-height: 1.5; }
+.admin-order-receipt-link { width: fit-content; color: #d85f00; font-size: 11px; font-weight: 700; overflow-wrap: anywhere; }
+.admin-order-progress { display: flex; align-items: stretch; gap: 7px; overflow-x: auto; margin: 0; padding: 0 0 4px; list-style: none; scrollbar-width: thin; }
+.admin-order-progress li { display: flex; flex: 1 0 max-content; align-items: center; justify-content: center; gap: 8px; min-width: 120px; padding: 8px 10px; border-radius: 9px; color: #85817e; background: #f5f3f1; font-size: 12px; text-align: center; }
+.admin-order-progress li.is-active { color: #c95700; background: #fff0e2; font-weight: 700; }
+.admin-order-progress li span { min-width: 0; overflow-wrap: anywhere; }
+.admin-order-progress li small { flex: 0 0 auto; color: inherit; font-size: 10px; font-weight: 500; text-align: right; }
+.admin-other-service-orders { display: grid; gap: 10px; margin-top: 22px; padding: 16px; border: 1px solid #eee3db; border-radius: 14px; background: #fffdfa; }
+.admin-other-service-orders h2 { margin: 0; font-size: 16px; }
+.admin-other-service-orders > div { display: flex; flex-wrap: wrap; gap: 9px; }
+.admin-other-service-orders .button { min-height: 40px; border-color: #ff7900; color: #fff; background: #ff7900; text-decoration: none; }
+.admin-other-service-orders .button:hover { border-color: #e66d00; background: #e66d00; }
+.admin-order-status-control { display: grid; width: min(100%, 340px); gap: 6px; color: #766e68; font-size: 11px; font-weight: 700; }
+.admin-order-status-control select { width: 100%; min-height: 42px; padding: 8px 12px; border: 1px solid #ff7900; border-radius: 10px; color: #29272c; background: #fff; font: 600 12px 'Avenir Next'; }
+.admin-current-order-card > .admin-order-status-control { margin: 0 14px 14px; }
+.my-order-status.is-no-show, .admin-orders-status-pill.is-no-show { color: #7d4b00; background: #fff1cc; }
+.admin-order-important-details { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; margin: 0; }
+.admin-order-important-details > div { min-width: 0; padding: 10px; border-radius: 10px; background: #fff8f2; }
+.admin-order-important-details dt { margin-bottom: 4px; color: #8b7565; font-size: 9px; font-weight: 700; text-transform: uppercase; }
+.admin-order-important-details dd { margin: 0; color: #403a36; font-size: 11px; line-height: 1.5; overflow-wrap: anywhere; }
+@media (max-width: 520px) {
+  .admin-order-receipt-controls, .admin-order-important-details { grid-template-columns: minmax(0, 1fr); }
+  .admin-order-progress li { flex-basis: 135px; }
+  .admin-order-progress li small { text-align: center; }
+  .admin-other-service-orders > div { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
 .admin-orders-receipt { display: grid; place-items: center; justify-self: center; width: 28px; height: 28px; padding: 0; border: 0; border-radius: 50%; cursor: pointer; }
 .admin-orders-receipt svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-width: 2.5; stroke-linecap: round; stroke-linejoin: round; }
 .admin-orders-receipt.has-receipt { color: #31945a; background: transparent; cursor: default; }
@@ -2080,7 +2192,7 @@ select::-ms-expand { display: none; }
 .marketplace-header .market-back,
 .grooming-header .grooming-back,
 .my-orders-header > a,
-.admin-market-heading > a,
+.admin-market-heading > a[aria-label],
 .admin-grooming-heading > a {
   width: 42px;
   height: 54px;
@@ -2104,7 +2216,7 @@ select::-ms-expand { display: none; }
 .marketplace-header .market-back::before,
 .grooming-header .grooming-back::before,
 .my-orders-header > a::before,
-.admin-market-heading > a::before,
+.admin-market-heading > a[aria-label]::before,
 .admin-grooming-heading > a::before {
   content: '';
   width: 14px;
@@ -2201,7 +2313,7 @@ select::-ms-expand { display: none; }
 .marketplace-header .market-back::before,
 .grooming-header .grooming-back::before,
 .my-orders-header > a::before,
-.admin-market-heading > a::before,
+.admin-market-heading > a[aria-label]::before,
 .admin-grooming-heading > a::before {
   position: absolute;
   top: 50%;
@@ -2363,3 +2475,7 @@ select::-ms-expand { display: none; }
   .admin-service-banner-preview { grid-column: 1; }
   .admin-promo-previews { grid-template-columns: minmax(0, 1fr); }
 }
+.admin-outlet-readonly { display: grid; grid-column: 1 / -1; gap: 0.35rem; padding: 0.9rem 1rem; border: 1px solid #f0dfd2; border-radius: 1rem; background: #fffaf6; color: #28272b; }
+.admin-outlet-readonly strong { font-size: 0.9rem; }
+.admin-outlet-readonly span { color: #635c58; overflow-wrap: anywhere; }
+.admin-outlet-readonly small { color: #8a817b; font-size: 0.78rem; }
