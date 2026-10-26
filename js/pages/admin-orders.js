@@ -7,6 +7,7 @@ import { mountDriverLocation } from './driver-location.js';
 import { recordAdminAction } from '../admin-audit.js';
 import { startQRScanner } from '../qr-scanner.js';
 import { saveOrderRecords } from '../app-data-sync.js';
+import { supabase } from '../supabase.js';
 
 const daycareKeys = ['furgo-demo-daycare-bookings', 'furgo-demo-pet-daycare-bookings', 'furgo-demo-daycare-orders'];
 let adminOrderLocationCleanups = [];
@@ -44,7 +45,11 @@ function getAdminStatus(order) {
 }
 
 function allAdminOrders() {
+  let profile = {};
+  try { profile = JSON.parse(sessionStorage.getItem('furgo-demo-user-profile') || '{}'); } catch { profile = {}; }
   return orderSources.flatMap((source) => source.load().map((order) => ({ ...order, serviceId: source.id, serviceLabel: source.label, storageKey: source.key, adminStatus: getAdminStatus(order) })))
+    .filter((order) => ['director', 'admin'].includes(profile.role)
+      || (profile.outletName && String(order.outlet || '').trim().toLowerCase() === String(profile.outletName).trim().toLowerCase()))
     .sort((a, b) => new Date(b.createdAt || b.date || 0) - new Date(a.createdAt || a.date || 0));
 }
 
@@ -117,10 +122,13 @@ function checkInPreviewMarkup(preview) {
 // Admin order board: one place for new orders, service details, status updates, and customer receipts.
 export function adminOrdersPage() {
   const role = sessionStorage.getItem('furgo-demo-user-role') || 'executive';
+  let profile = {};
+  try { profile = JSON.parse(sessionStorage.getItem('furgo-demo-user-profile') || '{}'); } catch { profile = {}; }
   const isDirector = ['admin', 'director'].includes(role);
   const homeHref = isDirector ? '#admin' : '#admin-access';
   const portalName = role === 'manager' ? 'Manager Portal' : role === 'executive' || role === 'staff' ? 'Executive Portal' : 'Director Portal';
   const orders = allAdminOrders();
+  const orderSectionTitle = isDirector ? 'All Customer Orders' : profile.outletName ? `${profile.outletName} Orders` : 'Orders For Your Outlet';
   const newCount = orders.filter((order) => ['New Order', 'New'].includes(order.adminStatus)).length;
   const cards = orders.map((order) => {
     const receipt = order.receipt;
@@ -143,7 +151,7 @@ export function adminOrdersPage() {
       : '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16V4m0 0L7 9m5-5 5 5M5 14v5h14v-5" /></svg>';
     return `<details class="admin-orders-card" data-order-key="${escapeHTML(order.storageKey)}" data-order-id="${escapeHTML(order.id)}"><summary><span class="admin-orders-reference"><strong>${escapeHTML(reference)}</strong><small>${escapeHTML(order.serviceLabel)} · ${escapeHTML(customer)}${date ? ` · ${escapeHTML(new Date(date).toLocaleDateString('en-MY'))}` : ''}</small></span><span class="admin-orders-status-pill">${escapeHTML(order.adminStatus)}</span><button class="admin-orders-receipt ${receipt ? 'has-receipt' : 'missing-receipt'}" type="button" data-open-order-receipt ${receipt ? 'disabled' : ''} aria-label="${receipt ? 'Receipt uploaded' : 'Upload receipt'}" title="${receipt ? 'Receipt uploaded' : 'Click to upload receipt'}">${receiptIcon}</button></summary><div class="admin-orders-detail"><div class="admin-orders-actions"><div class="admin-order-status-control"><strong>Order Status</strong><span class="admin-order-current-status">${escapeHTML(order.adminStatus)}</span><small>Status updates automatically from payment, receipt upload, customer cancellation, and QR check-in/check-out.</small></div><label class="admin-orders-upload">Upload / Replace Receipt<input type="file" accept="image/png,image/jpeg,image/webp,application/pdf" data-admin-order-receipt="${escapeHTML(order.storageKey)}|${escapeHTML(order.id)}" /></label></div>${taxiActionMarkup}<div class="admin-orders-receipt-preview">${receipt ? `<a href="${escapeHTML(receipt.data)}" target="_blank" rel="noopener" download="${escapeHTML(receipt.name || 'receipt')}">Current receipt: ${escapeHTML(receipt.name || 'View receipt')}</a><button class="admin-orders-delete-receipt" type="button" data-delete-order-receipt>Delete receipt</button>` : '<span>No receipt uploaded yet.</span>'}</div><dl>${detailRows(order)}</dl>${taxiTracking}</div></details>`;
   }).join('');
-  return `<main class="admin-portal-page admin-orders-page"><header class="admin-portal-header"><a class="admin-portal-brand" href="${homeHref}"><img src="Image/Icon/Logo.png" alt="Furgo" /><span>${portalName}</span></a><div class="admin-portal-account"><a href="${homeHref}">${isDirector ? 'Dashboard' : 'Admin'}</a><button type="button" data-logout>Log out</button></div></header><header class="admin-market-heading"><a href="${homeHref}" aria-label="Back to ${portalName}">‹</a><div><span>Customer operations</span><h1>Orders</h1></div></header><section class="admin-market-stats"><article><span>New orders</span><strong>${newCount}</strong></article><article><span>All orders</span><strong>${orders.length}</strong></article><article><span>Receipts uploaded</span><strong>${orders.filter((order) => order.receipt).length}</strong></article></section><section class="admin-market-panel admin-checkin-scan-panel"><div class="admin-market-panel-heading"><div><span>Visit check-in</span><h2>Scan Customer QR Code</h2></div><p>Scan a QR code or enter its manual code to review the matching order. The order updates only after you confirm.</p></div><div class="admin-checkin-scan-controls"><button class="button button-light" type="button" data-start-checkin-scan>Start camera scan</button><video class="admin-checkin-video" data-checkin-video playsinline muted hidden></video><p class="admin-checkin-scan-feedback" data-checkin-scan-feedback role="status" aria-live="polite">Camera access requires HTTPS and permission. You can also enter the scanned code below.</p><form class="admin-checkin-manual-form" data-checkin-manual-form><label>QR code<input name="token" inputmode="text" autocomplete="off" autocapitalize="characters" maxlength="17" minlength="10" pattern="[2-9A-HJ-NP-Z]{5}-?[2-9A-HJ-NP-Z]{5}|[2-9A-HJ-NP-Z]{17}" placeholder="e.g. 7K4MR-9TX2C" required /></label><button class="button button-primary" type="submit">Review Order</button></form></div></section><section class="admin-market-panel"><div class="admin-market-panel-heading"><div><span>Order management</span><h2>All Customer Orders</h2></div><p>Open an order to review its saved customer, service, pet, payment, and booking details. Update its status or upload a receipt/invoice for the customer.</p></div><div class="admin-orders-columns"><span>Order</span><span>Status</span><span>Receipt</span></div><div class="admin-orders-list">${cards || '<p class="admin-market-empty">No customer orders have been placed yet.</p>'}</div></section><dialog class="admin-checkin-preview-dialog" data-checkin-preview-dialog aria-labelledby="checkin-preview-title"></dialog></main>`;
+  return `<main class="admin-portal-page admin-orders-page"><header class="admin-portal-header"><a class="admin-portal-brand" href="${homeHref}"><img src="Image/Icon/Logo.png" alt="Furgo" /><span>${portalName}</span></a><div class="admin-portal-account"><span>${escapeHTML(profile.name || '')}${profile.outletShortform ? ` · ${escapeHTML(profile.outletShortform)}` : ''}</span><a href="${homeHref}">${isDirector ? 'Dashboard' : 'Admin'}</a><button type="button" data-logout>Log out</button></div></header><header class="admin-market-heading"><a href="${homeHref}" aria-label="Back to ${portalName}">‹</a><div><span>Customer operations${!isDirector && profile.outletShortform ? ` · ${escapeHTML(profile.outletShortform)}` : ''}</span><h1>Orders</h1></div></header><section class="admin-market-stats"><article><span>New orders</span><strong>${newCount}</strong></article><article><span>All orders</span><strong>${orders.length}</strong></article><article><span>Receipts uploaded</span><strong>${orders.filter((order) => order.receipt).length}</strong></article></section><section class="admin-market-panel admin-checkin-scan-panel"><div class="admin-market-panel-heading"><div><span>Visit check-in</span><h2>Scan Customer QR Code</h2></div><p>Scan a QR code or enter its manual code to review the matching order. The order updates only after you confirm.</p></div><div class="admin-checkin-scan-controls"><button class="button button-light" type="button" data-start-checkin-scan>Start camera scan</button><video class="admin-checkin-video" data-checkin-video playsinline muted hidden></video><p class="admin-checkin-scan-feedback" data-checkin-scan-feedback role="status" aria-live="polite">Camera access requires HTTPS and permission. You can also enter the scanned code below.</p><form class="admin-checkin-manual-form" data-checkin-manual-form><label>QR code<input name="token" inputmode="text" autocomplete="off" autocapitalize="characters" maxlength="17" minlength="10" pattern="[2-9A-HJ-NP-Z]{5}-?[2-9A-HJ-NP-Z]{5}|[2-9A-HJ-NP-Z]{17}" placeholder="e.g. 7K4MR-9TX2C" required /></label><button class="button button-primary" type="submit">Review Order</button></form></div></section><section class="admin-market-panel"><div class="admin-market-panel-heading"><div><span>Order management</span><h2>${escapeHTML(orderSectionTitle)}</h2></div><p>${!isDirector && !profile.outletName ? 'No outlet is assigned to this account yet. Ask a Director to assign one before managing orders.' : 'Open an order to review its saved customer, service, pet, payment, and booking details. Update its status or upload a receipt/invoice for the customer.'}</p></div><div class="admin-orders-columns"><span>Order</span><span>Status</span><span>Receipt</span></div><div class="admin-orders-list">${cards || '<p class="admin-market-empty">No customer orders have been placed yet.</p>'}</div></section><dialog class="admin-checkin-preview-dialog" data-checkin-preview-dialog aria-labelledby="checkin-preview-title"></dialog></main>`;
 }
 
 // Saves admin status changes and receipt files into the same storage records read by My Orders.
@@ -171,6 +179,16 @@ export function setupAdminOrders() {
     if (video) { video.pause(); video.srcObject = null; video.hidden = true; }
   };
   const showScanResult = async (rawCode) => {
+    const normalizedToken = extractCheckInCode(rawCode);
+    const { data: outletCheck, error: outletError } = await supabase.rpc('check_admin_qr_outlet', { p_token: normalizedToken });
+    if (outletError || !outletCheck?.ok) {
+      if (scanStatus) scanStatus.textContent = outletError?.message || outletCheck?.message || 'Could not verify the order outlet. Apply migration 0026 in Supabase and try again.';
+      return false;
+    }
+    if (!outletCheck.allowed) {
+      if (scanStatus) scanStatus.textContent = outletCheck.message;
+      return false;
+    }
     const result = applyCheckInScan(rawCode);
     if (scanStatus) scanStatus.textContent = result.message;
     if (!result.ok) return false;
@@ -202,6 +220,21 @@ export function setupAdminOrders() {
     try { await refreshCheckInTokens(); }
     catch (error) {
       if (scanStatus) scanStatus.textContent = `Could not refresh shared check-in codes: ${error.message}`;
+      return false;
+    }
+    const { data: outletCheck, error: outletError } = await supabase.rpc('check_admin_qr_outlet', { p_token: code });
+    if (outletError || !outletCheck?.ok) {
+      if (scanStatus) scanStatus.textContent = outletError?.message || outletCheck?.message || 'Could not verify the order outlet. Apply migration 0026 in Supabase and try again.';
+      return false;
+    }
+    if (!outletCheck.allowed) {
+      stopCamera();
+      if (previewDialog) {
+        previewDialog.dataset.checkinCode = '';
+        previewDialog.innerHTML = `<div class="admin-checkin-preview-heading"><span>Outlet Assignment</span><h2 id="checkin-preview-title">Order Is From Another Outlet</h2></div><p class="admin-checkin-preview-message">${escapeHTML(outletCheck.message || 'This order is not assigned to your outlet.')}</p><footer><button type="button" class="button button-light" data-cancel-checkin-preview>Close</button><button type="button" class="button button-primary" disabled>Check In</button></footer>`;
+        if (!previewDialog.open) previewDialog.showModal();
+      }
+      if (scanStatus) scanStatus.textContent = outletCheck.message || 'This order is not assigned to your outlet.';
       return false;
     }
     const preview = previewCheckInScan(code);

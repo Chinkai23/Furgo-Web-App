@@ -33,20 +33,31 @@ export function adminAccessPage() {
 
   const managerOptions = isDirector
     ? '<option value="executive">Executive</option><option value="manager">Manager</option><option value="director">Director</option><option value="driver">Driver</option>'
-    : '<option value="executive">Executive</option><option value="driver">Driver</option>';
-  const teamManagement = isManager ? `<section class="admin-market-panel admin-team-panel"><div class="admin-market-panel-heading"><div><span>Team access</span><h2>Manage Portal Users</h2></div><p>${isDirector ? 'Add Executive, Manager, Director, or Driver access for existing Furgo accounts. You can edit and remove lower-level users. Removing a Director requires approval from every other Director.' : 'Add, change, or remove Executive and Driver access for existing Furgo accounts.'}</p></div><form class="admin-team-form" data-admin-team-form><label>Existing account email<input name="email" type="email" autocomplete="email" placeholder="person@example.com" required /></label><label>Account level<select name="level" required>${managerOptions}</select></label><input type="hidden" name="action" value="add" /><div class="admin-market-form-actions"><button class="button button-primary" type="submit">Add user</button><button class="button button-light" type="button" data-cancel-team-edit hidden>Cancel edit</button><span data-admin-team-feedback role="status" aria-live="polite"></span></div></form><div class="admin-team-list" data-admin-team-list role="status" aria-live="polite">Loading team members…</div></section>` : '';
+    : '<option value="executive">Executive</option>';
+  const outletSetup = isDirector ? `<section class="admin-market-panel admin-outlet-panel"><div class="admin-market-panel-heading"><div><span>Outlet setup</span><h2>Manage Outlets</h2></div><p>Add the exact outlet name used on service bookings, plus a shortform. The shortform appears beside an assigned admin’s name.</p></div><form class="admin-outlet-form" data-admin-outlet-form><label>Outlet name<input name="name" maxlength="100" placeholder="Furgo Pet Care - Petaling Jaya" required /></label><label>Shortform<input name="shortform" maxlength="8" minlength="2" pattern="[A-Za-z0-9]{2,8}" placeholder="PJ" required /></label><div class="admin-market-form-actions"><button class="button button-primary" type="submit">Add Outlet</button><span data-admin-outlet-feedback role="status" aria-live="polite"></span></div></form><div class="admin-outlet-list" data-admin-outlet-list role="status" aria-live="polite">Loading outlets…</div></section>` : '';
+  const outletField = isDirector
+    ? '<label data-team-outlet-field>Assigned outlet<select name="outletId" data-team-outlet required><option value="">Choose an outlet</option></select></label>'
+    : `<label data-team-outlet-field>Assigned outlet<input value="${escapeHTML(profile.outletName ? `${profile.outletName} (${profile.outletShortform || ''})` : 'No outlet assigned') }" readonly /><input type="hidden" name="outletId" value="${escapeHTML(profile.outletId || '')}" /></label>`;
+  const canViewTeam = level.order >= 1;
+  const teamManagement = canViewTeam ? `<section class="admin-market-panel admin-team-panel"><div class="admin-market-panel-heading"><div><span>Team access</span><h2>${isManager ? 'Manage Portal Users' : 'Outlet Admins'}</h2></div><p>${isDirector ? 'Assign Executive and Manager accounts to an outlet. Director access remains company-wide. Removing a Director requires approval from every other Director.' : isManager ? 'View admins assigned to your outlet and add, edit, or remove Executive accounts.' : `Admins assigned to ${profile.outletName || 'your outlet'}.`}</p></div>${isManager ? `<form class="admin-team-form" data-admin-team-form><label>Existing account email<input name="email" type="email" autocomplete="email" placeholder="person@example.com" required /></label><label>Account level<select name="level" required>${managerOptions}</select></label>${outletField}<input type="hidden" name="action" value="add" /><div class="admin-market-form-actions"><button class="button button-primary" type="submit">Add user</button><button class="button button-light" type="button" data-cancel-team-edit hidden>Cancel edit</button><span data-admin-team-feedback role="status" aria-live="polite"></span></div></form>` : ''}${isDirector ? `<div class="admin-team-filters"><label>Outlet<select data-team-outlet-filter><option value="all">All outlets</option></select></label><label>Admin level<select data-team-level-filter><option value="all">All levels</option><option value="director">Director</option><option value="manager">Manager</option><option value="executive">Executive</option><option value="driver">Driver</option></select></label></div>` : ''}<div class="admin-team-list" data-admin-team-list role="status" aria-live="polite">Loading team members…</div></section>` : '';
   const directorApprovals = isDirector ? `<section class="admin-market-panel admin-director-approval-panel" data-director-approval-panel hidden><div class="admin-market-panel-heading"><div><span>Director governance</span><h2>Removal Approvals</h2></div><p>Every Director except the requester and the Director named in a request must approve it. One rejection stops the request.</p></div><div data-director-removal-requests role="status" aria-live="polite">Loading approval requests…</div></section>` : '';
-  return `<main class="admin-portal-page admin-access-page"><header class="admin-portal-header"><a class="admin-portal-brand" href="#admin-access"><img src="Image/Icon/Logo.png" alt="Furgo" /><span>Admin Portal</span></a><div class="admin-portal-account"><span>${escapeHTML(profile.name || '')}</span><button type="button" data-logout>Log out</button></div></header><header class="admin-market-heading"><a href="${isDirector ? '#admin' : '#admin-orders'}" aria-label="Back to portal">‹</a><div><span>Access level</span><h1>${level.name}</h1></div></header><section class="admin-access-level-summary"><span>YOUR ADMIN LEVEL</span><h2>${level.name}</h2></section><section class="admin-market-panel"><div class="admin-market-panel-heading"><div><span>Portal permissions</span><h2>Your Available Functions</h2></div><p>Your access follows the permissions assigned to your account.</p></div><div class="admin-access-feature-grid">${availableFeatures}</div></section>${directorApprovals}${teamManagement}</main>`;
+  return `<main class="admin-portal-page admin-access-page"><header class="admin-portal-header"><a class="admin-portal-brand" href="#admin-access"><img src="Image/Icon/Logo.png" alt="Furgo" /><span>Admin Portal</span></a><div class="admin-portal-account"><span>${escapeHTML(profile.name || '')}${profile.outletShortform ? ` · ${escapeHTML(profile.outletShortform)}` : ''}</span><button type="button" data-logout>Log out</button></div></header><header class="admin-market-heading"><a href="${isDirector ? '#admin' : '#admin-orders'}" aria-label="Back to portal">‹</a><div><span>Access level</span><h1>${level.name}</h1></div></header><section class="admin-access-level-summary"><span>YOUR ADMIN LEVEL</span><h2>${level.name}</h2></section><section class="admin-market-panel"><div class="admin-market-panel-heading"><div><span>Portal permissions</span><h2>Your Available Functions</h2></div><p>Your access follows the permissions assigned to your account.</p></div><div class="admin-access-feature-grid">${availableFeatures}</div></section>${directorApprovals}${outletSetup}${teamManagement}</main>`;
 }
 
 export function setupAdminAccess() {
   const root = document.querySelector('.admin-access-page');
   const team = root?.querySelector('[data-admin-team-list]');
   const form = root?.querySelector('[data-admin-team-form]');
+  const outletFilter = root?.querySelector('[data-team-outlet-filter]');
+  const levelFilter = root?.querySelector('[data-team-level-filter]');
+  const outletForm = root?.querySelector('[data-admin-outlet-form]');
+  const outletList = root?.querySelector('[data-admin-outlet-list]');
   const approvals = root?.querySelector('[data-director-removal-requests]');
   const notificationBadge = document.querySelector('[data-director-removal-badge]');
   const profile = JSON.parse(sessionStorage.getItem('furgo-demo-user-profile') || '{}');
   const callerLevel = levels[profile.role] || levels.executive;
+  let outlets = [];
+  let teamMembers = [];
   if (directorRemovalNotificationTimer) window.clearInterval(directorRemovalNotificationTimer);
   const renderRemovalApprovals = async () => {
     if (callerLevel.order < 3) return;
@@ -84,28 +95,61 @@ export function setupAdminAccess() {
       void renderRemovalApprovals();
     }, 30000);
   }
-  if (!root || !team || !form) return;
+  if (!root || !team) return;
+  const renderOutlets = async () => {
+    if (callerLevel.order < 3) return;
+    const { data, error } = await supabase.rpc('get_admin_outlets');
+    if (error) {
+      if (outletList) outletList.textContent = 'Outlet setup is not connected yet. Apply migration 0026 in Supabase.';
+      return;
+    }
+    outlets = Array.isArray(data) ? data : [];
+    const selector = form.elements.outletId;
+    if (selector?.tagName === 'SELECT') {
+      const current = selector.value;
+      selector.innerHTML = '<option value="">Choose an outlet</option>' + outlets.map((outlet) => `<option value="${escapeHTML(outlet.id)}">${escapeHTML(outlet.name)} (${escapeHTML(outlet.shortform)})</option>`).join('');
+      if (current && outlets.some((outlet) => outlet.id === current)) selector.value = current;
+    }
+    if (outletFilter) {
+      const current = outletFilter.value || 'all';
+      outletFilter.innerHTML = '<option value="all">All outlets</option>' + outlets.map((outlet) => `<option value="${escapeHTML(outlet.id)}">${escapeHTML(outlet.name)} (${escapeHTML(outlet.shortform)})</option>`).join('');
+      if (current === 'all' || outlets.some((outlet) => outlet.id === current)) outletFilter.value = current;
+    }
+    if (outletList) outletList.innerHTML = outlets.length
+      ? outlets.map((outlet) => `<article class="admin-outlet-item"><strong>${escapeHTML(outlet.name)}</strong><span>${escapeHTML(outlet.shortform)}</span></article>`).join('')
+      : '<p class="admin-market-empty">No outlets yet. Add the first outlet above.</p>';
+  };
   const renderTeam = async () => {
+    if (callerLevel.order < 1) return;
     team.textContent = 'Loading team members…';
     const { data, error } = await supabase.rpc('get_admin_team');
     if (error) {
       team.textContent = 'Team access is not connected yet. Apply the admin access migration in Supabase.';
       return;
     }
-    const members = Array.isArray(data) ? data : [];
+    teamMembers = Array.isArray(data) ? data : [];
+    renderTeamRows();
+  };
+  const renderTeamRows = () => {
+    const selectedOutlet = outletFilter?.value || 'all';
+    const selectedLevel = levelFilter?.value || 'all';
+    const members = teamMembers.filter((member) => (selectedOutlet === 'all' || member.outlet_id === selectedOutlet)
+      && (selectedLevel === 'all' || member.level === selectedLevel));
     team.innerHTML = members.length ? members.map((member) => {
       const memberLevel = levels[member.level] || levels.executive;
       const canManage = member.level !== 'driver' && memberLevel.order < callerLevel.order;
       const canRemoveDriver = member.level === 'driver' && callerLevel.order >= 2;
       const canRemoveDirector = callerLevel.order === 3 && memberLevel.order === 3
         && member.email && member.email.toLowerCase() !== String(profile.email || '').toLowerCase();
-      const controls = `${canManage ? `<button class="button button-light" type="button" data-edit-team-member data-email="${escapeHTML(member.email || '')}" data-level="${escapeHTML(member.level || '')}">Edit</button>` : ''}${canManage || canRemoveDirector || canRemoveDriver ? `<button class="button button-light" type="button" data-remove-team-member data-email="${escapeHTML(member.email || '')}" data-level="${escapeHTML(member.level || '')}">Remove</button>` : '<span class="admin-team-readonly">Same level · Read only</span>'}`;
-      return `<article class="admin-team-member"><div><strong>${escapeHTML(member.display_name || 'Furgo user')}</strong><small>${escapeHTML(member.email || 'Email unavailable')} · ${escapeHTML(memberLevel.name)}</small></div>${controls}</article>`;
-    }).join('') : '<p class="admin-market-empty">No portal users yet.</p>';
+      const controls = `${canManage ? `<button class="button button-light" type="button" data-edit-team-member data-email="${escapeHTML(member.email || '')}" data-level="${escapeHTML(member.level || '')}" data-outlet-id="${escapeHTML(member.outlet_id || '')}">Edit</button>` : ''}${canManage || canRemoveDirector || canRemoveDriver ? `<button class="button button-light" type="button" data-remove-team-member data-email="${escapeHTML(member.email || '')}" data-level="${escapeHTML(member.level || '')}" data-outlet-id="${escapeHTML(member.outlet_id || '')}">Remove</button>` : '<span class="admin-team-readonly">Same level · Read only</span>'}`;
+      const outletSuffix = member.outlet_shortform ? ` · ${member.outlet_shortform}` : '';
+      return `<article class="admin-team-member"><div><strong>${escapeHTML(member.display_name || 'Furgo user')}${outletSuffix ? ` · ${escapeHTML(member.outlet_shortform)}` : ''}</strong><small>${escapeHTML(member.email || 'Email unavailable')} · ${escapeHTML(memberLevel.name)}${member.outlet_name ? ` · ${escapeHTML(member.outlet_name)}` : ''}</small></div>${controls}</article>`;
+    }).join('') : `<p class="admin-market-empty">${teamMembers.length ? 'No admins match these filters.' : 'No portal users yet.'}</p>`;
   };
 
-  const submitTeamAction = async (email, level, action) => {
-    const feedback = form.querySelector('[data-admin-team-feedback]');
+  const submitTeamAction = async (email, level, action, outletId = '') => {
+    const feedback = form?.querySelector('[data-admin-team-feedback]');
+    if (!form || !feedback) return false;
     const requestsDirectorRemoval = action === 'remove' && level === 'director';
     if (requestsDirectorRemoval) {
       feedback.textContent = 'Submitting approval request…';
@@ -119,7 +163,7 @@ export function setupAdminAccess() {
       return true;
     }
     feedback.textContent = 'Saving…';
-    const { error } = await supabase.rpc('manage_admin_team_member', { p_email: email, p_level: level || null, p_action: action });
+    const { error } = await supabase.rpc('manage_admin_team_member', { p_email: email, p_level: level || null, p_action: action, p_outlet_id: outletId || null });
     if (error) {
       feedback.textContent = error.message || 'The team access change could not be saved.';
       return false;
@@ -129,17 +173,20 @@ export function setupAdminAccess() {
     return true;
   };
 
-  form.addEventListener('submit', async (event) => {
+  form?.addEventListener('submit', async (event) => {
     event.preventDefault();
     const values = new FormData(form);
-    const saved = await submitTeamAction(String(values.get('email') || '').trim(), String(values.get('level') || ''), String(values.get('action') || 'add'));
+    const saved = await submitTeamAction(String(values.get('email') || '').trim(), String(values.get('level') || ''), String(values.get('action') || 'add'), String(values.get('outletId') || ''));
     if (saved) resetTeamForm();
   });
   team.addEventListener('click', async (event) => {
     const edit = event.target.closest('[data-edit-team-member]');
     if (edit) {
+      if (!form) return;
       form.elements.email.value = edit.dataset.email || '';
       form.elements.level.value = edit.dataset.level || 'executive';
+      if (form.elements.outletId) form.elements.outletId.value = edit.dataset.outletId || profile.outletId || '';
+      updateOutletRequirement();
       const driverOption = form.elements.level.querySelector('option[value="driver"]');
       if (driverOption) driverOption.disabled = true;
       form.elements.action.value = 'update';
@@ -152,7 +199,7 @@ export function setupAdminAccess() {
     if (remove && window.confirm(remove.dataset.level === 'director'
       ? `Request removal of Director access for ${remove.dataset.email}? All other Directors must approve.`
       : `Remove portal access for ${remove.dataset.email}?`)) {
-      await submitTeamAction(remove.dataset.email || '', remove.dataset.level || '', 'remove');
+      await submitTeamAction(remove.dataset.email || '', remove.dataset.level || '', 'remove', remove.dataset.outletId || profile.outletId || '');
     }
   });
   approvals?.addEventListener('click', async (event) => {
@@ -173,15 +220,41 @@ export function setupAdminAccess() {
     await renderRemovalApprovals();
     await renderTeam();
   });
-  form.querySelector('[data-cancel-team-edit]')?.addEventListener('click', resetTeamForm);
+  form?.querySelector('[data-cancel-team-edit]')?.addEventListener('click', resetTeamForm);
+  const updateOutletRequirement = () => {
+    if (!form) return;
+    const needsOutlet = ['executive', 'manager'].includes(form.elements.level.value);
+    form.elements.outletId?.closest('[data-team-outlet-field]')?.toggleAttribute('hidden', !needsOutlet);
+    if (form.elements.outletId) form.elements.outletId.required = needsOutlet && form.elements.outletId.tagName === 'SELECT';
+  };
+  form?.elements.level?.addEventListener('change', updateOutletRequirement);
+  if (form) updateOutletRequirement();
+  outletForm?.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const feedback = outletForm.querySelector('[data-admin-outlet-feedback]');
+    const values = new FormData(outletForm);
+    feedback.textContent = 'Saving…';
+    const { error } = await supabase.rpc('manage_admin_outlet', {
+      p_name: String(values.get('name') || '').trim(), p_shortform: String(values.get('shortform') || '').trim().toUpperCase(),
+    });
+    if (error) { feedback.textContent = error.message || 'The outlet could not be saved.'; return; }
+    feedback.textContent = 'Outlet added.';
+    outletForm.reset();
+    await renderOutlets();
+  });
+  outletFilter?.addEventListener('change', renderTeamRows);
+  levelFilter?.addEventListener('change', renderTeamRows);
   function resetTeamForm() {
+    if (!form) return;
     form.reset();
     const driverOption = form.elements.level.querySelector('option[value="driver"]');
     if (driverOption) driverOption.disabled = false;
     form.elements.action.value = 'add';
     form.querySelector('[type="submit"]').textContent = 'Add user';
     form.querySelector('[data-cancel-team-edit]').hidden = true;
+    updateOutletRequirement();
   }
+  void renderOutlets();
   void renderTeam();
 }
 

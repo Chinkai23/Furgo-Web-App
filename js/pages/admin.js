@@ -20,8 +20,9 @@ export function adminPortalPage() {
   const daycareBookings = loadDaycareBookings();
   const newOrders = countNewAdminOrders();
   const newMarketplaceOrders = countNewAdminOrdersFor('marketplace');
-  const adminEmail = profile.email || 'admin@gmail.com';
-  const taxiJobs = loadPetTaxiJobs({ includeCompleted: true });
+  const adminEmail = `${profile.name || profile.email || 'admin@gmail.com'}${profile.outletShortform ? ` · ${profile.outletShortform}` : ''}`;
+  const taxiJobs = loadPetTaxiJobs({ includeCompleted: true })
+    .filter((job) => ['director', 'admin'].includes(profile.role) || (profile.outletName && String(job.outlet || '').trim().toLowerCase() === String(profile.outletName).trim().toLowerCase()));
   const taxiCards = taxiJobs.map((job) => {
     const inTransit = job.status === 'Pet Taxi Delivering...' && ['Picked Up', 'Returning to Customer'].includes(job.taxiStatus);
     const locationContent = inTransit

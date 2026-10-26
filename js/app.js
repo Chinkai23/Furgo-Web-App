@@ -32,7 +32,7 @@ import { setupPetTaxiAddressPicker } from './pages/pet-taxi-addresses.js';
 import { defaultGroomingSettings, groomingBookingsKey, groomingSettingsKey, groomingWeightTier, loadGroomingBookings, loadGroomingSettings } from './pages/grooming-data.js';
 import { myOrdersPage, setupMyOrders } from './pages/my-orders.js';
 import { adminOrdersPage, setupAdminOrders } from './pages/admin-orders.js';
-import { checkInPage, extractCheckInCode, formatCheckInToken, refreshCheckInTokens } from './pages/check-in.js';
+import { checkInPage, extractCheckInCode, formatCheckInToken, refreshCheckInTokens, setupCheckInInteractions } from './pages/check-in.js';
 import { adminBottomNavigation, escapeHTML } from './shared.js';
 import { adminEnquiriesPage, setupAdminEnquiries } from './pages/admin-enquiries.js';
 import { adminCustomersPage, assignUnownedPetProfiles, getCustomerAccountStatus, getCustomerRecordId, saveCustomerRecord, setupAdminCustomers } from './pages/admin-customers.js';
@@ -453,7 +453,7 @@ async function loadSupabaseIdentity(user) {
     supabase.from('user_roles').select('role').eq('user_id', user.id),
     supabase.from('profiles').select('display_name,email,phone_e164').eq('id', user.id).maybeSingle(),
     supabase.from('account_controls').select('status').eq('user_id', user.id).maybeSingle(),
-    supabase.from('portal_access').select('level').eq('user_id', user.id).maybeSingle(),
+    supabase.from('portal_access').select('level,outlet_id,admin_outlets(name,shortform)').eq('user_id', user.id).maybeSingle(),
   ]);
   if (roleError) throw roleError;
   if (profileError) throw profileError;
@@ -477,6 +477,9 @@ async function loadSupabaseIdentity(user) {
     email: profile?.email || user.email || user.user_metadata?.email || '',
     phone: phone.startsWith('+60') ? `0${phone.slice(3)}` : phone,
     role,
+    outletId: portalAccessResult.data?.outlet_id || '',
+    outletName: portalAccessResult.data?.admin_outlets?.name || '',
+    outletShortform: portalAccessResult.data?.admin_outlets?.shortform || '',
     authChannel: user.phone ? 'phone_password' : 'email_password',
   };
   sessionStorage.setItem('furgo-demo-user-profile', JSON.stringify(snapshot));
@@ -1643,22 +1646,32 @@ function setupGroomingBooking() {
   let voucherDiscount = 0;
   let appliedVoucher = '';
 
-  const currentPet = () => loadPetProfiles().find((pet) => pet.id === form.elements.petId?.value);
-  const currentPackage = () => settings.packages.find((item) => item.id === form.querySelector('[name="packageId"]:checked')?.value);
+  const selectedPets = () => {
+    const ids = (form.elements.petIds?.value || form.elements.petId?.value || '').split(',').filter(Boolean);
+    return ids.map((id) => loadPetProfiles().find((pet) => pet.id === id)).filter(Boolean);
+  };
+  const currentPet = () => selectedPets()[0];
+  const currentPackages = () => selectedPets().map((pet) => {
+    const radio = [...form.querySelectorAll('[data-package-pet]:checked')].find((input) => input.dataset.packagePet === pet.id);
+    const packageItem = settings.packages.find((item) => item.id === radio?.value);
+    return { pet, packageItem, price: Number(packageItem?.[groomingWeightTier(pet.weight, settings)] || 0) };
+  });
   const renderQuote = () => {
     const liveSettings = loadGroomingSettings();
-    const pet = currentPet();
+    const pets = selectedPets();
+    const pet = pets[0];
+    const petPackages = currentPackages();
     const tier = groomingWeightTier(pet?.weight, settings);
-    const packageItem = currentPackage();
-    const packagePrice = Number(packageItem?.[tier] || 0);
+    const packageItem = petPackages[0]?.packageItem;
+    const packagePrice = petPackages.reduce((sum, item) => sum + item.price, 0);
     const daycareOn = form.elements.includeDaycare.checked;
-    const daycareTotal = daycareOn ? Number(form.elements.daycareHours.value) * Number(settings.daycareHourlyRate) : 0;
+    const daycareTotal = daycareOn ? Number(form.elements.daycareHours.value) * Number(settings.daycareHourlyRate) * pets.length : 0;
     const taxiOn = form.elements.includeTaxi.checked;
     const taxiDistance = Number(form.elements.taxiDistance.value || 0);
     const petTaxiSettings = loadPetTaxiSettings();
-    const taxiTotal = taxiOn && taxiDistance > 0 ? Number(petTaxiSettings.baseFare) + taxiDistance * Number(petTaxiSettings.farePerKm) : 0;
+    const taxiTotal = taxiOn && taxiDistance > 0 ? (Number(petTaxiSettings.baseFare) + taxiDistance * Number(petTaxiSettings.farePerKm)) * pets.length : 0;
     const customAddOns = [...form.querySelectorAll('[data-grooming-custom-addon]:checked')].map((input) => liveSettings.addOns?.find((item) => item.id === input.value)).filter(Boolean);
-    const customAddOnTotal = customAddOns.reduce((sum, item) => sum + Number(item.price || 0), 0);
+    const customAddOnTotal = customAddOns.reduce((sum, item) => sum + Number(item.price || 0), 0) * pets.length;
     const subtotal = packagePrice + daycareTotal + taxiTotal + customAddOnTotal;
     if (appliedVoucher && subtotal < Number(settings.voucher.minimumSpend || 0)) {
       voucherDiscount = 0;
@@ -1677,17 +1690,16 @@ function setupGroomingBooking() {
     form.querySelector('[data-grooming-discount-row]').hidden = voucherDiscount <= 0;
     form.querySelector('[data-grooming-total]').textContent = money(total);
     form.dataset.quotedTotal = String(total);
-    return { pet, tier, packageItem, packagePrice, daycareTotal, taxiTotal, taxiDistance, customAddOns, customAddOnTotal, total };
+    return { pet, pets, tier, packageItem, petPackages, packagePrice, daycareTotal, taxiTotal, taxiDistance, customAddOns, customAddOnTotal, total };
   };
 
   const refreshWeightTier = () => {
     const pet = currentPet();
     if (!pet) return;
-    const tier = groomingWeightTier(pet?.weight, settings);
-    const label = tier === 'small' ? `Small · up to ${Number(settings.smallMaxKg)} kg` : tier === 'medium' ? `Medium · up to ${Number(settings.mediumMaxKg)} kg` : `Large · over ${Number(settings.mediumMaxKg)} kg`;
     const snapshot = form.querySelector('[data-grooming-pet-snapshot]');
+    const chosenIds = new Set(selectedPets().map((item) => item.id));
     form.querySelectorAll('[data-grooming-pet-choice]').forEach((card) => {
-      const selected = card.dataset.groomingPetChoice === pet.id;
+      const selected = chosenIds.has(card.dataset.groomingPetChoice);
       card.classList.toggle('is-selected', selected);
       card.setAttribute('aria-pressed', String(selected));
       card.querySelector('.grooming-pet-selected-mark')?.remove();
@@ -1698,17 +1710,28 @@ function setupGroomingBooking() {
         card.append(marker);
       }
     });
-    const remarks = Array.isArray(pet?.remarks) ? pet.remarks : [pet?.redFlagRemark].filter(Boolean);
-    snapshot.dataset.selectedPet = pet?.id || '';
-    form.querySelector('[data-pet-snapshot-name]').textContent = pet?.name || 'Pet profile';
-    form.querySelector('[data-pet-snapshot-breed]').textContent = `${pet?.breed || 'Breed not added'} · ${pet?.weight || 'Weight not added'} kg`;
-    form.querySelector('[data-pet-snapshot-vaccine]').textContent = (pet?.vaccinationCards || []).length ? 'Vaccination record uploaded' : 'No vaccination record on file';
-    form.querySelector('[data-pet-tier]').textContent = label;
-    form.querySelector('[data-pet-red-flags]').innerHTML = remarks.length ? `<b>Care notes:</b> ${remarks.map((item) => String(item).replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char])).join(' · ')}` : 'No red-flag care notes saved.';
-    form.querySelector('[data-grooming-tier-summary]').textContent = `Pricing tier: ${label} · Weight ${pet?.weight || '—'} kg`;
+    snapshot.dataset.selectedPet = [...chosenIds].join(',');
+    const snapshotList = form.querySelector('[data-pet-snapshot-list]');
+    snapshotList.replaceChildren(...selectedPets().map((selected) => {
+      const summary = document.createElement('div');
+      summary.className = 'grooming-selected-pet-summary';
+      const name = document.createElement('strong');
+      name.textContent = selected.name || 'Pet profile';
+      const details = document.createElement('span');
+      details.textContent = `${selected.breed || 'Breed not added'} · ${selected.weight || 'Weight not added'} kg`;
+      const vaccine = document.createElement('small');
+      vaccine.textContent = (selected.vaccinationCards || []).length ? 'Vaccination record uploaded' : 'No vaccination record on file';
+      summary.append(name, details, vaccine);
+      return summary;
+    }));
+    form.querySelector('[data-grooming-tier-summary]').textContent = selectedPets().map((item) => `${item.name}: ${groomingWeightTier(item.weight, settings)} tier · ${item.weight || '—'} kg`).join(' | ');
+    form.querySelectorAll('[data-pet-package]').forEach((section) => { section.hidden = !chosenIds.has(section.dataset.petPackage); });
+    const profileLink = form.querySelector('[data-grooming-pet-profile]');
+    if (profileLink && chosenIds.size === 1) profileLink.href = `#pet-profile?id=${encodeURIComponent([...chosenIds][0])}&from=grooming`;
     form.querySelectorAll('[data-package-price]').forEach((radio) => {
       const packageItem = settings.packages.find((item) => item.id === radio.value);
-      const price = Number(packageItem?.[tier] || 0);
+      const packagePet = loadPetProfiles().find((item) => item.id === radio.dataset.packagePet);
+      const price = Number(packageItem?.[groomingWeightTier(packagePet?.weight, settings)] || 0);
       radio.dataset.packagePrice = String(price);
       const output = radio.closest('.grooming-package-option')?.querySelector('b');
       if (output) output.textContent = money(price);
@@ -1822,8 +1845,9 @@ function setupGroomingBooking() {
     const route = matchPetTaxiRoute(locationText, outlet, latestSettings);
     const distanceKm = route ? Number(route.distanceKm) : 0;
     distanceInput.value = String(distanceKm);
+    const petCount = Math.max(1, selectedPets().length);
     quote.innerHTML = route
-      ? `<strong>Estimated taxi fare: ${money(Number(latestSettings.baseFare) + distanceKm * Number(latestSettings.farePerKm))}</strong><span>${escapeHTML(route.city)} to ${escapeHTML(outlet)} · ${distanceKm} km · one way</span>`
+      ? `<strong>Estimated taxi fare for ${petCount} pet${petCount === 1 ? '' : 's'}: ${money((Number(latestSettings.baseFare) + distanceKm * Number(latestSettings.farePerKm)) * petCount)}</strong><span>${escapeHTML(route.city)} to ${escapeHTML(outlet)} · ${distanceKm} km · one way</span>`
       : '<strong>Route estimate unavailable</strong><span>Choose an address in a configured city, or ask Admin to add this city and outlet route.</span>';
     renderQuote();
   };
@@ -1861,10 +1885,20 @@ function setupGroomingBooking() {
   form.querySelector('[data-grooming-pet-carousel]')?.addEventListener('click', (event) => {
     const card = event.target.closest('[data-grooming-pet-choice]');
     if (!card) return;
-    form.elements.petId.value = card.dataset.groomingPetChoice;
+    const chosen = new Set((form.elements.petIds.value || '').split(',').filter(Boolean));
+    if (chosen.has(card.dataset.groomingPetChoice)) chosen.delete(card.dataset.groomingPetChoice);
+    else chosen.add(card.dataset.groomingPetChoice);
+    if (!chosen.size) chosen.add(card.dataset.groomingPetChoice);
+    form.elements.petIds.value = [...chosen].join(',');
+    form.elements.petId.value = [...chosen][0];
     refreshWeightTier();
   });
   form.querySelector('[data-grooming-package-list]')?.addEventListener('change', renderQuote);
+  form.querySelector('[data-grooming-pet-profile]')?.addEventListener('click', (event) => {
+    if (selectedPets().length < 2) return;
+    event.preventDefault();
+    window.alert('Multiple pets are selected. Choose one pet before opening a pet profile.');
+  });
   // Adds clear previous/next controls while retaining native touch scrolling for both carousels.
   form.querySelectorAll('[data-grooming-carousel]').forEach((shell) => {
     const track = shell.querySelector('.grooming-choice-carousel, .grooming-addon-carousel');
@@ -1980,8 +2014,8 @@ function setupGroomingBooking() {
       return;
     }
     const quote = renderQuote();
-    if (!quote.pet || !quote.packageItem) {
-      feedback.textContent = 'Add a pet profile and choose an available package before booking.';
+    if (!quote.pet || quote.petPackages.length !== quote.pets.length || quote.petPackages.some((item) => !item.packageItem)) {
+      feedback.textContent = 'Choose at least one pet and a service package for every selected pet.';
       feedback.classList.add('visible');
       return;
     }
@@ -2045,7 +2079,10 @@ function setupGroomingBooking() {
         return;
       }
     }
-    const remarks = Array.isArray(quote.pet.remarks) ? quote.pet.remarks : [quote.pet.redFlagRemark].filter(Boolean);
+    const remarks = quote.pets.flatMap((item) => {
+      const notes = Array.isArray(item.remarks) ? item.remarks : [item.redFlagRemark].filter(Boolean);
+      return notes.map((note) => `${item.name}: ${note}`);
+    });
     const pickupSelect = form.querySelector('[name="pickup"]');
     const savedAddresses = (() => { try { return JSON.parse(localStorage.getItem('furgo-demo-addresses') || '[]'); } catch { return []; } })();
     const selectedPickupAddress = pickupSelect && pickupSelect.value !== 'new' ? savedAddresses[Number(pickupSelect.value)] : null;
@@ -2055,13 +2092,14 @@ function setupGroomingBooking() {
       id: `grooming-${Date.now()}`, reference: `GR-${Date.now().toString().slice(-7)}`,
       customerName: profile.name || 'Furgo Customer', customerEmail: profile.email || '', customerPhone: profile.phone || '',
       emergencyName: form.elements.emergencyName.value.trim(), emergencyPhone: form.elements.emergencyPhone.value.trim(),
-      petId: quote.pet.id, petName: quote.pet.name, petBreed: quote.pet.breed || 'Not provided', petWeight: quote.pet.weight || '0', petSex: quote.pet.gender || quote.pet.sex || '',
-      vaccinationOnFile: (quote.pet.vaccinationCards || []).length > 0, vaccinationCards: quote.pet.vaccinationCards || [], redFlags: remarks.join(' · '),
-      packageId: quote.packageItem.id, packageName: quote.packageItem.name, packagePrice: quote.packagePrice,
+      petId: quote.pet.id, petIds: quote.pets.map((item) => item.id), petName: quote.pets.map((item) => item.name).join(' | '), petBreed: quote.pets.map((item) => item.breed || 'Not provided').join(' | '), petWeight: quote.pets.map((item) => item.weight || '0').join(' | '), petSex: quote.pets.map((item) => item.gender || item.sex || '').join(' | '),
+      pets: quote.pets.map((item) => ({ id: item.id, name: item.name, species: item.species || 'Dog', breed: item.breed || 'Not provided', weight: item.weight || '0', sex: item.gender || item.sex || '', vaccinationOnFile: (item.vaccinationCards || []).length > 0, vaccinationCards: item.vaccinationCards || [], redFlags: (Array.isArray(item.remarks) ? item.remarks : [item.redFlagRemark].filter(Boolean)).join(' · ') })),
+      vaccinationOnFile: quote.pets.every((item) => (item.vaccinationCards || []).length > 0), vaccinationCards: quote.pets.flatMap((item) => item.vaccinationCards || []), redFlags: remarks.join(' · '),
+      packageId: quote.packageItem.id, packageName: quote.petPackages.map((item) => `${item.pet.name}: ${item.packageItem.name}`).join(' | '), packagePrice: quote.packagePrice, petPackages: quote.petPackages.map((item) => ({ petId: item.pet.id, petName: item.pet.name, packageId: item.packageItem.id, packageName: item.packageItem.name, price: item.price })),
       date: appointmentDate.value, time: appointmentTime.value, outlet: form.elements.outlet.value,
       daycareHours: form.elements.includeDaycare.checked ? Number(form.elements.daycareHours.value) : 0,
       daycareTiming: form.elements.daycareTiming.value, daycareTotal: quote.daycareTotal,
-      addOns: quote.customAddOns.map((item) => ({ id: item.id, name: item.name, description: item.description || '', price: Number(item.price || 0) })),
+      addOns: quote.customAddOns.map((item) => ({ id: item.id, name: item.name, description: item.description || '', price: Number(item.price || 0), quantity: quote.pets.length, lineTotal: Number(item.price || 0) * quote.pets.length })),
       addOnTotal: quote.customAddOnTotal,
       includeTaxi: form.elements.includeTaxi.checked, pickup, dropoff, taxiDistance: quote.taxiDistance, taxiTotal: quote.taxiTotal, taxiSchedule: form.elements.taxiSchedule.value,
       voucherCode: appliedVoucher, discount: voucherDiscount, total: quote.total,
@@ -2096,6 +2134,7 @@ function setupGroomingBooking() {
     }
     window.location.hash = '#grooming-orders';
   });
+  refreshWeightTier();
   refreshSlots();
   updateOptionalFields();
 }
@@ -2561,6 +2600,7 @@ function wireForms() {
   setupServiceBannerCarousel();
   setupAdminOrders();
   setupMyOrders();
+  setupCheckInInteractions();
   setupAdminAccess();
   setupAdminAuditPage();
   setupAdminEnquiries();

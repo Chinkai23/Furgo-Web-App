@@ -98,6 +98,70 @@ function formatOrderDate(value = '') {
   return parsed.toLocaleDateString('en-MY', { day: 'numeric', month: 'short', year: 'numeric' });
 }
 
+function orderPetCards(order) {
+  if (order.serviceId === 'marketplace' || order.type === 'pass-purchase') return '';
+  const split = (value) => String(value ?? '').split(/\s*\|\s*/).map((part) => part.trim()).filter(Boolean);
+  const snapshots = Array.isArray(order.pets) && order.pets.length
+    ? order.pets
+    : (Array.isArray(order.petNames) ? order.petNames : split(order.petName)).map((pet, index) => ({
+      id: Array.isArray(order.petIds) ? order.petIds[index] : order.petId,
+      name: typeof pet === 'string' ? pet : pet?.name,
+      species: split(order.petSpecies || order.species)[index],
+      breed: split(order.petBreed || order.breed)[index],
+      sex: split(order.petSex || order.gender)[index],
+      weight: split(order.petWeight || order.weight)[index],
+      colour: split(order.petColour || order.colour)[index],
+    }));
+  if (!snapshots.length) return '';
+  let profiles = [];
+  try {
+    const saved = JSON.parse(localStorage.getItem('furgo-demo-pet-profiles') || '[]');
+    if (Array.isArray(saved)) profiles = saved;
+  } catch { profiles = []; }
+  return `<div class="my-order-pet-list">${snapshots.map((snapshot, index) => {
+    const profile = profiles.find((item) => String(item.id) === String(snapshot.id))
+      || profiles.find((item) => item.name === snapshot.name)
+      || (index === 0 ? order.pet : null)
+      || {};
+    const name = snapshot.name || profile.name || `Pet ${index + 1}`;
+    const facts = [
+      ['Species', snapshot.species || profile.species],
+      ['Breed', snapshot.breed || profile.breed],
+      ['Gender', snapshot.sex || snapshot.gender || profile.sex || profile.gender],
+      ['Weight', (snapshot.weight ?? profile.weight) !== '' && (snapshot.weight ?? profile.weight) != null ? `${snapshot.weight ?? profile.weight} kg` : ''],
+      ['Colour', snapshot.colour || snapshot.color || profile.colour || profile.color],
+      ['Vaccination Cards', snapshot.vaccinationCards?.length ? 'Uploaded' : snapshot.vaccinationOnFile ? 'Uploaded' : ''],
+      ['Care Notes', snapshot.redFlags || (Array.isArray(profile.remarks) ? profile.remarks.join(' · ') : profile.redFlagRemark)],
+    ].filter(([, value]) => value != null && String(value).trim());
+    return `<section class="my-order-pet-card"><h3>${escapeHTML(name)}</h3>${facts.length ? `<dl>${facts.map(([label, value]) => `<div><dt>${escapeHTML(label)}</dt><dd>${escapeHTML(value)}</dd></div>`).join('')}</dl>` : '<p>Pet profile details are not available.</p>'}</section>`;
+  }).join('')}</div>`;
+}
+
+function orderDetailRows(order) {
+  const appointment = order.serviceId === 'hotel'
+    ? [order.roomName, order.checkIn || order.startDate, order.checkOut || order.endDate, order.outlet].filter(Boolean).join(' · ')
+    : [order.packageName || order.planName, order.date || order.bookingDate, order.time, order.dropoffTime && `Drop-off ${order.dropoffTime}`, order.pickupTime && `Pick-up ${order.pickupTime}`, order.outlet].filter(Boolean).join(' · ');
+  const items = Array.isArray(order.items)
+    ? order.items.map((item) => `${item.name || item.productName || 'Product'} × ${Number(item.quantity) || 1}`).join(', ')
+    : '';
+  const addOns = Array.isArray(order.addOns)
+    ? order.addOns.map((item) => typeof item === 'string' ? item : item.name).filter(Boolean).join(', ')
+    : '';
+  const payment = [order.paymentStatus, order.paymentMethod, order.paymentReference && `Ref ${order.paymentReference}`].filter(Boolean).join(' · ');
+  const total = Number(order.totalAmount ?? order.total);
+  const rows = [
+    ['Service', order.serviceLabel],
+    [order.serviceId === 'marketplace' ? 'Items' : 'Appointment', order.serviceId === 'marketplace' ? items || order.summary : appointment || order.summary],
+    ['Add-On Services', addOns],
+    ['Pet Taxi', order.includeTaxi || order.taxi?.pickup || order.taxi?.dropoff ? [order.taxiSchedule, order.taxi?.pickup, order.taxi?.dropoff].filter(Boolean).join(' · ') || 'Included' : ''],
+    ['Payment', payment],
+    ['Total Paid', Number.isFinite(total) ? `MYR ${total.toFixed(2)}` : ''],
+    ['Delivery Address', order.shippingAddress || order.deliveryAddress || order.address],
+    ['Order Notes', order.notes || order.specialRequests],
+  ].filter(([, value]) => value != null && String(value).trim());
+  return rows.map(([label, value]) => `<div><dt>${escapeHTML(label)}</dt><dd>${escapeHTML(value)}</dd></div>`).join('');
+}
+
 // My Orders: combines marketplace, grooming, hotel, and daycare orders with service/status tabs.
 export function myOrdersPage(routeParams = new URLSearchParams()) {
   let profile = {};
@@ -141,7 +205,11 @@ export function myOrdersPage(routeParams = new URLSearchParams()) {
     dateLabel: order.createdAt || order.date || '', totalAmount: Number(order.total) || 0,
   }));
 
-  const allOrders = [...marketplace, ...grooming, ...hotels, ...daycare].sort((a, b) => new Date(b.createdAt || b.dateLabel) - new Date(a.createdAt || a.dateLabel));
+  const orderCreatedAt = (order) => {
+    const timestamp = new Date(order.createdAt || order.dateLabel || order.date || 0).getTime();
+    return Number.isFinite(timestamp) ? timestamp : 0;
+  };
+  const allOrders = [...marketplace, ...grooming, ...hotels, ...daycare].sort((a, b) => orderCreatedAt(b) - orderCreatedAt(a));
   const serviceOrders = allOrders.filter((order) => service === 'all' || order.serviceId === service);
   const visibleOrders = serviceOrders.filter((order) => status === 'all' || statusCategory(customerOrderStatus(order)) === status);
   const icon = (file) => `Image/Icon/${encodeURIComponent(file)}`;
@@ -154,15 +222,15 @@ export function myOrdersPage(routeParams = new URLSearchParams()) {
 
   const orderCard = (order) => {
     const serviceName = order.serviceLabel;
-    const isCanceled = statusCategory(order.status) === 'canceled';
     const statusLabel = customerOrderStatus(order);
+    const isCanceled = statusCategory(statusLabel) === 'canceled';
     const summary = order.summary || order.description || 'Order details will appear here.';
     const marketplaceDetails = order.serviceId === 'marketplace' && order.trackingNumber
       ? `<p class="my-order-extra">${escapeHTML(order.courier || 'Courier')}: ${escapeHTML(order.trackingNumber)}</p>` : '';
     const groomingDetails = order.serviceId === 'grooming' && order.includeTaxi
       ? `<p class="my-order-extra">Pet taxi: ${escapeHTML(order.taxiSchedule || 'Pickup time pending')} · MYR ${Number(order.taxiTotal || 0).toFixed(2)}</p>` : '';
     const hotelDetails = order.serviceId === 'hotel'
-      ? `${order.roomName ? `<p class="my-order-extra">${escapeHTML(order.roomName)} · ${Number(order.nights || 0)} night(s) · ${escapeHTML(order.outlet || '')}</p>` : ''}${order.mediaLogs?.length ? `<div class="my-order-media-feed"><strong>My Stay · Care updates</strong>${order.mediaLogs.map((entry) => entry.type?.startsWith('video/') ? `<video controls preload="metadata" src="${escapeHTML(entry.data)}" aria-label="Pet Hotel update from ${escapeHTML(entry.date || '')}"></video>` : `<a href="${escapeHTML(entry.data)}" target="_blank" rel="noopener"><img src="${escapeHTML(entry.data)}" alt="Pet Hotel care update from ${escapeHTML(entry.date || '')}" loading="lazy" /><span>${escapeHTML(entry.date || '')} · ${escapeHTML(entry.name)}</span></a>`).join('')}</div>` : ''}` : '';
+      ? `${order.roomName ? `<p class="my-order-extra">${escapeHTML(order.roomName)} · ${Number(order.nights || 0)} night(s) · ${escapeHTML(order.outlet || '')}${order.roomArrangement === 'shared' ? ' · Pets sharing one room' : ''}</p>` : ''}${order.mediaLogs?.length ? `<div class="my-order-media-feed"><strong>My Stay · Care updates</strong>${order.mediaLogs.map((entry) => entry.type?.startsWith('video/') ? `<video controls preload="metadata" src="${escapeHTML(entry.data)}" aria-label="Pet Hotel update from ${escapeHTML(entry.date || '')}"></video>` : `<a href="${escapeHTML(entry.data)}" target="_blank" rel="noopener"><img src="${escapeHTML(entry.data)}" alt="Pet Hotel care update from ${escapeHTML(entry.date || '')}" loading="lazy" /><span>${escapeHTML(entry.date || '')} · ${escapeHTML(entry.name)}</span></a>`).join('')}</div>` : ''}` : '';
     const daycareDetails = order.serviceId === 'daycare' ? `<p class="my-order-extra">${order.type === 'pass-purchase' ? `${Number(order.sessions || 0)} sessions · valid through ${escapeHTML(order.expiresOn || '—')}` : `${Number(order.hours || 0)} hour visit · Drop-off ${escapeHTML(order.dropoffTime || '—')} · Pick-up ${escapeHTML(order.pickupTime || '—')}${order.passName ? ` · Pass ${escapeHTML(order.passName)}` : ''}`}</p>${order.addOns?.length ? `<p class="my-order-extra">Care: ${order.addOns.map((item) => escapeHTML(item.name)).join(', ')}</p>` : ''}` : '';
     const taxiEnabled = Boolean(order.includeTaxi || order.taxi?.pickup || order.taxi?.dropoff);
     const taxiProgress = order.taxiProgress?.status || 'Scheduled';
@@ -175,15 +243,17 @@ export function myOrdersPage(routeParams = new URLSearchParams()) {
     const taxiTracking = taxiEnabled ? `<section class="my-order-taxi-tracking"><strong>Pet Taxi · ${escapeHTML(taxiProgress)}</strong>${taxiLocationContent}${taxiProgress !== 'Completed' ? `<a href="${taxiCheckInHref}">Open Pet Taxi QR code</a>` : ''}</section>` : '';
     const reference = order.reference || order.id || '';
     const date = formatOrderDate(order.dateLabel);
+    const orderDetails = orderDetailRows(order);
+    const petsDetails = orderPetCards(order);
     const cancelAction = canCancelServiceOrder(order) ? `<button class="button button-light my-order-cancel" type="button" data-cancel-customer-order="${escapeHTML(order.serviceId)}|${escapeHTML(order._storageKey)}|${escapeHTML(order.id)}">Cancel Booking</button>` : '';
-    return `<article class="my-order-card"><div class="my-order-card-top"><span class="my-order-service-label">${escapeHTML(serviceName)}</span><b class="my-order-status ${isCanceled ? 'is-canceled' : statusCategory(statusLabel) === 'completed' ? 'is-complete' : ''}">${escapeHTML(statusLabel)}</b></div><h2>${escapeHTML(order.title)}</h2><p class="my-order-summary">${escapeHTML(summary)}</p><div class="my-order-card-bottom"><small>${[reference, date].filter(Boolean).map(escapeHTML).join(' · ')}</small><strong>MYR ${order.totalAmount.toFixed(2)}</strong></div>${marketplaceDetails}${groomingDetails}${hotelDetails}${daycareDetails}${taxiTracking}${order.receipt ? `<a class="my-order-tracking" href="${escapeHTML(order.receipt.data)}" download="${escapeHTML(order.receipt.name || 'receipt')}">View / download receipt or invoice</a>` : ''}${order.trackingUrl ? `<a class="my-order-tracking" href="${escapeHTML(order.trackingUrl)}" target="_blank" rel="noopener noreferrer">Track delivery</a>` : ''}${cancelAction}</article>`;
+    const receiptAction = order.receipt?.data
+      ? `<a class="button button-primary my-order-receipt-button" href="${escapeHTML(order.receipt.data)}" download="${escapeHTML(order.receipt.name || 'receipt')}">Download Receipt</a>`
+      : `<button class="button button-light my-order-receipt-button" type="button" data-show-receipt-message>Download Receipt</button><p class="my-order-receipt-empty" data-receipt-unavailable-message hidden>Your receipt will be available to download once the outlet has received your order.</p>`;
+    return `<details class="my-order-card"><summary class="my-order-card-summary"><div class="my-order-card-top"><span class="my-order-service-label">${escapeHTML(serviceName)}</span><b class="my-order-status ${isCanceled ? 'is-canceled' : statusCategory(statusLabel) === 'completed' ? 'is-complete' : ''}">${escapeHTML(statusLabel)}</b></div><h2>${escapeHTML(order.title)}</h2><p class="my-order-summary">${escapeHTML(summary)}</p><div class="my-order-card-bottom"><small>${[reference, date].filter(Boolean).map(escapeHTML).join(' · ')}</small><strong>MYR ${order.totalAmount.toFixed(2)}</strong></div><span class="my-order-expand-hint">View Order Details <span aria-hidden="true">⌄</span></span></summary><div class="my-order-expanded"><dl class="my-order-detail-list">${orderDetails}</dl>${petsDetails}${marketplaceDetails}${groomingDetails}${hotelDetails}${daycareDetails}${taxiTracking}${receiptAction}${order.trackingUrl ? `<a class="my-order-tracking" href="${escapeHTML(order.trackingUrl)}" target="_blank" rel="noopener noreferrer">Track Delivery</a>` : ''}${cancelAction}</div></details>`;
   };
 
   const groups = service === 'all'
-    ? orderServices.filter((item) => item.id !== 'all').map((item) => {
-      const orders = visibleOrders.filter((order) => order.serviceId === item.id);
-      return `<section class="my-orders-group"><div class="my-orders-group-heading"><h2>${item.label}</h2><span>${orders.length} ${orders.length === 1 ? 'order' : 'orders'}</span></div>${orders.length ? orders.map(orderCard).join('') : `<p class="my-orders-empty-category">No ${item.label.toLowerCase()} orders here yet.</p>`}</section>`;
-    }).join('')
+    ? visibleOrders.length ? visibleOrders.map(orderCard).join('') : `<section class="my-orders-empty"><h2>No Orders Found</h2><p>Your orders will appear here.</p></section>`
     : visibleOrders.length ? visibleOrders.map(orderCard).join('') : `<section class="my-orders-empty"><h2>No ${orderServices.find((item) => item.id === service)?.label || ''} Orders Found</h2><p>Try another service or status filter.</p></section>`;
 
   return `<main class="my-orders-page"><header class="my-orders-header"><a href="#${encodeURIComponent(returnTo)}" aria-label="Back">‹</a><h1>My Orders</h1><span aria-hidden="true"></span></header><nav class="my-orders-tabs" aria-label="Filter orders by service">${serviceTabs}</nav><nav class="my-orders-status-tabs" aria-label="Filter orders by status">${statusTabs}</nav><p class="my-orders-count">${visibleOrders.length} ${visibleOrders.length === 1 ? 'order' : 'orders'}</p><div class="my-orders-content">${groups}</div>${bottomNavigation('activity', icon)}</main>`;
@@ -198,6 +268,12 @@ export function setupMyOrders() {
   if (document.documentElement.dataset.customerOrderCancellationReady === 'true') return;
   document.documentElement.dataset.customerOrderCancellationReady = 'true';
   document.addEventListener('click', async (event) => {
+    const receiptButton = event.target.closest('[data-show-receipt-message]');
+    if (receiptButton) {
+      const message = receiptButton.closest('.my-order-expanded')?.querySelector('[data-receipt-unavailable-message]');
+      if (message) message.hidden = false;
+      return;
+    }
     const button = event.target.closest('[data-cancel-customer-order]');
     if (!button) return;
     const [serviceId, key, id] = button.dataset.cancelCustomerOrder.split('|');

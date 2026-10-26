@@ -20,16 +20,17 @@ export function petHotelPage() {
   const petCards = pets.map((pet) => `<button class="grooming-pet-card ${pet.id === pets[0]?.id ? 'is-selected' : ''}" type="button" data-hotel-pet-choice="${escapeHTML(pet.id)}" aria-pressed="${pet.id === pets[0]?.id}"><img class="grooming-pet-photo" src="${escapeHTML(pet.photo || icon('Profile Picture.png'))}" alt="" /><span class="grooming-pet-card-copy"><strong>${escapeHTML(pet.name)}</strong><span>${escapeHTML(pet.breed || 'Breed not added')}</span><small>${escapeHTML(pet.weight || 'Weight not added')} kg</small></span>${pet.id === pets[0]?.id ? `<span class="grooming-pet-selected-mark"><img src="${icon('Icon-13.png')}" alt="Selected" /></span>` : ''}</button>`).join('');
   const outletOptions = settings.outlets.map((outlet) => `<option>${escapeHTML(outlet)}</option>`).join('');
   const roomCards = settings.rooms.filter((room) => room.active !== false).map((room) => `<article class="hotel-room-card" data-hotel-room-card="${escapeHTML(room.id)}"><span class="hotel-room-image">${room.photo ? `<img src="${escapeHTML(room.photo)}" alt="${escapeHTML(room.name)}" />` : '<span aria-hidden="true">🐾</span>'}</span><span class="hotel-room-copy"><strong>${escapeHTML(room.name)}</strong><small>${escapeHTML(room.dimensions || 'Room dimensions on request')} · ${Number(room.capacity)} units</small><span>${escapeHTML(room.description || '')}</span><small class="hotel-room-amenities">${escapeHTML(room.amenities || '')}</small><b>${hotelMoney(room.nightlyRate)} <small>/ night</small></b><span class="hotel-room-availability" data-room-availability>Choose dates to see available rooms</span></span><div class="hotel-room-unit-grid" data-hotel-units aria-label="${escapeHTML(room.name)} room units">Select your stay dates to view rooms.</div></article>`).join('');
+  const roomGroups = pets.map((pet) => `<div class="hotel-room-pet-group" data-hotel-room-pet="${escapeHTML(pet.id)}" ${pet.id !== pets[0]?.id ? 'hidden' : ''}><h3>Select A Room Package For ${escapeHTML(pet.name)}</h3><div class="hotel-room-list" data-hotel-room-list data-room-pet-id="${escapeHTML(pet.id)}">${roomCards || '<p>No room types are currently available. Please check again later.</p>'}</div></div>`).join('');
   const addOnCards = settings.addOns.filter((item) => item.active !== false).map((item) => `<label class="hotel-addon-card"><input type="checkbox" name="hotelAddOn" value="${escapeHTML(item.id)}" data-hotel-addon /><span><strong>${escapeHTML(item.name)}</strong><small>${escapeHTML(item.description || '')}</small><b>${hotelMoney(item.price)}</b></span></label>`).join('');
   const groomingSettings = loadGroomingSettings();
-  const grooming = groomingSettings.packages.filter((item) => item.active !== false).map((item) => `<label class="hotel-grooming-card"><input type="radio" name="hotelGroomingPackage" value="${escapeHTML(item.id)}" data-hotel-grooming-package /><span><strong>${escapeHTML(item.name)}</strong><small>${escapeHTML(item.description || '')}</small><b data-hotel-grooming-price>${hotelMoney(item.small)}</b></span></label>`).join('');
+  const grooming = pets.map((pet) => `<div data-hotel-grooming-pet="${escapeHTML(pet.id)}" ${pet.id !== pets[0]?.id ? 'hidden' : ''}><h3>Select A Service Package For ${escapeHTML(pet.name)}</h3>${groomingSettings.packages.filter((item) => item.active !== false).map((item, index) => `<label class="hotel-grooming-card"><input type="radio" name="hotelGroomingPackage-${escapeHTML(pet.id)}" value="${escapeHTML(item.id)}" data-hotel-grooming-package data-package-pet="${escapeHTML(pet.id)}" ${index === 0 ? 'checked' : ''} /><span><strong>${escapeHTML(item.name)}</strong><small>${escapeHTML(item.description || '')}</small><b data-hotel-grooming-price>${hotelMoney(item.small)}</b></span></label>`).join('')}</div>`).join('');
   const taxiSchedule = `${renderPetTaxiAddressPicker({ addresses, profile, selectName: 'taxiAddress', manualName: 'taxiManualAddress' })}<div class="hotel-taxi-options"><label><input type="checkbox" name="taxiPickup" data-hotel-taxi /> Pickup for check-in</label><label><input type="checkbox" name="taxiDropoff" data-hotel-taxi /> Drop-off after check-out</label></div><p class="hotel-taxi-estimate" data-hotel-taxi-estimate>Choose a saved or manual address to see an estimate.</p><label class="grooming-field">Taxi schedule<select name="taxiSchedule"><option value="">Choose a pickup time</option>${petTaxi.scheduleSlots.map((time) => `<option value="${escapeHTML(time)}">${escapeHTML(time)}</option>`).join('')}</select></label>`;
 
   return `<main class="grooming-page hotel-page"><header class="grooming-header grooming-header-centered"><a class="grooming-back" href="#home" aria-label="Back to Home">‹</a><h1>Pet Hotel</h1><a class="grooming-header-orders" href="#orders?service=hotel&from=hotel" aria-label="My Orders"><img src="${icon('Icon-18.png')}" alt="" /></a></header>
     ${customerServiceBannerMarkup('hotel')}
     <form class="grooming-booking-form hotel-booking-form" data-hotel-booking>
-      <section class="grooming-section"><div class="grooming-section-heading"><span>01</span><div><h2>Choose Your Pet</h2><p>Pet information comes from the profile you saved.</p></div></div><div class="grooming-pet-carousel" data-hotel-pet-carousel>${petCards || '<p>No pet profiles yet. Add a pet profile before booking a stay.</p>'}</div><input type="hidden" name="petId" value="${escapeHTML(pets[0]?.id || '')}" /><div class="hotel-health-gate" data-hotel-health-gate></div><label class="hotel-vaccination-confirm" data-hotel-vaccination-confirm><input type="checkbox" name="vaccinationCurrent" required /> I confirm this pet’s vaccination record is current and valid for the full stay.</label><a class="hotel-vaccination-link" data-hotel-pet-profile href="${pets[0] ? `#pet-profile?id=${encodeURIComponent(pets[0].id)}&from=hotel` : '#pet-profile?mode=add&from=hotel'}">Manage pet profile and vaccination card</a></section>
-      <section class="grooming-section"><div class="grooming-section-heading"><span>02</span><div><h2>Choose Your Stay Dates</h2><p>Tap a check-in date, then tap a check-out date to complete your range.</p></div></div><div class="hotel-range-display"><div><small>Check-in</small><strong data-hotel-check-in-display>Choose date</strong></div><span aria-hidden="true">→</span><div><small>Check-out</small><strong data-hotel-check-out-display>Choose date</strong></div></div><input type="hidden" name="checkIn" data-hotel-check-in value="" /><input type="hidden" name="checkOut" data-hotel-check-out value="" /><div class="hotel-calendar" data-hotel-calendar aria-label="Select check-in and check-out dates"><div class="hotel-calendar-heading"><button type="button" data-hotel-calendar-nav="previous" aria-label="Previous month">‹</button><strong data-hotel-calendar-month></strong><button type="button" data-hotel-calendar-nav="next" aria-label="Next month">›</button></div><div class="hotel-calendar-grid" data-hotel-calendar-grid role="grid"></div><div class="hotel-calendar-legend"><span><i class="is-legend-selected"></i>Selected</span><span><i class="is-legend-range"></i>Stay dates</span><span><i class="is-legend-unavailable"></i>Unavailable</span></div></div><label class="grooming-field hotel-outlet-field">Furgo outlet<select name="outlet" data-hotel-outlet required>${outletOptions}</select></label><p class="hotel-date-summary" data-hotel-date-summary>Select check-in and check-out dates to view rooms available for the full stay.</p><div class="hotel-room-list" data-hotel-room-list>${roomCards || '<p>No room types are currently available. Please check again later.</p>'}</div><input type="hidden" name="roomId" data-hotel-room-id /><input type="hidden" name="roomUnit" data-hotel-room-unit /></section>
+      <section class="grooming-section"><div class="grooming-section-heading"><span>01</span><div><h2>Choose Your Pet</h2><p>Select one or more pets for this stay. Tap a selected pet again to remove it.</p></div></div><div class="grooming-pet-carousel" data-hotel-pet-carousel>${petCards || '<p>No pet profiles yet. Add a pet profile before booking a stay.</p>'}</div><input type="hidden" name="petId" value="${escapeHTML(pets[0]?.id || '')}" /><input type="hidden" name="petIds" value="${escapeHTML(pets[0]?.id || '')}" /><div class="hotel-health-gate" data-hotel-health-gate></div><label class="hotel-vaccination-confirm" data-hotel-vaccination-confirm><input type="checkbox" name="vaccinationCurrent" required /> I confirm the selected pets’ vaccination records are current and valid for the full stay.</label><a class="hotel-vaccination-link" data-hotel-pet-profile href="${pets[0] ? `#pet-profile?id=${encodeURIComponent(pets[0].id)}&from=hotel` : '#pet-profile?mode=add&from=hotel'}">More Pet Profile</a></section>
+      <section class="grooming-section"><div class="grooming-section-heading"><span>02</span><div><h2>Choose Your Stay Dates</h2><p>Tap a check-in date, then tap a check-out date to complete your range.</p></div></div><div class="hotel-range-display"><div><small>Check-in</small><strong data-hotel-check-in-display>Choose date</strong></div><span aria-hidden="true">→</span><div><small>Check-out</small><strong data-hotel-check-out-display>Choose date</strong></div></div><input type="hidden" name="checkIn" data-hotel-check-in value="" /><input type="hidden" name="checkOut" data-hotel-check-out value="" /><div class="hotel-calendar" data-hotel-calendar aria-label="Select check-in and check-out dates"><div class="hotel-calendar-heading"><button type="button" data-hotel-calendar-nav="previous" aria-label="Previous month">‹</button><strong data-hotel-calendar-month></strong><button type="button" data-hotel-calendar-nav="next" aria-label="Next month">›</button></div><div class="hotel-calendar-grid" data-hotel-calendar-grid role="grid"></div><div class="hotel-calendar-legend"><span><i class="is-legend-selected"></i>Selected</span><span><i class="is-legend-range"></i>Stay dates</span><span><i class="is-legend-unavailable"></i>Unavailable</span></div></div><label class="grooming-field hotel-outlet-field">Furgo outlet<select name="outlet" data-hotel-outlet required>${outletOptions}</select></label><p class="hotel-date-summary" data-hotel-date-summary>Select check-in and check-out dates to view rooms available for the full stay.</p><input type="hidden" name="roomAssignments" value="{}" data-hotel-room-assignments /><div class="hotel-room-sharing" data-hotel-room-sharing hidden><label><input type="checkbox" name="shareHotelRoom" data-hotel-share-room /> Keep the selected pets together in one room</label><p>Your pets will share the selected room.</p></div><p class="hotel-double-room-empty" data-hotel-double-room-empty hidden>No room types are currently marked as double rooms. Please contact Furgo for help.</p>${roomGroups || '<p>No pet profiles yet.</p>'}</section>
       <section class="grooming-section hotel-pet-taxi-section"><div class="grooming-section-heading"><span><img class="pet-taxi-service-icon" src="Image/Icon/MVP Icon-05.png" alt="" /></span><div><h2>Pet Taxi (Add On)</h2><p>Add pickup or drop-off to your Pet Hotel booking.</p></div></div><label class="hotel-addon-toggle"><input type="checkbox" name="includeTaxi" data-hotel-include-taxi /> Add Pet Taxi pickup or drop-off <small>From MYR ${Number(petTaxi.baseFare).toFixed(2)} + MYR ${Number(petTaxi.farePerKm).toFixed(2)} / km</small></label><div class="hotel-taxi-fields" data-hotel-taxi-fields hidden>${taxiSchedule}</div></section>
       <section class="grooming-section"><div class="grooming-section-heading"><span>04</span><div><h2>Other Add On Services</h2><p>Choose optional services for your pet’s stay.</p></div></div><div class="hotel-addon-list">${addOnCards || '<p>No optional care services are available right now.</p>'}</div><label class="hotel-addon-toggle"><input type="checkbox" name="includeGrooming" data-hotel-include-grooming /> Add grooming during the stay</label><div class="hotel-grooming-fields" data-hotel-grooming-fields hidden><div class="hotel-grooming-list">${grooming || '<p>No grooming add-ons are currently available.</p>'}</div><div class="grooming-form-grid hotel-form-grid"><label class="grooming-field">Preferred grooming date<input type="date" name="groomingDate" data-hotel-grooming-date /></label><label class="grooming-field">Preferred grooming time<select name="groomingTime">${settings.groomingTimeSlots.map((time) => `<option value="${escapeHTML(time)}">${escapeHTML(time)}</option>`).join('')}</select></label></div><p class="hotel-grooming-estimate" data-hotel-grooming-estimate></p></div></section>
       <section class="grooming-section"><div class="grooming-section-heading"><span>05</span><div><h2>Emergency Contact</h2><p>We’ll use this contact if we need to reach you during the stay.</p></div></div><div class="grooming-form-grid hotel-form-grid"><label class="grooming-field">Contact name<input name="emergencyName" value="${escapeHTML(profile.name || '')}" required /></label><label class="grooming-field">Phone number<input name="emergencyPhone" type="tel" value="${escapeHTML(profile.phone || '')}" required /></label></div></section>
@@ -45,7 +46,8 @@ export function setupHotelBooking() {
   let appliedCode = '';
   const settings = loadHotelSettings();
   const message = form.querySelector('[data-hotel-feedback]');
-  const selectedPet = () => loadPetProfiles().find((pet) => pet.id === form.elements.petId.value);
+  const selectedPets = () => (form.elements.petIds.value || form.elements.petId.value || '').split(',').filter(Boolean).map((id) => loadPetProfiles().find((pet) => pet.id === id)).filter(Boolean);
+  const selectedPet = () => selectedPets()[0];
   const calendar = form.querySelector('[data-hotel-calendar]');
   let calendarMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
   const dateValue = (date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
@@ -91,18 +93,31 @@ export function setupHotelBooking() {
     const end = new Date(`${form.elements.checkOut.value}T00:00:00`);
     return Number.isFinite(start.getTime()) && Number.isFinite(end.getTime()) && end > start ? Math.ceil((end - start) / 86400000) : 0;
   };
-  const chosenRoom = () => settings.rooms.find((room) => room.id === form.elements.roomId.value && room.active !== false && form.elements.roomUnit.value);
+  const readRoomAssignments = () => { try { return JSON.parse(form.elements.roomAssignments.value || '{}'); } catch { return {}; } };
+  const writeRoomAssignments = (assignments) => { form.elements.roomAssignments.value = JSON.stringify(assignments); };
+  const shareHotelRoom = () => selectedPets().length > 1 && form.elements.shareHotelRoom.checked;
+  const updateRoomSharingOption = () => {
+    const sharingOption = form.querySelector('[data-hotel-room-sharing]');
+    const show = selectedPets().length > 1;
+    sharingOption.hidden = !show;
+    if (!show) form.elements.shareHotelRoom.checked = false;
+  };
+  const chosenRoom = (petId) => {
+    const assignment = readRoomAssignments()[petId];
+    return settings.rooms.find((room) => room.id === assignment?.roomId && room.active !== false && assignment?.unit && (!shareHotelRoom() || room.doubleRoom === true));
+  };
   const updateHealthGate = () => {
-    const pet = selectedPet();
-    const hasCard = Boolean(pet?.vaccinationCards?.length);
+    const pets = selectedPets();
+    const pet = pets[0];
+    const hasCard = pets.length > 0 && pets.every((item) => item.vaccinationCards?.length);
     const gate = form.querySelector('[data-hotel-health-gate]');
-    gate.innerHTML = !pet ? '<strong>Add a pet profile and current vaccination card to book Pet Hotel.</strong>' : !hasCard ? '<strong>Vaccination card required.</strong> Add a current card in your pet profile to book Pet Hotel.' : '<strong>Vaccination card uploaded.</strong> Confirm it remains current for the full stay. Staff will review the card.';
+    gate.innerHTML = !pet ? '<strong>Add a pet profile and current vaccination card to book Pet Hotel.</strong>' : !hasCard ? '<strong>Vaccination cards required.</strong> Every selected pet needs a current card in its profile.' : '<strong>Vaccination cards uploaded.</strong> Confirm they remain current for the full stay. Staff will review them.';
     const confirm = form.querySelector('[data-hotel-vaccination-confirm]');
     confirm.hidden = !hasCard;
     form.elements.vaccinationCurrent.required = hasCard;
     if (!hasCard) form.elements.vaccinationCurrent.checked = false;
     const profileLink = form.querySelector('[data-hotel-pet-profile]');
-    profileLink.href = pet ? `#pet-profile?id=${encodeURIComponent(pet.id)}&from=hotel` : '#pet-profile?mode=add&from=hotel';
+    profileLink.href = pets.length === 1 ? `#pet-profile?id=${encodeURIComponent(pet.id)}&from=hotel` : '#pet-profile?from=hotel';
   };
   const refreshRooms = () => {
     const checkIn = form.elements.checkIn.value;
@@ -120,21 +135,40 @@ export function setupHotelBooking() {
     form.querySelector('[data-hotel-date-summary]').textContent = closedStayDate ? `The outlet is not accepting stays on ${closedStayDate}. Please select different dates.` : validRange ? `${count} night${count === 1 ? '' : 's'} · choose an available room unit below.` : 'Select check-in, then check-out, to check room availability.';
     renderCalendar();
     const bookings = loadHotelBookings();
-    let roomSelectionStillValid = false;
-    form.querySelectorAll('[data-hotel-room-card]').forEach((card) => {
-      const room = settings.rooms.find((item) => item.id === card.dataset.hotelRoomCard);
-      const units = room ? availableHotelUnits(room, outlet, checkIn, checkOut, bookings) : [];
-      const availableCount = closedStayDate ? 0 : units.filter((unit) => unit.available).length;
-      card.querySelector('[data-room-availability]').textContent = validRange ? `${availableCount} of ${units.length} units available` : 'Choose dates to see room availability';
-      let thisRoomSelected = false;
-      card.querySelector('[data-hotel-units]').innerHTML = validRange && !closedStayDate ? units.map(({ unit, available }) => {
-        const selected = form.elements.roomId.value === room.id && form.elements.roomUnit.value === unit && available;
-        if (selected) { roomSelectionStillValid = true; thisRoomSelected = true; }
-        return `<button type="button" class="hotel-unit-seat ${available ? 'is-available' : 'is-unavailable'} ${selected ? 'is-selected' : ''}" data-hotel-unit-choice="${escapeHTML(unit)}" data-room-id="${escapeHTML(room.id)}" aria-label="${escapeHTML(room.name)} ${escapeHTML(unit)}: ${available ? 'available' : 'unavailable'}" aria-pressed="${selected}" ${available ? '' : 'disabled'}>${escapeHTML(unit.replace('Unit ', ''))}</button>`;
-      }).join('') : '<span class="hotel-unit-prompt">Choose dates to view availability</span>';
-      card.classList.toggle('is-selected', thisRoomSelected);
+    const assignments = readRoomAssignments();
+    const sharing = shareHotelRoom();
+    const selected = selectedPets();
+    const sharedPetIds = new Set(selected.map((pet) => pet.id));
+    const sharedNames = selected.map((pet) => pet.name).join(' & ');
+    const doubleRoomEmpty = form.querySelector('[data-hotel-double-room-empty]');
+    const doubleRoomsExist = settings.rooms.some((room) => room.active !== false && room.doubleRoom === true);
+    doubleRoomEmpty.hidden = !sharing || doubleRoomsExist;
+    form.querySelectorAll('[data-hotel-room-pet]').forEach((group) => {
+      const petId = group.dataset.hotelRoomPet;
+      const currentAssignment = assignments[petId];
+      const heading = group.querySelector('h3');
+      if (heading) heading.textContent = sharing ? `Select A Shared Room For ${sharedNames}` : `Select A Room Package For ${selected.find((pet) => pet.id === petId)?.name || 'Your Pet'}`;
+      let roomSelectionStillValid = false;
+      group.querySelectorAll('[data-hotel-room-card]').forEach((card) => {
+        const room = settings.rooms.find((item) => item.id === card.dataset.hotelRoomCard);
+        card.hidden = sharing && room?.doubleRoom !== true;
+        const units = room ? availableHotelUnits(room, outlet, checkIn, checkOut, bookings) : [];
+        const availableCount = closedStayDate ? 0 : units.filter((unit) => unit.available).length;
+        card.querySelector('[data-room-availability]').textContent = validRange ? `${availableCount} of ${units.length} units available` : 'Choose dates to see room availability';
+        const isThisRoom = currentAssignment?.roomId === room?.id;
+        card.querySelector('[data-hotel-units]').innerHTML = validRange && !closedStayDate ? units.map(({ unit, available }) => {
+          const assignedToOtherPet = !sharing && Object.entries(assignments).some(([otherPetId, assignment]) => otherPetId !== petId && assignment?.unit === unit && assignment?.roomId === room?.id);
+          const unitAvailable = available && !assignedToOtherPet;
+          const selected = isThisRoom && currentAssignment?.unit === unit && unitAvailable;
+          if (selected) roomSelectionStillValid = true;
+          return `<button type="button" class="hotel-unit-seat ${unitAvailable ? 'is-available' : 'is-unavailable'} ${selected ? 'is-selected' : ''}" data-hotel-unit-choice="${escapeHTML(unit)}" data-room-id="${escapeHTML(room.id)}" data-pet-id="${escapeHTML(petId)}" aria-label="${escapeHTML(room.name)} ${escapeHTML(unit)}: ${unitAvailable ? 'available' : 'unavailable'}" aria-pressed="${selected}" ${unitAvailable ? '' : 'disabled'}>${escapeHTML(unit.replace('Unit ', ''))}</button>`;
+        }).join('') : '<span class="hotel-unit-prompt">Choose dates to view availability</span>';
+        card.classList.toggle('is-selected', isThisRoom && roomSelectionStillValid);
+      });
+      if (!roomSelectionStillValid) delete assignments[petId];
+      group.hidden = !sharedPetIds.has(petId) || (sharing && petId !== selected[0]?.id);
     });
-    if (!roomSelectionStillValid) { form.elements.roomId.value = ''; form.elements.roomUnit.value = ''; }
+    writeRoomAssignments(assignments);
     refreshQuote();
   };
   const addressAndRoute = () => {
@@ -152,27 +186,40 @@ export function setupHotelBooking() {
     const taxiOn = form.elements.includeTaxi.checked;
     const { route, km, fare } = addressAndRoute();
     const trips = Number(form.elements.taxiPickup.checked) + Number(form.elements.taxiDropoff.checked);
-    form.querySelector('[data-hotel-taxi-estimate]').textContent = !taxiOn ? 'Pet taxi is not selected.' : route ? `${route.city} to ${form.elements.outlet.value} · ${km} km one way · ${hotelMoney(fare * trips)} estimated total for ${trips} trip${trips === 1 ? '' : 's'}.` : 'Route estimate unavailable. Use an address in a city configured by Admin.';
+    const petCount = selectedPets().length;
+    form.querySelector('[data-hotel-taxi-estimate]').textContent = !taxiOn ? 'Pet taxi is not selected.' : route ? `${route.city} to ${form.elements.outlet.value} · ${km} km one way · ${hotelMoney(fare * trips * petCount)} estimated for ${trips} trip${trips === 1 ? '' : 's'} and ${petCount} pet${petCount === 1 ? '' : 's'}.` : 'Route estimate unavailable. Use an address in a city configured by Admin.';
     refreshQuote();
   };
   const refreshQuote = () => {
-    const pet = selectedPet();
-    const room = chosenRoom();
+    const pets = selectedPets();
+    const pet = pets[0];
+    const sharing = shareHotelRoom();
+    const roomLines = pets.map((selected) => ({ pet: selected, room: chosenRoom(selected.id), assignment: readRoomAssignments()[selected.id] }));
+    const room = roomLines[0]?.room;
     const nightCount = nights();
-    const roomTotal = room && nightCount ? Number(room.nightlyRate) * nightCount : 0;
-    const addOnTotal = [...form.querySelectorAll('[data-hotel-addon]:checked')].reduce((sum, input) => sum + Number(settings.addOns.find((item) => item.id === input.value)?.price || 0), 0);
+    const pricedRooms = sharing
+      ? [...new Map(roomLines.filter((line) => line.room && line.assignment?.unit).map((line) => [`${line.assignment.roomId}:${line.assignment.unit}`, line])).values()]
+      : roomLines;
+    const roomTotal = nightCount ? pricedRooms.reduce((sum, line) => sum + Number(line.room?.nightlyRate || 0) * nightCount, 0) : 0;
+    const addOnTotal = [...form.querySelectorAll('[data-hotel-addon]:checked')].reduce((sum, input) => sum + Number(settings.addOns.find((item) => item.id === input.value)?.price || 0), 0) * pets.length;
     const liveGroomingSettings = loadGroomingSettings();
-    const groomingItem = liveGroomingSettings.packages.find((item) => item.id === form.querySelector('[data-hotel-grooming-package]:checked')?.value);
-    const groomingPrice = form.elements.includeGrooming.checked && groomingItem ? Number(groomingItem[groomingWeightTier(pet?.weight, liveGroomingSettings)] || 0) : 0;
+    const groomingItems = pets.map((selected) => {
+      const radio = [...form.querySelectorAll('[data-hotel-grooming-package]:checked')].find((input) => input.dataset.packagePet === selected.id);
+      const item = liveGroomingSettings.packages.find((packageItem) => packageItem.id === radio?.value);
+      return { pet: selected, item, price: Number(item?.[groomingWeightTier(selected.weight, liveGroomingSettings)] || 0) };
+    });
+    const groomingPrice = form.elements.includeGrooming.checked ? groomingItems.reduce((sum, item) => sum + item.price, 0) : 0;
+    const groomingItem = groomingItems[0]?.item;
     form.querySelectorAll('[data-hotel-grooming-package]').forEach((radio) => {
       const item = liveGroomingSettings.packages.find((packageItem) => packageItem.id === radio.value);
-      const price = Number(item?.[groomingWeightTier(pet?.weight, liveGroomingSettings)] || 0);
+      const packagePet = loadPetProfiles().find((selected) => selected.id === radio.dataset.packagePet);
+      const price = Number(item?.[groomingWeightTier(packagePet?.weight, liveGroomingSettings)] || 0);
       const output = radio.closest('.hotel-grooming-card')?.querySelector('[data-hotel-grooming-price]');
       if (output) output.textContent = hotelMoney(price);
     });
     const { fare } = addressAndRoute();
     const trips = form.elements.includeTaxi.checked ? Number(form.elements.taxiPickup.checked) + Number(form.elements.taxiDropoff.checked) : 0;
-    const taxiTotal = fare * trips;
+    const taxiTotal = fare * trips * pets.length;
     const subtotal = roomTotal + addOnTotal + groomingPrice + taxiTotal;
     const voucher = loadHotelSettings().voucher;
     if (appliedCode && (!voucher.enabled || appliedCode !== String(voucher.code).toUpperCase() || subtotal < Number(voucher.minimumSpend || 0))) { discount = 0; appliedCode = ''; }
@@ -189,14 +236,16 @@ export function setupHotelBooking() {
     form.querySelector('[data-hotel-grand-total]').textContent = hotelMoney(total);
     form.dataset.total = String(total);
     const groomingEstimate = form.querySelector('[data-hotel-grooming-estimate]');
-    groomingEstimate.textContent = form.elements.includeGrooming.checked && groomingItem ? `${groomingItem.name}: ${hotelMoney(groomingPrice)} · ${pet?.breed || 'Breed not added'} · ${pet?.weight || '—'} kg` : '';
-    return { pet, room, nightCount, roomTotal, addOnTotal, groomingItem, groomingPrice, taxiTotal, taxiFare: fare, taxiTrips: trips, total };
+    groomingEstimate.textContent = form.elements.includeGrooming.checked && groomingItem ? groomingItems.map((entry) => `${entry.pet.name}: ${entry.item?.name || 'Choose a package'} (${hotelMoney(entry.price)})`).join(' · ') : '';
+    form.querySelectorAll('[data-hotel-grooming-pet]').forEach((section) => { section.hidden = !pets.some((selected) => selected.id === section.dataset.hotelGroomingPet); });
+    return { pet, pets, room, roomLines, shareRoom: sharing, nightCount, roomTotal, addOnTotal, groomingItem, groomingItems, groomingPrice, taxiTotal, taxiFare: fare, taxiTrips: trips, total };
   };
   const updateOptional = () => {
     const groomingOn = form.elements.includeGrooming.checked;
     form.querySelector('[data-hotel-grooming-fields]').hidden = !groomingOn;
     form.elements.groomingDate.required = groomingOn;
-    form.querySelectorAll('[data-hotel-grooming-package]').forEach((radio) => { radio.required = groomingOn; });
+    const chosenIds = new Set(selectedPets().map((item) => item.id));
+    form.querySelectorAll('[data-hotel-grooming-package]').forEach((radio) => { radio.required = groomingOn && chosenIds.has(radio.dataset.packagePet); });
     form.querySelector('[data-hotel-taxi-fields]').hidden = !form.elements.includeTaxi.checked;
     const manual = form.elements.taxiAddress.value === 'new';
     form.querySelector('[data-pet-taxi-address-editor]').hidden = !manual || !form.elements.includeTaxi.checked;
@@ -209,23 +258,39 @@ export function setupHotelBooking() {
   form.querySelector('[data-hotel-pet-carousel]').addEventListener('click', (event) => {
     const card = event.target.closest('[data-hotel-pet-choice]');
     if (!card) return;
-    form.elements.petId.value = card.dataset.hotelPetChoice;
+    const chosen = new Set((form.elements.petIds.value || '').split(',').filter(Boolean));
+    if (chosen.has(card.dataset.hotelPetChoice)) chosen.delete(card.dataset.hotelPetChoice); else chosen.add(card.dataset.hotelPetChoice);
+    if (!chosen.size) chosen.add(card.dataset.hotelPetChoice);
+    form.elements.petIds.value = [...chosen].join(',');
+    form.elements.petId.value = [...chosen][0];
+    updateRoomSharingOption();
+    const assignments = readRoomAssignments();
+    Object.keys(assignments).forEach((petId) => { if (!chosen.has(petId)) delete assignments[petId]; });
+    if (shareHotelRoom()) {
+      const sharedAssignment = Object.values(assignments)[0];
+      if (sharedAssignment) [...chosen].forEach((petId) => { assignments[petId] = { ...sharedAssignment }; });
+    }
+    writeRoomAssignments(assignments);
     form.querySelectorAll('[data-hotel-pet-choice]').forEach((item) => {
-      const selected = item === card;
+      const selected = chosen.has(item.dataset.hotelPetChoice);
       item.classList.toggle('is-selected', selected);
       item.setAttribute('aria-pressed', String(selected));
       item.querySelector('.grooming-pet-selected-mark')?.remove();
       if (selected) { const mark = document.createElement('span'); mark.className = 'grooming-pet-selected-mark'; mark.innerHTML = '<img src="Image/Icon/Icon-13.png" alt="Selected" />'; item.append(mark); }
     });
-    updateHealthGate(); refreshQuote();
+    updateHealthGate(); updateOptional(); refreshRooms();
   });
-  form.querySelector('[data-hotel-room-list]').addEventListener('click', (event) => {
+  form.querySelector('[data-hotel-pet-profile]').addEventListener('click', (event) => { if (selectedPets().length < 2) return; event.preventDefault(); window.alert('Multiple pets are selected. Choose one pet before opening a pet profile.'); });
+  form.querySelectorAll('[data-hotel-room-list]').forEach((roomList) => roomList.addEventListener('click', (event) => {
     const unit = event.target.closest('[data-hotel-unit-choice]');
     if (!unit || unit.disabled) return;
-    form.elements.roomId.value = unit.dataset.roomId;
-    form.elements.roomUnit.value = unit.dataset.hotelUnitChoice;
+    const assignments = readRoomAssignments();
+    const assignment = { roomId: unit.dataset.roomId, unit: unit.dataset.hotelUnitChoice };
+    if (shareHotelRoom()) selectedPets().forEach((pet) => { assignments[pet.id] = { ...assignment }; });
+    else assignments[unit.dataset.petId] = assignment;
+    writeRoomAssignments(assignments);
     refreshRooms();
-  });
+  }));
   calendar.addEventListener('click', (event) => {
     const nav = event.target.closest('[data-hotel-calendar-nav]');
     if (nav) {
@@ -242,8 +307,7 @@ export function setupHotelBooking() {
     } else {
       form.elements.checkOut.value = date;
     }
-    form.elements.roomId.value = '';
-    form.elements.roomUnit.value = '';
+    writeRoomAssignments({});
     refreshRooms();
     updateHealthGate();
   });
@@ -251,6 +315,7 @@ export function setupHotelBooking() {
   form.querySelectorAll('[data-hotel-addon]').forEach((input) => input.addEventListener('change', refreshQuote));
   form.querySelectorAll('[data-hotel-grooming-package]').forEach((input) => input.addEventListener('change', refreshQuote));
   form.elements.includeGrooming.addEventListener('change', updateOptional);
+  form.elements.shareHotelRoom.addEventListener('change', () => { writeRoomAssignments({}); refreshRooms(); });
   form.elements.includeTaxi.addEventListener('change', updateOptional);
   form.querySelectorAll('[data-hotel-taxi]').forEach((input) => input.addEventListener('change', refreshTaxi));
   form.elements.taxiAddress.addEventListener('change', updateOptional);
@@ -275,7 +340,7 @@ export function setupHotelBooking() {
   window.addEventListener('storage', (event) => {
     if ([hotelSettingsKey, hotelBookingsKey].includes(event.key)) refreshRooms();
   });
-  updateHealthGate(); updateOptional(); refreshRooms();
+  updateRoomSharingOption(); updateHealthGate(); updateOptional(); refreshRooms();
 
   form.addEventListener('submit', async (event) => {
     event.preventDefault();
@@ -286,11 +351,14 @@ export function setupHotelBooking() {
     }
     if (!form.reportValidity()) return;
     const quote = refreshQuote();
+    const pets = quote.pets;
     const pet = quote.pet;
-    if (!pet || !pet.vaccinationCards?.length || !form.elements.vaccinationCurrent.checked) { message.textContent = 'Upload a vaccination card and confirm that it remains current for the full stay to book Pet Hotel.'; message.classList.add('visible'); return; }
-    if (!quote.room || !quote.nightCount) { message.textContent = 'Choose a room type and a valid check-in and check-out date.'; message.classList.add('visible'); return; }
-    const selectedUnit = availableHotelUnits(quote.room, form.elements.outlet.value, form.elements.checkIn.value, form.elements.checkOut.value).find((unit) => unit.unit === form.elements.roomUnit.value);
-    if (!selectedUnit?.available) { message.textContent = 'That room was just booked for part of your stay. Choose another available unit or date.'; message.classList.add('visible'); refreshRooms(); return; }
+    if (!pet || pets.some((item) => !item.vaccinationCards?.length) || !form.elements.vaccinationCurrent.checked) { message.textContent = 'Every selected pet needs an uploaded vaccination card. Confirm that the records remain current for the full stay.'; message.classList.add('visible'); return; }
+    const assignmentsAreShared = quote.shareRoom && quote.roomLines.every((line) => line.assignment?.roomId === quote.roomLines[0]?.assignment?.roomId && line.assignment?.unit === quote.roomLines[0]?.assignment?.unit);
+    if (quote.roomLines.length !== pets.length || quote.roomLines.some((line) => !line.room || !line.assignment?.unit) || (quote.shareRoom && !assignmentsAreShared) || !quote.nightCount) { message.textContent = quote.shareRoom ? 'Choose one available shared room for all selected pets.' : 'Choose an available room package and unit for every selected pet.'; message.classList.add('visible'); return; }
+    const selectedUnits = quote.roomLines.map((line) => ({ line, unit: availableHotelUnits(line.room, form.elements.outlet.value, form.elements.checkIn.value, form.elements.checkOut.value).find((item) => item.unit === line.assignment.unit) }));
+    const expectedUnitCount = quote.shareRoom ? 1 : pets.length;
+    if (selectedUnits.some(({ unit }) => !unit?.available) || new Set(selectedUnits.map(({ line }) => `${line.assignment.roomId}:${line.assignment.unit}`)).size !== expectedUnitCount) { message.textContent = quote.shareRoom ? 'The selected shared room is no longer available. Choose another room.' : 'One or more selected rooms were just booked or assigned twice. Choose a different available unit for each pet.'; message.classList.add('visible'); refreshRooms(); return; }
     if (form.elements.includeTaxi.checked && (!quote.taxiTrips || !quote.taxiFare || !form.elements.taxiSchedule.value)) { message.textContent = 'Choose at least one taxi trip, a configured address route, and a pickup/drop-off schedule.'; message.classList.add('visible'); return; }
     const file = form.elements.transferSlip.files?.[0];
     let paymentProof = null;
@@ -308,14 +376,14 @@ export function setupHotelBooking() {
     const addressIndex = form.elements.taxiAddress.value === 'new' ? -1 : Number(form.elements.taxiAddress.value);
     const addresses = (() => { try { return JSON.parse(localStorage.getItem('furgo-demo-addresses') || '[]'); } catch { return []; } })();
     const taxiAddress = addressIndex >= 0 ? addresses[addressIndex] : { street: form.elements.taxiManualAddress.value.trim(), city: '', state: '' };
-    const addOns = [...form.querySelectorAll('[data-hotel-addon]:checked')].map((input) => settings.addOns.find((item) => item.id === input.value)).filter(Boolean).map((item) => ({ id: item.id, name: item.name, price: Number(item.price) }));
+    const addOns = [...form.querySelectorAll('[data-hotel-addon]:checked')].map((input) => settings.addOns.find((item) => item.id === input.value)).filter(Boolean).map((item) => ({ id: item.id, name: item.name, price: Number(item.price), quantity: pets.length, lineTotal: Number(item.price) * pets.length }));
     const booking = {
       id: `hotel-${Date.now()}`, userId: profile.id || '', reference: `HT-${Date.now().toString().slice(-7)}`, createdAt: new Date().toISOString(),
       customerName: profile.name || 'Furgo Customer', customerEmail: profile.email || '', customerPhone: profile.phone || '', emergencyName: form.elements.emergencyName.value.trim(), emergencyPhone: form.elements.emergencyPhone.value.trim(),
-      petId: pet.id, petName: pet.name, petSpecies: pet.species || 'Dog', petBreed: pet.breed || 'Not provided', petWeight: pet.weight || '0', redFlags: (pet.remarks || []).join(' · ') || pet.redFlagRemark || '', vaccinationCards: pet.vaccinationCards, vaccinationStatus: 'Owner confirmed · pending staff review',
-      outlet: form.elements.outlet.value, roomId: quote.room.id, roomName: quote.room.name, assignedUnit: form.elements.roomUnit.value, checkIn: form.elements.checkIn.value, checkOut: form.elements.checkOut.value, nights: quote.nightCount, nightlyRate: Number(quote.room.nightlyRate), roomTotal: quote.roomTotal,
-      addOns, grooming: form.elements.includeGrooming.checked && quote.groomingItem ? { packageId: quote.groomingItem.id, packageName: quote.groomingItem.name, price: quote.groomingPrice, date: form.elements.groomingDate.value, time: form.elements.groomingTime.value } : null,
-      taxi: form.elements.includeTaxi.checked ? { pickup: form.elements.taxiPickup.checked, dropoff: form.elements.taxiDropoff.checked, address: [taxiAddress.street, taxiAddress.city, taxiAddress.state].filter(Boolean).join(', '), city: taxiAddress.city || '', schedule: form.elements.taxiSchedule.value, distanceKm: quote.taxiFare ? (quote.taxiFare - Number(loadPetTaxiSettings().baseFare)) / Number(loadPetTaxiSettings().farePerKm) : 0, fare: quote.taxiFare * quote.taxiTrips } : null,
+      petId: pet.id, petIds: pets.map((item) => item.id), petName: pets.map((item) => item.name).join(' | '), pets: pets.map((item) => ({ id: item.id, name: item.name, species: item.species || 'Dog', breed: item.breed || 'Not provided', weight: item.weight || '0', redFlags: (item.remarks || []).join(' · ') || item.redFlagRemark || '', vaccinationCards: item.vaccinationCards || [] })), petSpecies: pets.map((item) => item.species || 'Dog').join(' | '), petBreed: pets.map((item) => item.breed || 'Not provided').join(' | '), petWeight: pets.map((item) => item.weight || '0').join(' | '), redFlags: pets.map((item) => `${item.name}: ${(item.remarks || []).join(' · ') || item.redFlagRemark || ''}`).filter(Boolean).join(' | '), vaccinationCards: pets.flatMap((item) => item.vaccinationCards || []), vaccinationStatus: 'Owner confirmed · pending staff review',
+      outlet: form.elements.outlet.value, roomArrangement: quote.shareRoom ? 'shared' : 'separate', roomId: quote.room.id, roomName: quote.room.name, assignedUnit: quote.roomLines[0]?.assignment?.unit || '', assignedUnits: quote.roomLines.map((line) => line.assignment.unit), petRooms: quote.roomLines.map((line) => ({ petId: line.pet.id, petName: line.pet.name, roomId: line.room.id, roomName: line.room.name, assignedUnit: line.assignment.unit, nightlyRate: Number(line.room.nightlyRate), total: quote.shareRoom ? Number(line.room.nightlyRate) * quote.nightCount / pets.length : Number(line.room.nightlyRate) * quote.nightCount })), checkIn: form.elements.checkIn.value, checkOut: form.elements.checkOut.value, nights: quote.nightCount, nightlyRate: Number(quote.room.nightlyRate), roomTotal: quote.roomTotal,
+      addOns, grooming: form.elements.includeGrooming.checked && quote.groomingItem ? { packageId: quote.groomingItem.id, packageName: quote.groomingItems.map((entry) => `${entry.pet.name}: ${entry.item?.name || ''}`).join(' | '), price: quote.groomingPrice, packages: quote.groomingItems.map((entry) => ({ petId: entry.pet.id, petName: entry.pet.name, packageId: entry.item?.id || '', packageName: entry.item?.name || '', price: entry.price })), date: form.elements.groomingDate.value, time: form.elements.groomingTime.value } : null,
+      taxi: form.elements.includeTaxi.checked ? { pickup: form.elements.taxiPickup.checked, dropoff: form.elements.taxiDropoff.checked, address: [taxiAddress.street, taxiAddress.city, taxiAddress.state].filter(Boolean).join(', '), city: taxiAddress.city || '', schedule: form.elements.taxiSchedule.value, distanceKm: quote.taxiFare ? (quote.taxiFare - Number(loadPetTaxiSettings().baseFare)) / Number(loadPetTaxiSettings().farePerKm) : 0, fare: quote.taxiFare * quote.taxiTrips * pets.length } : null,
       voucherCode: appliedCode, discount, total: quote.total, paymentMethod, paymentStatus: paymentMethod === 'wallet' ? 'Paid with Furgo Credit' : paymentMethod === 'bank-transfer' ? 'Awaiting verification' : 'Pending online payment',
       status: paymentMethod === 'wallet' ? 'Pending / Confirmed' : 'Pending / Confirmed', paymentProof, receipt: null, mediaLogs: [], statusHistory: [{ status: 'Pending / Confirmed', changedAt: new Date().toISOString(), changedBy: 'Customer' }],
     };

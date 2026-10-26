@@ -74,11 +74,14 @@ export function availableHotelUnits(room, outlet, checkIn, checkOut, bookings = 
   const unitCount = Math.max(0, Number(room.capacity) || 0);
   const units = Array.from({ length: unitCount }, (_, index) => `Unit ${String(index + 1).padStart(2, '0')}`);
   if (!checkIn || !checkOut || checkOut <= checkIn) return units.map((unit) => ({ unit, available: false, reason: 'Choose stay dates' }));
-  const occupied = bookings.filter((booking) => booking.roomId === room.id && booking.outlet === outlet
+  const occupied = bookings.filter((booking) => (booking.roomId === room.id || (booking.petRooms || []).some((item) => item.roomId === room.id)) && booking.outlet === outlet
     && !/cancel|completed/i.test(String(booking.status || ''))
     && booking.checkIn < checkOut && booking.checkOut > checkIn);
-  const unavailable = new Set(occupied.map((booking) => booking.assignedUnit).filter(Boolean));
-  let unassignedOccupancy = occupied.filter((booking) => !booking.assignedUnit).length;
+  const unitsForRoom = (booking) => (booking.petRooms || []).length
+    ? booking.petRooms.filter((item) => item.roomId === room.id).map((item) => item.assignedUnit).filter(Boolean)
+    : Array.isArray(booking.assignedUnits) && booking.assignedUnits.length ? booking.assignedUnits : [booking.assignedUnit].filter(Boolean);
+  const unavailable = new Set(occupied.flatMap(unitsForRoom));
+  let unassignedOccupancy = occupied.filter((booking) => !unitsForRoom(booking).length).length;
   for (const unit of units) {
     if (unassignedOccupancy <= 0) break;
     if (unavailable.has(unit)) continue;

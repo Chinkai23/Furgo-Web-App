@@ -12,7 +12,9 @@ export function adminGroomingPage({ settingsOnly = false } = {}) {
   const profile = JSON.parse(sessionStorage.getItem('furgo-demo-user-profile') || '{}');
   const isExecutive = ['executive', 'staff'].includes(profile.role);
   const settings = loadGroomingSettings();
-  const bookings = loadGroomingBookings().sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  const bookings = loadGroomingBookings()
+    .filter((booking) => ['director', 'admin'].includes(profile.role) || (profile.outletName && String(booking.outlet || '').trim().toLowerCase() === String(profile.outletName).trim().toLowerCase()))
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   const weekdayControls = weekdays.map((day) => `<label class="admin-grooming-weekday"><input type="checkbox" name="availableWeekdays" value="${day.value}" ${settings.availableWeekdays.includes(day.value) ? 'checked' : ''} />${day.label}</label>`).join('');
 
   // Each package exposes editable weight-tier pricing and can be shown or hidden from customers.

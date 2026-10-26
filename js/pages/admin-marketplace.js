@@ -9,8 +9,12 @@ export function marketplaceOfferSettingsPanel() {
 
 // Admin Marketplace: editable catalog, offers, internal supplier mappings, fulfilment, and exports.
 export function adminMarketplacePage() {
+  let profile = {};
+  try { profile = JSON.parse(sessionStorage.getItem('furgo-demo-user-profile') || '{}'); } catch { profile = {}; }
   const products = loadMarketplaceProducts();
-  const orders = loadMarketplaceOrders().sort((a, b) => new Date(b.createdAt || b.date) - new Date(a.createdAt || a.date));
+  const orders = loadMarketplaceOrders()
+    .filter((order) => ['director', 'admin'].includes(profile.role) || (profile.outletName && String(order.outlet || order.fulfillmentOutlet || '').trim().toLowerCase() === String(profile.outletName).trim().toLowerCase()))
+    .sort((a, b) => new Date(b.createdAt || b.date) - new Date(a.createdAt || a.date));
   const suppliers = [...new Set(products.flatMap((product) => product.variants.map((variant) => variant.supplierId || variant.supplier || 'Unassigned')))].sort();
   const supplierOptions = suppliers.map((supplier) => `<option value="${escapeHTML(supplier)}">${escapeHTML(supplier)}</option>`).join('');
   const productRows = products.map((product) => product.variants.map((variant) => `<tr class="${product.hidden ? 'admin-market-hidden-row' : ''}"><td>${escapeHTML(product.name)}<small>${escapeHTML(variant.label)}${product.hidden ? ' · Hidden' : ''}</small></td><td>${escapeHTML(variant.sku || '—')}</td><td>${escapeHTML(variant.supplierId || variant.supplier || 'Unassigned')}</td><td>${escapeHTML(variant.supplierSku || '—')}</td><td>MYR ${Number(variant.cost || 0).toFixed(2)}</td><td>${Number(variant.stock) || 0}</td><td class="admin-market-actions"><button type="button" data-edit-market-product="${escapeHTML(product.id)}" data-edit-market-variant="${escapeHTML(variant.id)}">Edit</button><button type="button" data-toggle-market-product="${escapeHTML(product.id)}">${product.hidden ? 'Show' : 'Hide'}</button><button type="button" class="admin-market-delete" data-delete-market-product="${escapeHTML(product.id)}">Delete</button></td></tr>`).join('')).join('');

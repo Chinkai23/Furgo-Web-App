@@ -137,6 +137,7 @@ async function writeDedicatedRecord(key, record, ownerId) {
       status: String(record.status || 'New'),
       payment_status: String(record.paymentStatus || 'Pending'),
       total: Number(record.total) || 0,
+      outlet: String(record.outlet || record.fulfillmentOutlet || ''),
       details,
       created_at: createdAt,
       updated_at: new Date().toISOString(),
@@ -265,6 +266,7 @@ function dedicatedRecordFromRow(key, row, items = []) {
   if (key === 'furgo-demo-marketplace-orders') {
     record.paymentStatus = row.payment_status;
     record.total = Number(row.total) || 0;
+    record.outlet = row.outlet || record.outlet || '';
     record.items = items;
   } else if (key === 'furgo-demo-hotel-bookings') {
     record.outlet = row.outlet;

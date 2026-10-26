@@ -31,18 +31,18 @@ export function petDaycarePage() {
   const activePassOptions = (petId) => passes.filter((pass) => pass.petId === petId).map((pass) => `<option value="${escapeHTML(pass.id)}">${escapeHTML(pass.name)} · ${Number(pass.remainingSessions)} visit${Number(pass.remainingSessions) === 1 ? '' : 's'} left${pass.expiresOn ? ` · expires ${escapeHTML(pass.expiresOn)}` : ''}</option>`).join('');
   const addonMarkup = settings.addOns.filter((item) => item.active !== false).map((item) => `<label class="daycare-addon-card"><input type="checkbox" name="addOn" value="${escapeHTML(item.id)}" data-daycare-addon /><span><strong>${escapeHTML(item.name)}</strong><small>${escapeHTML(item.description || '')}</small><b>${money(item.price)}</b>${item.id === 'medication' ? '<input class="daycare-medication-note" name="medicationDetails" placeholder="Medication and instructions" aria-label="Medication details" />' : ''}</span></label>`).join('');
   const groomingSettings = loadGroomingSettings();
-  const groomingOptions = groomingSettings.packages.filter((item) => item.active !== false).map((item, index) => `<label class="daycare-addon-card"><input type="radio" name="groomingPackage" value="${escapeHTML(item.id)}" data-daycare-grooming-package ${index === 0 ? 'checked' : ''} /><span><strong>${escapeHTML(item.name)}</strong><small>${escapeHTML(item.description || '')}</small><b data-daycare-grooming-price>${money(item.small)}</b></span></label>`).join('');
+  const groomingOptions = pets.map((pet) => `<div data-daycare-package-pet="${escapeHTML(pet.id)}" ${pet.id !== pets[0]?.id ? 'hidden' : ''}><h3>Select A Service Package For ${escapeHTML(pet.name)}</h3><div class="daycare-grooming-list">${groomingSettings.packages.filter((item) => item.active !== false).map((item, index) => `<label class="daycare-addon-card"><input type="radio" name="groomingPackage-${escapeHTML(pet.id)}" value="${escapeHTML(item.id)}" data-daycare-grooming-package data-package-pet="${escapeHTML(pet.id)}" ${index === 0 ? 'checked' : ''} /><span><strong>${escapeHTML(item.name)}</strong><small>${escapeHTML(item.description || '')}</small><b data-daycare-grooming-price>${money(item.small)}</b></span></label>`).join('')}</div></div>`).join('');
 
   return `<main class="grooming-page daycare-page">
     <header class="grooming-header grooming-header-centered"><a class="grooming-back" href="#home" aria-label="Back to Home">‹</a><h1>Pet Daycare</h1><a class="grooming-header-orders" href="#orders?from=daycare" aria-label="My Order"><img src="${icon('Icon-18.png')}" alt="" /></a></header>
     ${customerServiceBannerMarkup('daycare')}
     <section class="daycare-intro-card"><h2>${escapeHTML(settings.serviceName || 'Furgo Pet Daycare')}</h2><p>${escapeHTML(settings.serviceDescription || '')}</p></section>
     <form class="grooming-booking-form" data-daycare-booking>
-      <section class="grooming-section"><div class="grooming-section-heading"><span>01</span><div><h2>Choose Your Pet</h2><p>We’ll use your pet’s profile for care notes, vaccination status, and pricing.</p></div></div>
-        ${pets.length ? `<input type="hidden" name="petId" value="${escapeHTML(pets[0].id)}" data-daycare-pet /> <div class="grooming-pet-carousel" data-daycare-pet-carousel>${activePets}</div><div class="grooming-pet-snapshot" data-daycare-pet-snapshot><div><strong data-daycare-pet-name>${escapeHTML(pets[0].name)}</strong><span data-daycare-pet-info>${escapeHTML(pets[0].species || 'Dog')} · ${escapeHTML(pets[0].breed || 'Breed not added')} · ${escapeHTML(pets[0].weight || '—')} kg</span><small data-daycare-vaccine>${pets[0].vaccinationCards?.length ? 'Vaccination record uploaded' : 'Vaccination record required'}</small></div><div><span class="grooming-tier-pill" data-daycare-tier>${daycareWeightTier(pets[0].weight, settings)} size</span><p data-daycare-remarks>${Array.isArray(pets[0].remarks) ? pets[0].remarks.map(escapeHTML).join(' · ') : escapeHTML(pets[0].redFlagRemark || 'No care remarks saved.')}</p></div></div>` : '<p class="grooming-empty-pets">Add a pet profile before booking daycare.</p>'}
+      <section class="grooming-section"><div class="grooming-section-heading"><span>01</span><div><h2>Choose Your Pet</h2><p>Select one or more pets. Tap a selected pet again to remove it. Prices and add-ons are calculated per pet.</p></div></div>
+        ${pets.length ? `<input type="hidden" name="petId" value="${escapeHTML(pets[0].id)}" data-daycare-pet /><input type="hidden" name="petIds" value="${escapeHTML(pets[0].id)}" /><div class="grooming-pet-carousel" data-daycare-pet-carousel>${activePets}</div><div class="grooming-pet-snapshot" data-daycare-pet-snapshot><div class="grooming-selected-pet-list" data-daycare-pet-summary-list><div class="grooming-selected-pet-summary"><strong>${escapeHTML(pets[0].name)}</strong><span>${escapeHTML(pets[0].species || 'Dog')} · ${escapeHTML(pets[0].breed || 'Breed not added')} · ${escapeHTML(pets[0].weight || '—')} kg</span><small>${pets[0].vaccinationCards?.length ? 'Vaccination record uploaded' : 'Vaccination record required'}</small></div></div></div>` : '<p class="grooming-empty-pets">Add a pet profile before booking daycare.</p>'}
         <a class="grooming-add-pet" href="#pet-profile?mode=add&from=daycare">+ Add a pet profile</a>
       </section>
-      <section class="grooming-section"><div class="grooming-section-heading"><span>02</span><div><h2>Choose A Booking Option</h2><p>Book a single visit, redeem a pass session, or purchase a pass for future visits.</p></div></div>
+      <section class="grooming-section"><div class="grooming-section-heading"><span>02</span><div><h2>Choose A Booking Option</h2><p>Book a single visit for one or more pets, redeem a pet-specific pass, or purchase a pass for one pet.</p></div></div>
         <div class="daycare-mode-switch" role="radiogroup" aria-label="Daycare booking option"><label><input type="radio" name="bookingMode" value="single" checked data-daycare-mode /><span>Single visit</span></label><label><input type="radio" name="bookingMode" value="redeem" data-daycare-mode /><span>Use a pass</span></label><label><input type="radio" name="bookingMode" value="purchase" data-daycare-mode /><span>Buy a pass</span></label></div>
         <div class="daycare-purchase-fields" data-daycare-purchase hidden><h3>Daycare Pass Store</h3><div class="daycare-pass-list">${passesMarkup || '<p>Passes are temporarily unavailable.</p>'}</div></div>
         <div class="daycare-visit-fields" data-daycare-visit><div class="daycare-form-grid"><label class="grooming-field">Daycare outlet<select name="outlet">${outletOptions}</select></label><label class="grooming-field" data-daycare-pass-field>Use active pass<select name="passId"><option value="">${passes.length ? 'Choose an active pass' : 'No active passes. Buy a pass or book a single visit.'}</option>${activePassOptions(pets[0]?.id)}</select></label><label class="grooming-field daycare-date-field">Visit date<input type="date" name="date" data-daycare-date required /></label><label class="grooming-field">Drop-off time<select name="dropoffTime" data-daycare-dropoff required></select></label><label class="grooming-field">Pick-up time<select name="pickupTime" data-daycare-pickup required></select></label><label class="grooming-field" data-daycare-hours-field>Visit length<select name="hours" data-daycare-hours>${Array.from({ length: 9 }, (_, index) => `<option value="${index + 1}">${index + 1} hour${index ? 's' : ''}</option>`).join('')}</select></label><div class="daycare-capacity" data-daycare-capacity role="status">Select a date to see availability.</div></div>
@@ -53,7 +53,7 @@ export function petDaycarePage() {
         <label class="hotel-addon-toggle daycare-toggle"><input type="checkbox" name="includeGrooming" data-daycare-include-grooming /> Add pre-pickup grooming</label><div class="daycare-grooming-fields" data-daycare-grooming-fields hidden><div class="daycare-grooming-list">${groomingOptions}</div><div class="daycare-form-grid"><label class="grooming-field">Grooming date<input type="date" name="groomingDate" data-daycare-grooming-date /></label><label class="grooming-field">Preferred time<select name="groomingTime">${(groomingSettings.timeSlots || []).map((time) => `<option>${escapeHTML(time)}</option>`).join('')}</select></label></div></div>
 
       </section>
-      <section class="grooming-section"><div class="grooming-section-heading"><span>05</span><div><h2>Health Check & Contact</h2><p>For the safety of all pets, a current vaccination record is required before a visit.</p></div></div><div class="daycare-health-gate" data-daycare-health-gate role="status"></div><label class="hotel-vaccination-confirm" data-daycare-vaccine-confirm><input type="checkbox" name="vaccinationCurrent" required /> I confirm this pet’s vaccination record is current and valid for the visit date.</label><div class="daycare-form-grid" data-daycare-contact-fields><label class="grooming-field">Emergency contact name<input name="emergencyName" value="${escapeHTML(profile.name || '')}" required /></label><label class="grooming-field">Emergency contact phone<input name="emergencyPhone" type="tel" inputmode="tel" value="${escapeHTML(profile.phone || '')}" required /></label></div><a class="grooming-vaccination-link" data-daycare-pet-profile href="#pet-profile?from=daycare">Update pet vaccination record</a></section>
+      <section class="grooming-section"><div class="grooming-section-heading"><span>05</span><div><h2>Health Check & Contact</h2><p>For the safety of all pets, a current vaccination record is required before a visit.</p></div></div><div class="daycare-health-gate" data-daycare-health-gate role="status"></div><label class="hotel-vaccination-confirm" data-daycare-vaccine-confirm><input type="checkbox" name="vaccinationCurrent" required /> I confirm the selected pets’ vaccination records are current and valid for the visit date.</label><div class="daycare-form-grid" data-daycare-contact-fields><label class="grooming-field">Emergency contact name<input name="emergencyName" value="${escapeHTML(profile.name || '')}" required /></label><label class="grooming-field">Emergency contact phone<input name="emergencyPhone" type="tel" inputmode="tel" value="${escapeHTML(profile.phone || '')}" required /></label></div><a class="grooming-vaccination-link" data-daycare-pet-profile href="#pet-profile?from=daycare">More Pet Profile</a></section>
       <section class="grooming-section grooming-payment-section"><div class="grooming-section-heading"><span>06</span><div><h2>Review & Payment</h2><p>Apply a daycare offer, then choose a payment method.</p></div></div><div class="grooming-voucher-row"><label class="grooming-field">Promo code<input name="voucherCode" placeholder="Enter promo code" data-daycare-voucher /></label><button class="button button-light" type="button" data-apply-daycare-voucher>Apply</button></div><p class="grooming-voucher-feedback" data-daycare-voucher-feedback role="status">${settings.voucher.enabled ? `Available demo code: ${escapeHTML(settings.voucher.code)}` : 'No daycare promo code is active.'}</p><div class="grooming-payment-options"><label><input type="radio" name="paymentMethod" value="gateway" checked /><span><strong>Online payment</strong><small>Card, FPX / online banking, or e-wallet</small></span></label><label><input type="radio" name="paymentMethod" value="wallet" /><span><strong>Furgo Credit</strong><small>Balance: ${money(Number(localStorage.getItem('furgo-demo-credit-balance') || 0))}</small></span></label><label><input type="radio" name="paymentMethod" value="bank-transfer" /><span><strong>Manual bank transfer</strong><small>Attach a transfer slip for Admin verification</small></span></label></div><label class="grooming-field daycare-transfer" data-daycare-transfer hidden>Transfer slip (image or PDF, max 1 MB)<input name="transferSlip" type="file" accept="image/png,image/jpeg,image/webp,application/pdf" /></label>
         <div class="grooming-booking-summary"><h3>Daycare Estimate</h3><p><span data-daycare-base-label>Single visit</span><b data-daycare-base-total>${money(settings.hourlyRates.small)}</b></p><p data-daycare-addons-row hidden><span>Care add-ons</span><b data-daycare-addons-total>${money(0)}</b></p><p data-daycare-grooming-row hidden><span>Pre-pickup grooming</span><b data-daycare-grooming-total>${money(0)}</b></p><p data-daycare-taxi-row hidden><span>Pet Taxi estimate</span><b data-daycare-taxi-total>${money(0)}</b></p><p data-daycare-discount-row hidden><span>Promo discount</span><b data-daycare-discount>${money(0)}</b></p><div class="grooming-total-row"><span>Estimated total</span><strong data-daycare-total>${money(settings.hourlyRates.small)}</strong></div></div><div class="form-feedback" data-daycare-feedback role="status" aria-live="polite"></div><button class="button button-primary grooming-submit" type="submit" ${pets.length ? '' : 'disabled'} data-daycare-submit>Continue to confirmation</button><p class="grooming-prototype-note">Your booking is saved to your account. Payment and map integrations are not connected in this prototype.</p>
       </section>
@@ -72,7 +72,8 @@ export function setupDaycareBooking() {
   const date = form.elements.date;
   const modes = [...form.querySelectorAll('[data-daycare-mode]')];
   const currentMode = () => form.querySelector('[data-daycare-mode]:checked')?.value || 'single';
-  const pet = () => loadPetProfiles().find((item) => item.id === form.elements.petId.value);
+  const selectedPets = () => (form.elements.petIds.value || form.elements.petId.value || '').split(',').filter(Boolean).map((id) => loadPetProfiles().find((item) => item.id === id)).filter(Boolean);
+  const pet = () => selectedPets()[0];
   const tier = () => daycareWeightTier(pet()?.weight, loadDaycareSettings());
   const safeKey = (value) => String(value || '').replace(/[^A-Za-z0-9_-]/g, '');
   const dateToday = new Date(); dateToday.setHours(0, 0, 0, 0);
@@ -94,17 +95,17 @@ export function setupDaycareBooking() {
     if (choices.includes(priorPickup)) pickup.value = priorPickup; else pickup.selectedIndex = Math.min(choices.length - 1, 1);
   };
   const setHealthGate = () => {
-    const selected = pet();
-    const cards = selected?.vaccinationCards || [];
-    const valid = cards.length > 0;
+    const selected = selectedPets();
+    const cards = selected.flatMap((item) => item.vaccinationCards || []);
+    const valid = selected.length > 0 && selected.every((item) => (item.vaccinationCards || []).length > 0);
     const gate = form.querySelector('[data-daycare-health-gate]');
     const confirm = form.querySelector('[data-daycare-vaccine-confirm]');
-    gate.innerHTML = !selected ? '<strong>Select a pet profile.</strong> A current vaccination card is required before booking.' : !cards.length ? '<strong>Vaccination card missing.</strong> Upload the card to the pet profile to continue.' : '<strong>Vaccination card uploaded.</strong> Please confirm it is current for the visit date. Staff will review the card.';
+    gate.innerHTML = !selected.length ? '<strong>Select a pet profile.</strong> A current vaccination card is required before booking.' : !valid ? '<strong>Vaccination card missing.</strong> Every selected pet needs a current card in its profile.' : '<strong>Vaccination cards uploaded.</strong> Confirm they are current for the visit date. Staff will review them.';
     const requiredForVisit = currentMode() !== 'purchase';
     confirm.hidden = !requiredForVisit || !cards.length || !valid;
     form.elements.vaccinationCurrent.required = Boolean(requiredForVisit && cards.length && valid);
     if (!requiredForVisit || !cards.length || !valid) form.elements.vaccinationCurrent.checked = false;
-    form.querySelector('[data-daycare-pet-profile]').href = selected ? `#pet-profile?id=${encodeURIComponent(selected.id)}&from=daycare` : '#pet-profile?mode=add&from=daycare';
+    form.querySelector('[data-daycare-pet-profile]').href = selected.length === 1 ? `#pet-profile?id=${encodeURIComponent(selected[0].id)}&from=daycare` : '#pet-profile?from=daycare';
     return valid;
   };
   const capacity = () => {
@@ -131,26 +132,34 @@ export function setupDaycareBooking() {
     const trip = form.elements.taxiTrip.value;
     const tripCount = trip === 'both' ? 2 : 1;
     const fare = route ? (Number(live.baseFare) + Number(route.distanceKm) * Number(live.farePerKm)) * tripCount : 0;
-    form.querySelector('[data-daycare-taxi-estimate]').textContent = !form.elements.includeTaxi.checked ? 'Pet Taxi is not selected.' : route ? `${route.city} · ${Number(route.distanceKm)} km one way · ${money(fare)} estimated.` : 'No route estimate found. Enter a configured city to see the demo fare.';
+    const totalFare = fare * Math.max(1, selectedPets().length);
+    form.querySelector('[data-daycare-taxi-estimate]').textContent = !form.elements.includeTaxi.checked ? 'Pet Taxi is not selected.' : route ? `${route.city} · ${Number(route.distanceKm)} km one way · ${money(totalFare)} estimated for ${selectedPets().length} pet${selectedPets().length === 1 ? '' : 's'}.` : 'No route estimate found. Enter a configured city to see the demo fare.';
     return fare;
   };
   const quote = () => {
     const live = loadDaycareSettings();
-    const selectedPet = pet();
+    const selectedPetsList = selectedPets();
+    const selectedPet = selectedPetsList[0];
     const mode = currentMode();
     const visitHours = Math.max(1, Number(form.elements.hours.value) || 1);
     const isDayRate = mode === 'single' && visitHours >= 8;
-    const basePrice = mode === 'purchase' ? Number(live.passes.find((item) => item.id === form.querySelector('[name="passPlan"]:checked')?.value)?.price || 0) : mode === 'redeem' ? 0 : isDayRate ? Number(live.dailyRates[tier()] || 0) : Number(live.hourlyRates[tier()] || 0) * visitHours;
-    const addOnTotal = [...form.querySelectorAll('[data-daycare-addon]:checked')].reduce((sum, input) => sum + Number(live.addOns.find((item) => item.id === input.value)?.price || 0), 0);
+    const basePrice = mode === 'purchase' ? Number(live.passes.find((item) => item.id === form.querySelector('[name="passPlan"]:checked')?.value)?.price || 0) : mode === 'redeem' ? 0 : selectedPetsList.reduce((sum, item) => sum + (isDayRate ? Number(live.dailyRates[daycareWeightTier(item.weight, live)] || 0) : Number(live.hourlyRates[daycareWeightTier(item.weight, live)] || 0) * visitHours), 0);
+    const addOnTotal = [...form.querySelectorAll('[data-daycare-addon]:checked')].reduce((sum, input) => sum + Number(live.addOns.find((item) => item.id === input.value)?.price || 0), 0) * selectedPetsList.length;
     const gsettings = loadGroomingSettings();
-    const groom = gsettings.packages.find((item) => item.id === form.querySelector('[data-daycare-grooming-package]:checked')?.value);
-    const groomingPrice = form.elements.includeGrooming.checked && groom ? Number(groom[groomingTier(selectedPet?.weight, gsettings)] || 0) : 0;
+    const petGrooming = selectedPetsList.map((selected) => {
+      const radio = [...form.querySelectorAll('[data-daycare-grooming-package]:checked')].find((input) => input.dataset.packagePet === selected.id);
+      const item = gsettings.packages.find((entry) => entry.id === radio?.value);
+      return { pet: selected, item, price: Number(item?.[groomingTier(selected.weight, gsettings)] || 0) };
+    });
+    const groom = petGrooming[0]?.item;
+    const groomingPrice = form.elements.includeGrooming.checked ? petGrooming.reduce((sum, item) => sum + item.price, 0) : 0;
     form.querySelectorAll('[data-daycare-grooming-package]').forEach((radio) => {
       const item = gsettings.packages.find((entry) => entry.id === radio.value);
+      const packagePet = selectedPetsList.find((selected) => selected.id === radio.dataset.packagePet) || loadPetProfiles().find((selected) => selected.id === radio.dataset.packagePet);
       const output = radio.closest('.daycare-addon-card')?.querySelector('[data-daycare-grooming-price]');
-      if (output) output.textContent = money(item?.[groomingTier(selectedPet?.weight, gsettings)] || 0);
+      if (output) output.textContent = money(item?.[groomingTier(packagePet?.weight, gsettings)] || 0);
     });
-    const taxi = form.elements.includeTaxi.checked ? taxiEstimate() : 0;
+    const taxi = form.elements.includeTaxi.checked ? taxiEstimate() * selectedPetsList.length : 0;
     const subtotal = basePrice + addOnTotal + groomingPrice + taxi;
     const voucher = live.voucher;
     if (appliedCode && (!voucher.enabled || appliedCode !== String(voucher.code).toUpperCase() || subtotal < Number(voucher.minimumSpend || 0))) { discount = 0; appliedCode = ''; }
@@ -167,9 +176,13 @@ export function setupDaycareBooking() {
     form.querySelector('[data-daycare-discount-row]').hidden = discount <= 0;
     form.querySelector('[data-daycare-total]').textContent = money(total);
     form.dataset.total = String(total);
-    return { selectedPet, mode, visitHours, basePrice, addOnTotal, grooming, groomingPrice, taxi, total };
+    return { selectedPet, pets: selectedPetsList, mode, visitHours, basePrice, addOnTotal, grooming, petGrooming, groomingPrice, taxi, total };
   };
   const updateMode = () => {
+    if (form.querySelector('[data-daycare-mode]:checked')?.value !== 'single' && selectedPets().length > 1) {
+      form.querySelector('[data-daycare-mode][value="single"]').checked = true;
+      window.alert('Daycare passes are linked to one pet. Choose one pet to buy or redeem a pass.');
+    }
     const mode = currentMode();
     form.querySelector('[data-daycare-purchase]').hidden = mode !== 'purchase';
     form.querySelector('[data-daycare-visit]').hidden = mode === 'purchase';
@@ -194,22 +207,37 @@ export function setupDaycareBooking() {
     capacity(); quote();
   };
   const refreshPet = (selected) => {
-    form.elements.petId.value = selected.id;
+    const chosen = selectedPets();
+    form.elements.petIds.value = chosen.map((item) => item.id).join(',');
+    form.elements.petId.value = chosen[0]?.id || '';
     const passSelect = form.elements.passId;
-    passSelect.innerHTML = `<option value="">${passes.some((pass) => pass.petId === selected.id) ? 'Choose an active pass' : 'No active passes for this pet.'}</option>${activePassOptions(selected.id)}`;
-    form.querySelector('[data-daycare-pet-name]').textContent = selected.name;
-    form.querySelector('[data-daycare-pet-info]').textContent = `${selected.species || 'Dog'} · ${selected.breed || 'Breed not added'} · ${selected.weight || '—'} kg`;
-    form.querySelector('[data-daycare-vaccine]').textContent = selected.vaccinationCards?.length ? 'Vaccination record uploaded' : 'Vaccination record required';
-    form.querySelector('[data-daycare-tier]').textContent = `${daycareWeightTier(selected.weight, loadDaycareSettings())} size`;
-    const remarks = Array.isArray(selected.remarks) ? selected.remarks : [selected.redFlagRemark].filter(Boolean);
-    form.querySelector('[data-daycare-remarks]').textContent = remarks.join(' · ') || 'No care remarks saved.';
+    passSelect.innerHTML = `<option value="">${chosen.length === 1 && passes.some((pass) => pass.petId === chosen[0].id) ? 'Choose an active pass' : 'Passes are pet-specific; select one pet to use a pass.'}</option>${chosen.length === 1 ? activePassOptions(chosen[0].id) : ''}`;
+    const summaryList = form.querySelector('[data-daycare-pet-summary-list]');
+    summaryList.replaceChildren(...chosen.map((item) => {
+      const summary = document.createElement('div');
+      summary.className = 'grooming-selected-pet-summary';
+      const name = document.createElement('strong');
+      name.textContent = item.name || 'Pet profile';
+      const details = document.createElement('span');
+      details.textContent = `${item.species || 'Dog'} · ${item.breed || 'Breed not added'} · ${item.weight || '—'} kg`;
+      const vaccine = document.createElement('small');
+      vaccine.textContent = item.vaccinationCards?.length ? 'Vaccination record uploaded' : 'Vaccination record required';
+      summary.append(name, details, vaccine);
+      return summary;
+    }));
+    form.querySelectorAll('[data-daycare-package-pet]').forEach((section) => { section.hidden = !chosen.some((item) => item.id === section.dataset.daycarePackagePet); });
     form.querySelectorAll('[data-daycare-pet-choice]').forEach((card) => {
-      const isChosen = card.dataset.daycarePetChoice === selected.id;
+      const isChosen = chosen.some((item) => item.id === card.dataset.daycarePetChoice);
       card.classList.toggle('is-selected', isChosen);
       card.setAttribute('aria-pressed', String(isChosen));
       card.querySelector('.grooming-pet-selected-mark')?.remove();
       if (isChosen) { const mark = document.createElement('span'); mark.className = 'grooming-pet-selected-mark'; mark.innerHTML = '<img src="Image/Icon/Icon-13.png" alt="Selected" />'; card.append(mark); }
     });
+    if (currentMode() !== 'single' && chosen.length > 1) {
+      form.querySelector('[data-daycare-mode][value="single"]').checked = true;
+      window.alert('Daycare passes are linked to one pet. The booking option has switched to Single Visit for your selected pets.');
+      updateMode();
+    }
     setHealthGate(); quote();
   };
 
@@ -217,7 +245,8 @@ export function setupDaycareBooking() {
   date.min = new Date(dateToday.getTime() - dateToday.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
   const max = new Date(dateToday); max.setDate(max.getDate() + Number(settings.bookingHorizonDays || 90));
   date.max = new Date(max.getTime() - max.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
-  form.querySelector('[data-daycare-pet-carousel]').addEventListener('click', (event) => { const card = event.target.closest('[data-daycare-pet-choice]'); const selected = loadPetProfiles().find((item) => item.id === card?.dataset.daycarePetChoice); if (selected) refreshPet(selected); });
+  form.querySelector('[data-daycare-pet-carousel]').addEventListener('click', (event) => { const card = event.target.closest('[data-daycare-pet-choice]'); const selected = loadPetProfiles().find((item) => item.id === card?.dataset.daycarePetChoice); if (!selected) return; const ids = new Set((form.elements.petIds.value || '').split(',').filter(Boolean)); if (ids.has(selected.id)) ids.delete(selected.id); else ids.add(selected.id); if (!ids.size) ids.add(selected.id); form.elements.petIds.value = [...ids].join(','); refreshPet(selected); });
+  form.querySelector('[data-daycare-pet-profile]').addEventListener('click', (event) => { if (selectedPets().length < 2) return; event.preventDefault(); window.alert('Multiple pets are selected. Choose one pet before opening a pet profile.'); });
   modes.forEach((input) => input.addEventListener('change', updateMode));
   date.addEventListener('change', () => { capacity(); setHealthGate(); quote(); if (form.elements.includeGrooming.checked) form.elements.groomingDate.value = date.value; });
   form.elements.hours.addEventListener('change', () => { const index = form.elements.dropoffTime.selectedIndex; form.elements.pickupTime.selectedIndex = Math.min(form.elements.pickupTime.options.length - 1, index + Number(form.elements.hours.value)); quote(); });
@@ -243,8 +272,9 @@ export function setupDaycareBooking() {
   form.addEventListener('submit', async (event) => {
     event.preventDefault(); feedback.textContent = '';
     if (!form.reportValidity()) return;
-    const live = loadDaycareSettings(); const selectedPet = pet(); const mode = currentMode(); const current = quote();
-    if (!selectedPet) { feedback.textContent = 'Choose a pet profile to continue.'; return; }
+    const live = loadDaycareSettings(); const selectedPet = pet(); const chosenPets = selectedPets(); const mode = currentMode(); const current = quote();
+    if (!selectedPet || !chosenPets.length) { feedback.textContent = 'Choose at least one pet profile to continue.'; return; }
+    if (mode !== 'single' && chosenPets.length > 1) { feedback.textContent = 'Daycare passes are linked to one pet. Choose one pet or switch to Single Visit.'; return; }
     if (mode === 'purchase') {
       const plan = live.passes.find((item) => item.id === form.querySelector('[name="passPlan"]:checked')?.value && item.active !== false);
       if (!plan) { feedback.textContent = 'Choose an available pass.'; return; }
@@ -272,7 +302,7 @@ export function setupDaycareBooking() {
       window.location.hash = '#orders?service=daycare&from=daycare'; return;
     }
     if (!capacity()) { feedback.textContent = 'This date is full or unavailable. Choose another day.'; return; }
-    if (!setHealthGate() || !form.elements.vaccinationCurrent.checked) { feedback.textContent = 'A current vaccination record and confirmation are required.'; return; }
+    if (!setHealthGate() || !form.elements.vaccinationCurrent.checked) { feedback.textContent = 'Every selected pet needs a current vaccination record and confirmation.'; return; }
     if (form.elements.pickupTime.value <= form.elements.dropoffTime.value) { feedback.textContent = 'Pick-up time must be later than drop-off time.'; return; }
     let pass = null;
     if (mode === 'redeem') {
@@ -290,7 +320,7 @@ export function setupDaycareBooking() {
     let paymentProof = null;
     if (paymentMethod === 'bank-transfer') { const file = form.elements.transferSlip.files?.[0]; if (!file) { feedback.textContent = 'Upload a bank transfer slip to continue.'; return; } if (file.size > 1024 * 1024) { feedback.textContent = 'Transfer slips must be 1 MB or smaller.'; return; } paymentProof = await new Promise((resolve) => { const reader = new FileReader(); reader.onload = () => resolve({ name: file.name, data: reader.result }); reader.onerror = () => resolve(null); reader.readAsDataURL(file); }); if (!paymentProof) { feedback.textContent = 'The transfer slip could not be read.'; return; } }
     const selectedAddOns = [...form.querySelectorAll('[data-daycare-addon]:checked')].map((input) => ({ ...live.addOns.find((item) => item.id === input.value), details: input.value === 'medication' ? form.elements.medicationDetails.value.trim() : '' }));
-    const record = { id: `DC-${Date.now()}`, userId: profile.id || '', reference: `DC-${new Date().getFullYear()}-${String(Date.now()).slice(-6)}`, type: mode === 'redeem' ? 'pass-redemption' : 'single-visit', customerName: profile.name || '', customerEmail: profile.email || '', customerPhone: profile.phone || '', emergencyName: form.elements.emergencyName.value.trim(), emergencyPhone: form.elements.emergencyPhone.value.trim(), petId: selectedPet.id, petName: selectedPet.name, petSpecies: selectedPet.species || 'Dog', petBreed: selectedPet.breed || '', petWeight: Number(selectedPet.weight) || 0, vaccinationOnFile: Boolean(selectedPet.vaccinationCards?.length), vaccinationCards: selectedPet.vaccinationCards || [], vaccinationStatus: 'Owner confirmed · pending staff review', redFlags: (Array.isArray(selectedPet.remarks) ? selectedPet.remarks : [selectedPet.redFlagRemark].filter(Boolean)).join(' · '), outlet: form.elements.outlet.value, date: date.value, dropoffTime: form.elements.dropoffTime.value, pickupTime: form.elements.pickupTime.value, time: `${form.elements.dropoffTime.value} - ${form.elements.pickupTime.value}`, hours: current.visitHours, weightTier: tier(), passId: pass?.id || '', passName: pass?.name || '', passSessionsRemaining: pass ? Number(pass.remainingSessions) - 1 : 0, addOns: selectedAddOns, includeGrooming: form.elements.includeGrooming.checked, groomingPackage: current.grooming?.name || '', groomingDate: form.elements.includeGrooming.checked ? form.elements.groomingDate.value : '', groomingTime: form.elements.includeGrooming.checked ? form.elements.groomingTime.value : '', includeTaxi: form.elements.includeTaxi.checked, taxiAddress: form.elements.includeTaxi.checked ? ([getSelectedProfileAddress(form.elements.taxiAddress)?.street, getSelectedProfileAddress(form.elements.taxiAddress)?.city, getSelectedProfileAddress(form.elements.taxiAddress)?.state, getSelectedProfileAddress(form.elements.taxiAddress)?.postcode].filter(Boolean).join(', ') || form.elements.taxiManualAddress.value.trim()) : '', taxiTrip: form.elements.includeTaxi.checked ? form.elements.taxiTrip.value : '', taxiSchedule: form.elements.includeTaxi.checked ? form.elements.taxiSchedule.value : '', taxiTotal: current.taxi, voucherCode: appliedCode, subtotal: current.basePrice + current.addOnTotal + current.groomingPrice + current.taxi, discount, total: current.total, paymentMethod, paymentStatus: paymentProof ? 'Pending Payment Verification' : paymentMethod === 'wallet' ? 'Paid' : 'Pending / Confirmed', paymentProof, status: paymentProof ? 'Pending Payment Verification' : 'Pending / Confirmed', adminStatus: 'New', tasks: selectedAddOns.map((item) => ({ name: item.name, completed: false, details: item.details || '' })).concat(current.grooming ? [{ name: `Grooming · ${current.grooming.name}`, completed: false, details: `${form.elements.groomingDate.value} ${form.elements.groomingTime.value}` }] : []), createdAt: new Date().toISOString() };
+    const record = { id: `DC-${Date.now()}`, userId: profile.id || '', reference: `DC-${new Date().getFullYear()}-${String(Date.now()).slice(-6)}`, type: mode === 'redeem' ? 'pass-redemption' : 'single-visit', customerName: profile.name || '', customerEmail: profile.email || '', customerPhone: profile.phone || '', emergencyName: form.elements.emergencyName.value.trim(), emergencyPhone: form.elements.emergencyPhone.value.trim(), petId: selectedPet.id, petIds: chosenPets.map((item) => item.id), petName: chosenPets.map((item) => item.name).join(' | '), pets: chosenPets.map((item) => ({ id: item.id, name: item.name, species: item.species || 'Dog', breed: item.breed || '', weight: Number(item.weight) || 0, vaccinationOnFile: Boolean(item.vaccinationCards?.length), vaccinationCards: item.vaccinationCards || [], redFlags: (Array.isArray(item.remarks) ? item.remarks : [item.redFlagRemark].filter(Boolean)).join(' · ') })), petSpecies: chosenPets.map((item) => item.species || 'Dog').join(' | '), petBreed: chosenPets.map((item) => item.breed || '').join(' | '), petWeight: chosenPets.map((item) => Number(item.weight) || 0).join(' | '), vaccinationOnFile: chosenPets.every((item) => item.vaccinationCards?.length), vaccinationCards: chosenPets.flatMap((item) => item.vaccinationCards || []), vaccinationStatus: 'Owner confirmed · pending staff review', redFlags: chosenPets.map((item) => `${item.name}: ${(Array.isArray(item.remarks) ? item.remarks : [item.redFlagRemark].filter(Boolean)).join(' · ')}`).filter(Boolean).join(' | '), outlet: form.elements.outlet.value, date: date.value, dropoffTime: form.elements.dropoffTime.value, pickupTime: form.elements.pickupTime.value, time: `${form.elements.dropoffTime.value} - ${form.elements.pickupTime.value}`, hours: current.visitHours, weightTier: chosenPets.map((item) => `${item.name}: ${daycareWeightTier(item.weight, live)}`).join(' | '), passId: pass?.id || '', passName: pass?.name || '', passSessionsRemaining: pass ? Number(pass.remainingSessions) - 1 : 0, addOns: selectedAddOns.map((item) => ({ ...item, quantity: chosenPets.length, lineTotal: Number(item.price || 0) * chosenPets.length })), includeGrooming: form.elements.includeGrooming.checked, groomingPackage: current.petGrooming.map((item) => `${item.pet.name}: ${item.item?.name || ''}`).filter(Boolean).join(' | '), groomingDate: form.elements.includeGrooming.checked ? form.elements.groomingDate.value : '', groomingTime: form.elements.includeGrooming.checked ? form.elements.groomingTime.value : '', includeTaxi: form.elements.includeTaxi.checked, taxiAddress: form.elements.includeTaxi.checked ? ([getSelectedProfileAddress(form.elements.taxiAddress)?.street, getSelectedProfileAddress(form.elements.taxiAddress)?.city, getSelectedProfileAddress(form.elements.taxiAddress)?.state, getSelectedProfileAddress(form.elements.taxiAddress)?.postcode].filter(Boolean).join(', ') || form.elements.taxiManualAddress.value.trim()) : '', taxiTrip: form.elements.includeTaxi.checked ? form.elements.taxiTrip.value : '', taxiSchedule: form.elements.includeTaxi.checked ? form.elements.taxiSchedule.value : '', taxiTotal: current.taxi, voucherCode: appliedCode, subtotal: current.basePrice + current.addOnTotal + current.groomingPrice + current.taxi, discount, total: current.total, paymentMethod, paymentStatus: paymentProof ? 'Pending Payment Verification' : paymentMethod === 'wallet' ? 'Paid' : 'Pending / Confirmed', paymentProof, status: paymentProof ? 'Pending Payment Verification' : 'Pending / Confirmed', adminStatus: 'New', tasks: selectedAddOns.map((item) => ({ name: item.name, completed: false, details: item.details || '', quantity: chosenPets.length })).concat(current.grooming ? [{ name: `Grooming · ${current.grooming.name}`, completed: false, details: `${form.elements.groomingDate.value} ${form.elements.groomingTime.value}`, quantity: chosenPets.length }] : []), createdAt: new Date().toISOString() };
     try {
       await saveDedicatedBooking(daycareBookingsKey, record, [...loadDaycareBookings(), record]);
     } catch (error) {
@@ -310,5 +340,6 @@ export function setupDaycareBooking() {
   });
   form.elements.includeGrooming.dispatchEvent(new Event('change'));
   form.elements.includeTaxi.dispatchEvent(new Event('change'));
+  refreshPet(pet());
   setHealthGate(); capacity(); updateMode();
 }

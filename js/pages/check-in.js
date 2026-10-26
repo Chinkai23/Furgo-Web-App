@@ -211,11 +211,29 @@ function bookingOrders(profile) {
       const orderEmail = String(order.customerEmail || order.email || '').trim().toLowerCase();
       const orderPhone = String(order.customerPhone || order.phone || '').replace(/\D/g, '');
       const owned = (email && orderEmail === email) || (phone && orderPhone === phone);
-      const taxiInProgress = Boolean((order.includeTaxi || order.taxi?.pickup || order.taxi?.dropoff) && order.taxiProgress?.status !== 'Completed');
-      const active = !/cancel/i.test(order.status || '') && (!/complete|deliver/i.test(order.status || '') || taxiInProgress);
+      const status = String(order.adminStatus || order.status || '').trim().toLowerCase().replace(/[-_]/g, ' ');
+      const terminalStatus = /^(cancelled?|completed|delivered|checked out)$/.test(status);
+      const active = !terminalStatus && order.taxiProgress?.status !== 'Completed';
       return owned && order.petName && order.type !== 'pass-purchase' && active;
     })
-    .sort((a, b) => new Date(b.createdAt || b.date || b.checkIn || 0) - new Date(a.createdAt || a.date || a.checkIn || 0));
+    .sort((a, b) => {
+      const serviceDate = (order) => order._service === 'hotel'
+        ? order.checkIn || order.startDate || order.date || order.createdAt
+        : order.date || order.bookingDate || order.createdAt;
+      const dateA = new Date(serviceDate(a) || 0).getTime();
+      const dateB = new Date(serviceDate(b) || 0).getTime();
+      const normalizedA = Number.isFinite(dateA) ? dateA : 0;
+      const normalizedB = Number.isFinite(dateB) ? dateB : 0;
+      if (normalizedA !== normalizedB) return normalizedA - normalizedB;
+      const timeInMinutes = (order) => {
+        const match = String(order.time || order.dropoffTime || '').match(/(\d{1,2}):(\d{2})\s*([ap])?m?/i);
+        if (!match) return 0;
+        let hour = Number(match[1]) % 12;
+        if (match[3]?.toLowerCase() === 'p') hour += 12;
+        return hour * 60 + Number(match[2]);
+      };
+      return timeInMinutes(a) - timeInMinutes(b);
+    });
 }
 
 function orderSummary(order) {
@@ -244,21 +262,161 @@ export function setupCheckInCodeInput(input) {
   });
 }
 
-function selectedOrderDetail(order) {
-  if (!order) return '<section class="check-in-detail check-in-detail-empty"><h2>Choose An Order To Continue</h2><p>Select an active booking above to show its check-in QR code and details.</p></section>';
+function serviceDisplayName(order) {
+  if (order._service === 'grooming') return order.packageName || 'Grooming';
+  if (order._service === 'hotel') return order.roomName || 'Pet Hotel Stay';
+  return order.type === 'pass-purchase' ? order.planName || 'Daycare Pass' : order.passName || 'Pet Daycare Visit';
+}
+
+function orderPetNames(order) {
+  const sources = Array.isArray(order.pets) && order.pets.length
+    ? order.pets.map((pet) => typeof pet === 'string' ? pet : pet?.name)
+    : Array.isArray(order.petNames) && order.petNames.length
+      ? order.petNames.map((pet) => typeof pet === 'string' ? pet : pet?.name)
+      : [order.pet?.name || order.petName];
+  return [...new Set(sources.map((name) => String(name || '').trim()).filter(Boolean))].join(' | ');
+}
+
+function formatOrderReference(reference) {
+  const value = String(reference || '');
+  const match = value.match(/^([A-Z]+)-(\d{5,})$/i);
+  return match ? `${match[1]}-${match[2].slice(0, 4)}-${match[2].slice(4)}` : value;
+}
+
+function petDetailsCards(order) {
+  let pets = [];
+  try {
+    const saved = JSON.parse(localStorage.getItem('furgo-demo-pet-profiles') || '[]');
+    if (Array.isArray(saved)) pets = saved;
+  } catch { pets = []; }
+  const split = (value) => String(value ?? '').split(/\s*\|\s*/).map((part) => part.trim()).filter(Boolean);
+  const snapshots = Array.isArray(order.pets) && order.pets.length
+    ? order.pets
+    : (Array.isArray(order.petNames) ? order.petNames : split(order.petName)).map((name, index) => ({
+      id: Array.isArray(order.petIds) ? order.petIds[index] : order.petId,
+      name: typeof name === 'string' ? name : name?.name,
+      species: split(order.petSpecies)[index],
+      breed: split(order.petBreed || order.breed)[index],
+      weight: split(order.petWeight || order.weight)[index],
+      sex: split(order.petSex || order.gender)[index],
+      photo: index === 0 ? order.petPhoto || order.pet?.photo : '',
+    }));
+  const cards = snapshots.map((snapshot, index) => {
+    const pet = pets.find((item) => String(item.id) === String(snapshot.id))
+      || pets.find((item) => item.name === snapshot.name)
+      || (index === 0 ? order.pet : null)
+      || {};
+    const image = snapshot.photo || pet.photo || (index === 0 ? order.petPhoto || order.pet?.photo : '') || '';
+    const safeImage = /^(data:image\/(png|jpeg|webp|gif);base64,|https:\/\/|Image\/)/i.test(String(image)) ? image : 'Image/Other%20Image/Pet%20Profile%20Picture.png';
+    const name = snapshot.name || pet.name || `Pet ${index + 1}`;
+    const breed = snapshot.breed || pet.breed || '';
+    const sex = snapshot.sex || snapshot.gender || pet.sex || pet.gender || '';
+    const weight = snapshot.weight ?? pet.weight;
+    const species = snapshot.species || pet.species || '';
+    const details = [species, breed, sex, weight !== '' && weight != null ? `${weight} kg` : ''].filter(Boolean).join(' · ');
+    return `<section class="check-in-pet-card"><img src="${escapeHTML(safeImage)}" alt="${escapeHTML(name)} profile" /><div><strong>${escapeHTML(name)}</strong><span>${escapeHTML(details || 'Pet profile')}</span></div></section>`;
+  }).join('');
+  return cards ? `<div class="check-in-pet-cards">${cards}</div>` : '';
+}
+
+function orderDetailRows(order, taxiStatus) {
+  const values = [
+    ['Order Number', order.reference || order.id],
+    ['Service', order._serviceLabel],
+    ['Appointment', orderSummary(order)],
+    ['Customer', order.customerName],
+    ['Contact', order.customerPhone || order.customerEmail],
+    ['Payment', [order.paymentStatus, order.paymentMethod].filter(Boolean).join(' · ')],
+    ['Total', Number.isFinite(Number(order.total)) ? `MYR ${Number(order.total).toFixed(2)}` : ''],
+    ['Add-on services', Array.isArray(order.addOns) ? order.addOns.map((item) => item.name).filter(Boolean).join(', ') : ''],
+    ['Pet Taxi', order.includeTaxi || order.taxi?.pickup || order.taxi?.dropoff ? taxiStatus : ''],
+    ['Customer notes', order.notes || order.specialRequests],
+  ].filter(([, value]) => value != null && String(value).trim());
+  return values.map(([label, value]) => `<div><dt>${escapeHTML(label)}</dt><dd>${escapeHTML(value)}</dd></div>`).join('');
+}
+
+function appointmentDetailsMarkup(order) {
+  const formatDate = (value) => {
+    const text = String(value || '').trim();
+    const match = text.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    return match
+      ? new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3])).toLocaleDateString('en-MY', { day: 'numeric', month: 'short', year: 'numeric' })
+      : text;
+  };
+  const formatTime = (value) => String(value || '').replace(/\b(\d{1,2}):(\d{2})(\s*([ap])m)?\b/gi, (match, rawHour, minutes, suffix, period) => {
+    const hour = Number(rawHour);
+    if (period) return `${hour}:${minutes} ${period.toUpperCase()}M`;
+    return `${hour % 12 || 12}:${minutes} ${hour >= 12 ? 'PM' : 'AM'}`;
+  });
+  const date = order._service === 'hotel'
+    ? [order.checkIn, order.checkOut].filter(Boolean).map(formatDate).join(' – ')
+    : formatDate(order.date || order.bookingDate || '');
+  const time = order._service === 'daycare'
+    ? [order.dropoffTime, order.pickupTime].filter(Boolean).map(formatTime).join(' – ')
+    : formatTime(order.time || '');
+  const petNames = orderPetNames(order);
+  const highlight = (value) => value ? `<span>${escapeHTML(value)}</span>` : '';
+  const dateAndTime = [date, time].filter(Boolean).join(' | ');
+  return `<section class="check-in-appointment"><p class="check-in-appointment-number">${escapeHTML(dateAndTime)}</p><div class="check-in-appointment-highlights">${highlight(petNames)}</div></section>`;
+}
+
+function selectedOrderDetail(order, showMore = false) {
+  if (!order) return '';
   const currentStatus = String(order.adminStatus || order.status || '');
-  if (/^completed$/i.test(currentStatus) || /^cancelled$/i.test(currentStatus)) return '<section class="check-in-detail check-in-detail-empty"><h2>Order Completed</h2><p>This order has been completed. Its QR and manual codes are no longer available.</p></section>';
+  if (/^(completed|cancelled|canceled|delivered|checked out)$/i.test(currentStatus.trim())) return '';
   const phase = String(order.adminStatus || order.status || '').toLowerCase().replace(/[-_]/g, ' ') === 'checked in' ? 'check-out' : 'check-in';
   const hasTaxi = Boolean(order.includeTaxi || order.taxi?.pickup || order.taxi?.dropoff);
   const taxiStatus = order.taxiProgress?.status || 'Scheduled';
   const token = hasTaxi ? '' : ensureCheckInToken(order._storageKey, order.id, phase);
   const taxiToken = hasTaxi && taxiStatus !== 'Completed' ? ensureCheckInToken(order._storageKey, order.id, 'taxi-trip') : '';
-  const taxiQr = taxiToken ? `<section class="check-in-taxi-qr"><div><span>Pet Taxi · ${escapeHTML(taxiStatus)}</span><h3>Driver Trip QR Code</h3><p>Show this same order QR to the driver at pickup and again when your pet arrives home.</p><small class="check-in-manual-code">Manual code: <strong>${escapeHTML(formatCheckInToken(taxiToken))}</strong></small></div>${makeCheckInQrSvg(taxiToken)}</section>` : hasTaxi ? '<p class="check-in-taxi-complete">Pet Taxi delivery is complete.</p>' : '';
+  const qrButton = (value, label) => `<button type="button" class="check-in-qr-trigger" data-open-check-in-qr aria-label="Enlarge ${escapeHTML(label)}">${makeCheckInQrSvg(value)}</button>`;
+  const orderRef = `${order._service}:${order.id}`;
+  const detailsHref = `#check-in?order=${encodeURIComponent(orderRef)}&details=1`;
+  const detailsLink = `<a class="button button-primary check-in-more-button" href="${detailsHref}">More Details</a>`;
+  const taxiQr = taxiToken ? `<section class="check-in-taxi-qr">${showMore ? '' : appointmentDetailsMarkup(order)}${qrButton(taxiToken, 'Pet Taxi QR code')}<div><span>Pet Taxi · ${escapeHTML(taxiStatus)}</span><h3>Driver Trip QR Code</h3><p>Show this code to staff when you arrive.</p><small class="check-in-manual-code">Manual code: <strong>${escapeHTML(formatCheckInToken(taxiToken))}</strong></small>${showMore ? '' : detailsLink}</div></section>` : hasTaxi ? '<p class="check-in-taxi-complete">Pet Taxi delivery is complete.</p>' : '';
   const heading = phase === 'check-in' ? 'Check-In QR Code' : 'Check-Out QR Code';
-  const action = phase === 'check-in' ? 'Ask staff to scan this code when you arrive.' : 'Your pet is checked in. Ask staff to scan this same code again when you are ready to check out.';
-  const scanNote = phase === 'check-in' ? 'Scanning opens a review first. Staff check-in only completes after confirmation.' : 'Scanning opens a review first. Staff check-out only completes after confirmation.';
-  const qrLayout = hasTaxi ? taxiQr : `<div class="check-in-qr-layout">${makeCheckInQrSvg(token)}<div><h3>${heading}</h3><p>${escapeHTML(action)}</p><small>Reference: ${escapeHTML(order.reference || order.id)}</small><small class="check-in-manual-code">Manual code: <strong>${escapeHTML(formatCheckInToken(token))}</strong></small></div></div>`;
-  return `<section class="check-in-detail"><div class="check-in-detail-heading"><div><span>${escapeHTML(order._serviceLabel)}</span><h2>${escapeHTML(order.petName)} · ${escapeHTML(order.reference || order.id)}</h2></div><b class="check-in-status ${phase === 'check-out' ? 'is-checked-in' : ''}">${escapeHTML(order.status || 'In Progress')}</b></div>${qrLayout}<dl class="check-in-order-details"><div><dt>Pet</dt><dd>${escapeHTML(order.petName)}</dd></div><div><dt>Service</dt><dd>${escapeHTML(order._serviceLabel)}</dd></div><div><dt>Details</dt><dd>${escapeHTML(orderSummary(order) || 'Booking details are being prepared.')}</dd></div><div><dt>Current status</dt><dd>${escapeHTML(order.status || 'In Progress')}</dd></div>${hasTaxi ? `<div><dt>Pet Taxi status</dt><dd>${escapeHTML(taxiStatus)}</dd></div>` : ''}</dl><p class="check-in-demo-note">${escapeHTML(hasTaxi ? 'This code remains valid for pickup and the final delivery scan.' : scanNote)}</p></section>`;
+  const action = phase === 'check-in' ? 'Show this code to staff when you arrive.' : 'Show this code to staff when you are ready to check out.';
+  const qrLayout = hasTaxi ? taxiQr : `<section class="check-in-qr-layout">${showMore ? '' : appointmentDetailsMarkup(order)}${qrButton(token, 'order QR code')}<div><h3>${heading}</h3><p>${escapeHTML(action)}</p><small class="check-in-manual-code">Manual code: <strong>${escapeHTML(formatCheckInToken(token))}</strong></small>${showMore ? '' : detailsLink}</div></section>`;
+  const serviceName = serviceDisplayName(order);
+  const serviceHeading = `${serviceName} (${formatOrderReference(order.reference || order.id)})`;
+  if (showMore) return `<section class="check-in-detail check-in-more-details"><div class="check-in-detail-heading"><h2>${escapeHTML(serviceHeading)}</h2><b class="check-in-status">${escapeHTML(currentStatus || 'In Progress')}</b></div>${petDetailsCards(order)}${qrLayout}<dl class="check-in-order-details">${orderDetailRows(order, taxiStatus)}</dl></section>`;
+  return `<section class="check-in-detail"><div class="check-in-detail-heading"><h2>${escapeHTML(serviceHeading)}</h2><b class="check-in-status ${phase === 'check-out' ? 'is-checked-in' : ''}">${escapeHTML(currentStatus || 'In Progress')}</b></div>${qrLayout}</section>`;
+}
+
+export function setupCheckInInteractions() {
+  if (document.documentElement.dataset.checkInQrInteractionsReady === 'true') return;
+  document.documentElement.dataset.checkInQrInteractionsReady = 'true';
+  document.addEventListener('click', (event) => {
+    const opener = event.target.closest('[data-open-check-in-qr]');
+    const closer = event.target.closest('[data-close-check-in-qr]');
+    const modal = document.querySelector('[data-check-in-qr-modal]');
+    if (!modal) return;
+    if (opener) {
+      const svg = opener.querySelector('svg');
+      if (!svg) return;
+      modal.innerHTML = `<div class="check-in-qr-modal-content"><button type="button" class="check-in-qr-modal-close" data-close-check-in-qr aria-label="Close full-size QR code">×</button><button type="button" class="check-in-qr-modal-image" data-close-check-in-qr aria-label="Close full-size QR code">${svg.outerHTML}</button></div>`;
+      modal.hidden = false;
+      modal.setAttribute('aria-hidden', 'false');
+      modal.setAttribute('role', 'dialog');
+      modal.setAttribute('aria-modal', 'true');
+      document.body.classList.add('check-in-qr-modal-open');
+      modal.querySelector('[data-close-check-in-qr]')?.focus();
+    } else if (closer || event.target === modal) {
+      modal.hidden = true;
+      modal.setAttribute('aria-hidden', 'true');
+      modal.innerHTML = '';
+      document.body.classList.remove('check-in-qr-modal-open');
+    }
+  });
+  document.addEventListener('keydown', (event) => {
+    if (event.key !== 'Escape') return;
+    const modal = document.querySelector('[data-check-in-qr-modal]');
+    if (!modal || modal.hidden) return;
+    modal.hidden = true;
+    modal.setAttribute('aria-hidden', 'true');
+    modal.innerHTML = '';
+    document.body.classList.remove('check-in-qr-modal-open');
+  });
 }
 
 // Customer Check In: shows upcoming service bookings and the current visit QR.
@@ -267,12 +425,10 @@ export function checkInPage(routeParams = new URLSearchParams()) {
   try { profile = JSON.parse(sessionStorage.getItem('furgo-demo-user-profile') || '{}'); } catch { profile = {}; }
   const orders = bookingOrders(profile);
   const selectedRef = routeParams.get('order') || '';
-  const selected = orders.find((order) => `${order._service}:${order.id}` === selectedRef) || null;
-  const cards = orders.map((order) => {
-    const ref = `${order._service}:${order.id}`;
-    const chosen = selected && `${selected._service}:${selected.id}` === ref;
-    return `<a class="check-in-order-choice ${chosen ? 'is-selected' : ''}" href="#check-in?order=${encodeURIComponent(ref)}" ${chosen ? 'aria-current="true"' : ''}><span><strong>${escapeHTML(order.petName)}</strong><small>${escapeHTML(order._serviceLabel)} · ${escapeHTML(order.reference || order.id)}</small><small>${escapeHTML(orderSummary(order) || 'Booking details available')}</small></span><b class="check-in-status ${String(order.status || '').toLowerCase() === 'checked in' ? 'is-checked-in' : ''}">${escapeHTML(order.status || 'In Progress')}</b><span class="check-in-order-arrow" aria-hidden="true">›</span></a>`;
-  }).join('');
+  const selected = orders.find((order) => `${order._service}:${order.id}` === selectedRef) || orders[0] || null;
+  const showMore = routeParams.get('details') === '1';
   const icon = (file) => `Image/Icon/${encodeURIComponent(file)}`;
-  return `<main class="check-in-page"><header class="profile-heading check-in-heading"><a class="profile-back" href="#home" aria-label="Back to Home">‹</a><h1>Check In</h1></header><section class="check-in-intro"><span>Service visits</span><h2>Your Active Orders</h2><p>Choose a booking to show its check-in or check-out QR code to Furgo staff.</p></section><section class="check-in-order-list" aria-label="Active bookings">${cards || '<div class="check-in-empty"><h2>No Active Bookings</h2><p>Orders for grooming, pet hotel, or pet daycare will appear here until they are completed.</p></div>'}</section>${selectedOrderDetail(selected)}${bottomNavigation('check-in', icon)}</main>`;
+  const headerBack = showMore && selected ? `#check-in?order=${encodeURIComponent(`${selected._service}:${selected.id}`)}` : showMore ? '#check-in' : '#home';
+  const activeQrSections = orders.map((order) => selectedOrderDetail(order)).join('');
+  return `<main class="check-in-page"><header class="profile-heading check-in-heading"><a class="profile-back" href="${headerBack}" aria-label="${showMore ? 'Back to Check In' : 'Back to Home'}">‹</a><h1>${showMore ? 'Order Details' : 'Check In'}</h1></header>${showMore ? selectedOrderDetail(selected, true) : activeQrSections || '<div class="check-in-empty"><h2>No Active Bookings</h2><p>Orders for grooming, pet hotel, or pet daycare will appear here until they are completed.</p></div>'}<div class="check-in-qr-modal" data-check-in-qr-modal hidden aria-hidden="true"></div>${bottomNavigation('check-in', icon)}</main>`;
 }
