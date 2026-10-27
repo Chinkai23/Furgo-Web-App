@@ -699,6 +699,7 @@ h1, h2, h3, p { margin-top: 0; }
 .admin-market-stats span { color: var(--muted); font-size: 11px; }
 .admin-market-stats strong { font: 700 25px 'Avenir Next'; }
 .admin-market-panel { margin-top: 19px; padding: 19px; border: 1px solid #f1dfd0; border-radius: 19px; background: #fff; }
+.admin-market-panel.admin-service-order-board { padding: 0; border-color: transparent; background: transparent; }
 .admin-market-panel-heading { display: flex; justify-content: space-between; gap: 20px; margin-bottom: 14px; }
 .admin-market-panel-heading h2 { margin: 4px 0 0; font: 700 19px 'Avenir Next'; }
 .admin-market-panel-heading p { max-width: 360px; margin: 0; color: var(--muted); font-size: 11px; line-height: 1.5; }
@@ -1330,6 +1331,11 @@ h1, h2, h3, p { margin-top: 0; }
 .my-order-receipt-button { width: fit-content; min-height: 38px; justify-self: start; font-size: 11px; }
 .my-order-receipt-empty { margin: 0; color: #c43d32; font-size: 11px; font-weight: 600; line-height: 1.5; }
 .my-order-card-top, .my-order-card-bottom { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.admin-order-summary-badges { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 8px; }
+.admin-order-receipt-badge { display: inline-flex; align-items: center; gap: 4px; font-size: 10px; font-weight: 700; line-height: 1.35; text-align: right; }
+.admin-order-receipt-badge.is-missing { color: #c43d32; }
+.admin-order-receipt-badge.is-uploaded { color: #357a45; }
+.admin-order-receipt-badge svg { width: 14px; height: 14px; flex: 0 0 14px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 .my-order-service-label { color: #d85f00; font-size: 10px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
 .my-order-status { padding: 5px 9px; border-radius: 20px; color: #d85f00; background: #fff1d7; font-size: 10px; }
 .my-order-status.is-complete { color: #d85f00; background: #e8f5eb; }
@@ -1634,6 +1640,7 @@ select::-ms-expand { display: none; }
 .admin-hotel-calendar-legend span { display: inline-flex; align-items: center; gap: 6px; }
 .admin-hotel-calendar-legend i { width: 10px; height: 10px; border-radius: 3px; background: #e8f5eb; }
 .admin-hotel-calendar-legend i.is-reserved { background: #ffe2c8; }
+.admin-hotel-calendar-legend i.is-blocked { background: #eee9e4; }
 .admin-hotel-calendar-scroll { overflow: auto; border: 1px solid #f0e2d7; border-radius: 12px; }
 .admin-hotel-calendar { width: 100%; min-width: 760px; border-collapse: separate; border-spacing: 0; background: #fff; }
 .admin-hotel-calendar th, .admin-hotel-calendar td { min-width: 86px; padding: 7px; border-right: 1px solid #f2e9e2; border-bottom: 1px solid #f2e9e2; text-align: center; }
@@ -1643,9 +1650,12 @@ select::-ms-expand { display: none; }
 .admin-hotel-calendar thead th span, .admin-hotel-calendar thead th strong, .admin-hotel-calendar tbody th span, .admin-hotel-calendar tbody th small { display: block; }
 .admin-hotel-calendar thead th span, .admin-hotel-calendar tbody th small { color: #8b817a; font-size: 9px; font-weight: 500; }
 .admin-hotel-calendar thead th strong, .admin-hotel-calendar tbody th span { margin-top: 3px; font-size: 10px; font-weight: 700; }
-.admin-hotel-calendar-cell { display: block; max-width: 124px; margin: auto; padding: 7px 5px; overflow: hidden; border-radius: 7px; font-size: 9px; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
+.admin-hotel-calendar-cell { display: block; width: 100%; max-width: 124px; margin: auto; padding: 7px 5px; overflow: hidden; border: 0; border-radius: 7px; font: inherit; font-size: 9px; font-weight: 700; line-height: 1.3; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
 .admin-hotel-calendar-cell.is-available { color: #32734a; background: #eaf6ed; }
 .admin-hotel-calendar-cell.is-reserved { color: #a94f08; background: #fff0e2; }
+.admin-hotel-calendar-cell.is-blocked { color: #71665e; background: #eee9e4; }
+.admin-hotel-calendar-cell:hover { filter: brightness(.96); }
+.admin-hotel-calendar-cell:focus-visible { outline: 2px solid var(--orange); outline-offset: 2px; }
 .admin-hotel-calendar tr:last-child th, .admin-hotel-calendar tr:last-child td { border-bottom: 0; }
 .admin-hotel-calendar th:last-child, .admin-hotel-calendar td:last-child { border-right: 0; }
 @media (max-width: 600px) {
@@ -1739,6 +1749,13 @@ select::-ms-expand { display: none; }
 .admin-order-receipt-summary { margin: -2px 0 0; color: #756e69; font-size: 11px; font-weight: 600; }
 .admin-order-receipt-section,
 .admin-order-status-section { display: grid; gap: 10px; min-width: 0; padding: 13px; border: 1px solid #f0e4da; border-radius: 13px; background: #fffdfa; }
+.admin-grooming-receipt-current,
+.admin-hotel-receipt-current { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.admin-grooming-receipt-current p,
+.admin-hotel-receipt-current p { margin: 0; }
+.admin-grooming-receipt-current [data-delete-grooming-receipt],
+.admin-hotel-receipt-current [data-delete-hotel-receipt],
+[data-delete-daycare-receipt] { min-height: 26px; padding: 0 8px; border-radius: 8px; font-size: 10px; }
 .admin-order-receipt-section h3,
 .admin-order-status-section h3 { margin: 0; font-size: 14px; }
 .admin-order-receipt-controls { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
@@ -2022,7 +2039,7 @@ select::-ms-expand { display: none; }
   box-shadow: 0 6px 18px #3824120b;
 }
 .admin-service-window .admin-tool-icon { width: 42px; height: 42px; border-radius: 13px; font-size: 22px; }
-.admin-service-window h2 { margin: 0 0 4px; font: 700 17px 'Avenir Next'; }
+.admin-service-window h3 { margin: 0 0 4px; font: 700 17px 'Avenir Next'; }
 .admin-service-window p { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.5; }
 .admin-service-window .button { min-height: 40px; justify-content: center; padding: 0 12px; font-size: calc(11px + 2pt); white-space: nowrap; }
 .admin-service-window-artwork { width: 66px; height: 60px; display: block; object-fit: contain; }
@@ -2042,7 +2059,7 @@ select::-ms-expand { display: none; }
   .admin-service-windows { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; }
   .admin-service-window { min-height: 205px; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto auto 1fr auto; align-items: start; gap: 8px; padding: 11px; }
   .admin-service-window-artwork { width: 48px; height: 46px; }
-  .admin-service-window h2 { font-size: 14px; }
+  .admin-service-window h3 { font-size: 14px; }
   .admin-service-window p { font-size: 10px; }
   .admin-service-window .button { grid-column: auto; width: 100%; min-height: 38px; padding: 0 4px; font-size: calc(9px + 2pt); white-space: normal; }
   .admin-daycare-profile-form { grid-template-columns: minmax(0, 1fr); }
@@ -2097,8 +2114,10 @@ select::-ms-expand { display: none; }
 .driver-bottom-nav span { color: white; font-size: 9px; font-weight: 700; line-height: 1; }
 .admin-pet-taxi-section { margin-top: 22px; padding: 20px; border: 1px solid #f1dfd0; border-radius: 18px; background: #fff; }
 .admin-pet-taxi-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; margin-bottom: 14px; }
-.admin-pet-taxi-heading > div > span { color: var(--orange-dark); font-size: 10px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
-.admin-pet-taxi-heading h2 { margin: 3px 0 5px; font: 700 20px/1.2 'Avenir Next'; }
+.admin-pet-taxi-title-row { display: flex; align-items: center; gap: 10px; margin-bottom: 5px; }
+.admin-pet-taxi-title-row > img { width: 48px; height: 48px; object-fit: contain; }
+.admin-pet-taxi-heading .admin-pet-taxi-kicker { display: block; color: var(--orange-dark); font-size: 10px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+.admin-pet-taxi-heading h2 { margin: 3px 0 0; font: 700 20px/1.2 'Avenir Next'; }
 .admin-pet-taxi-heading p { max-width: 680px; margin: 0; color: var(--muted); font-size: 12px; line-height: 1.5; }
 .admin-pet-taxi-heading .button { min-height: 38px; flex: 0 0 auto; font-size: 11px; }
 .admin-pet-taxi-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }

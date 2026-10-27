@@ -5,7 +5,7 @@ export function adminOrderStage(order) {
   const status = customerOrderStatus(order);
   if (['completed', 'canceled', 'no-show'].includes(statusCategory(status))) return 'completed';
   if (order.serviceId === 'marketplace') return status === 'In Progress' ? 'progressing' : 'new';
-  return order.receipt ? 'progressing' : 'new';
+  return order.receipt || !['New Order', 'Pending Payment'].includes(status) ? 'progressing' : 'new';
 }
 
 export function adminOrderStageFilters(orders, serviceId, selectedStage = 'new') {
@@ -31,7 +31,20 @@ export function adminOrderReceiptStatus(order) {
   if (!order.receipt) return 'Not Uploaded';
   const receiptType = String(order.receipt.type || order.paymentStatus || '').toLowerCase();
   if (receiptType.includes('full')) return 'Full Payment Receipt Uploaded';
-  return 'Deposit Receipt Uploaded';
+  if (receiptType.includes('deposit')) return 'Deposit Receipt Uploaded';
+  return 'Receipt Uploaded';
+}
+
+function adminOrderReceiptBadge(order) {
+  if (!['grooming', 'hotel', 'daycare'].includes(order.serviceId)) return '';
+  const receiptStatus = adminOrderReceiptStatus(order);
+  const missing = receiptStatus === 'Not Uploaded';
+  const fullPayment = receiptStatus === 'Full Payment Receipt Uploaded';
+  const icon = missing || !fullPayment
+    ? '<svg viewBox="0 0 20 20" focusable="false"><path d="M10 13V3m0 0L6.5 6.5M10 3l3.5 3.5M4 12.5v4h12v-4" /></svg>'
+    : '<svg viewBox="0 0 20 20" focusable="false"><path d="m4 10.5 4 4 8-9" /></svg>';
+  const label = missing ? 'Receipt Not Uploaded' : receiptStatus;
+  return `<span class="admin-order-receipt-badge ${missing ? 'is-missing' : 'is-uploaded'}" role="img" aria-label="${escapeHTML(label)}" title="${escapeHTML(label)}">${icon}</span>`;
 }
 
 export function adminOrderProgressMarkup(order) {
@@ -70,7 +83,7 @@ export function adminOrderCardMarkup({ order, serviceLabel, title, summary, summ
   const formattedDate = date ? new Date(date).toLocaleDateString('en-MY', { day: 'numeric', month: 'short', year: 'numeric' }) : '';
   const amount = Number(total ?? order.totalAmount ?? order.total);
   const orderReference = reference || order.reference || order.id || '';
-  return `<details class="my-order-card admin-service-order-card"><summary class="my-order-card-summary"><div class="my-order-card-top"><span class="my-order-service-label">${escapeHTML(serviceLabel)}</span><b class="my-order-status ${statusClass}">${escapeHTML(status)}</b></div><h2>${escapeHTML(title || 'Order')}</h2><p class="my-order-summary ${summaryMarkup ? 'admin-market-order-summary' : ''}">${summaryMarkup || escapeHTML(summary || 'Order details will appear here.')}</p><div class="my-order-card-bottom"><small>${[orderReference, formattedDate].filter(Boolean).map(escapeHTML).join(' · ')}</small><strong>MYR ${Number.isFinite(amount) ? amount.toFixed(2) : '0.00'}</strong></div><span class="my-order-expand-hint">View Order Details <span aria-hidden="true">⌄</span></span></summary><div class="my-order-expanded admin-service-order-details">${details}</div></details>`;
+  return `<details class="my-order-card admin-service-order-card"><summary class="my-order-card-summary"><div class="my-order-card-top"><span class="my-order-service-label">${escapeHTML(serviceLabel)}</span><div class="admin-order-summary-badges"><b class="my-order-status ${statusClass}">${escapeHTML(status)}</b>${adminOrderReceiptBadge(order)}</div></div><h2>${escapeHTML(title || 'Order')}</h2><p class="my-order-summary ${summaryMarkup ? 'admin-market-order-summary' : ''}">${summaryMarkup || escapeHTML(summary || 'Order details will appear here.')}</p><div class="my-order-card-bottom"><small>${[orderReference, formattedDate].filter(Boolean).map(escapeHTML).join(' · ')}</small><strong>MYR ${Number.isFinite(amount) ? amount.toFixed(2) : '0.00'}</strong></div><span class="my-order-expand-hint">View Order Details <span aria-hidden="true">⌄</span></span></summary><div class="my-order-expanded admin-service-order-details">${details}</div></details>`;
 }
 
 export function adminOrderStatusControl(order, storageKey = order.storageKey || '') {

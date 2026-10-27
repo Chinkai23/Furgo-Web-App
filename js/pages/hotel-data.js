@@ -42,6 +42,7 @@ export function loadHotelSettings() {
       groomingPackages: Array.isArray(saved?.groomingPackages) ? saved.groomingPackages : defaultHotelSettings.groomingPackages,
       outlets: getSharedOutletNames(defaultHotelSettings.outlets),
       closedDates: Array.isArray(saved?.closedDates) ? saved.closedDates : defaultHotelSettings.closedDates,
+      roomDateAvailability: Array.isArray(saved?.roomDateAvailability) ? saved.roomDateAvailability : [],
       groomingTimeSlots: Array.isArray(saved?.groomingTimeSlots) && saved.groomingTimeSlots.length ? saved.groomingTimeSlots : defaultHotelSettings.groomingTimeSlots,
       taxiRouteEstimates: Array.isArray(saved?.taxiRouteEstimates) ? saved.taxiRouteEstimates : defaultHotelSettings.taxiRouteEstimates,
       voucher: { ...defaultHotelSettings.voucher, ...(saved?.voucher || {}) },
@@ -80,6 +81,13 @@ export function availableHotelUnits(room, outlet, checkIn, checkOut, bookings = 
     ? booking.petRooms.filter((item) => item.roomId === room.id).map((item) => item.assignedUnit).filter(Boolean)
     : Array.isArray(booking.assignedUnits) && booking.assignedUnits.length ? booking.assignedUnits : [booking.assignedUnit].filter(Boolean);
   const unavailable = new Set(occupied.flatMap(unitsForRoom));
+  const manualBlocks = loadHotelSettings().roomDateAvailability.filter((entry) => entry.roomId === room.id && entry.outlet === outlet);
+  const stayDates = [];
+  for (const date = new Date(`${checkIn}T12:00:00`); date < new Date(`${checkOut}T12:00:00`); date.setDate(date.getDate() + 1)) {
+    stayDates.push(`${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`);
+  }
+  const blocked = new Set(manualBlocks.filter((entry) => stayDates.includes(entry.date)).map((entry) => entry.unit));
+  blocked.forEach((unit) => unavailable.add(unit));
   let unassignedOccupancy = occupied.filter((booking) => !unitsForRoom(booking).length).length;
   for (const unit of units) {
     if (unassignedOccupancy <= 0) break;
@@ -87,5 +95,5 @@ export function availableHotelUnits(room, outlet, checkIn, checkOut, bookings = 
     unavailable.add(unit);
     unassignedOccupancy -= 1;
   }
-  return units.map((unit) => ({ unit, available: !unavailable.has(unit), reason: unavailable.has(unit) ? 'Reserved for these dates' : 'Available' }));
+  return units.map((unit) => ({ unit, available: !unavailable.has(unit), reason: occupied.some((booking) => unitsForRoom(booking).includes(unit)) ? 'Reserved for these dates' : blocked.has(unit) ? 'Unavailable for these dates' : 'Available' }));
 }

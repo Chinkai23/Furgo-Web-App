@@ -19,11 +19,11 @@ import { adminPromotionsPage, loadPromotions, maximumPromotions, normalizePromot
 import { adminPortalPage, setupAdminPortal } from './pages/admin.js';
 import { groomingBookingPage, groomingOrdersPage } from './pages/grooming.js';
 import { adminGroomingPage } from './pages/admin-grooming.js';
+import { setupServiceAddOns } from './pages/admin-service-addons.js';
 import { petHotelPage, setupHotelBooking } from './pages/hotel.js';
 import { adminHotelPage, setupAdminHotel } from './pages/admin-hotel.js';
 import { petDaycarePage, setupDaycareBooking } from './pages/daycare.js';
 import { adminDaycarePage, setupAdminDaycare } from './pages/admin-daycare.js';
-import { adminAddOnsPage, setupAdminAddOns } from './pages/admin-addons.js';
 import { adminPetTaxiPage, setupAdminPetTaxi } from './pages/admin-pet-taxi.js';
 import { setupAdminServiceBanners } from './pages/admin-service-banners.js';
 import { setupServiceBannerCarousel } from './pages/service-banners.js';
@@ -2142,6 +2142,7 @@ function setupGroomingBooking() {
 
 // Admin tools save grooming packages, outlet capacity, booking statuses, and customer receipts.
 function setupAdminGrooming() {
+  setupServiceAddOns({ serviceKey: 'grooming', settingsKey: groomingSettingsKey, loadSettings: loadGroomingSettings, cloudSync: true });
   const settingsForm = document.querySelector('[data-admin-grooming-settings]');
   if (settingsForm) {
     settingsForm.addEventListener('submit', async (event) => {
@@ -2260,6 +2261,31 @@ function setupAdminGrooming() {
       render();
     } catch (error) {
       window.alert(`Could not save the receipt: ${friendlyAuthError(error)}`);
+    }
+  }));
+
+  document.querySelectorAll('[data-delete-grooming-receipt]').forEach((button) => button.addEventListener('click', async () => {
+    if (!window.confirm('Delete the uploaded receipt for this booking?')) return;
+    const bookings = loadGroomingBookings();
+    const booking = bookings.find((item) => item.id === button.dataset.deleteGroomingReceipt);
+    if (!booking?.receipt) return;
+    const previousStatus = booking.receipt.previousStatus;
+    const previousPaymentStatus = booking.receipt.previousPaymentStatus;
+    delete booking.receipt;
+    if (previousPaymentStatus !== undefined) booking.paymentStatus = previousPaymentStatus;
+    else if (/receipt uploaded/i.test(String(booking.paymentStatus || ''))) delete booking.paymentStatus;
+    if (/^received order$/i.test(String(booking.adminStatus || booking.status || '')) && previousStatus) {
+      booking.adminStatus = previousStatus;
+      booking.status = previousStatus;
+      booking.statusHistory = [...(booking.statusHistory || []), { status: previousStatus, previousStatus: 'Received Order', changedAt: new Date().toISOString(), changedBy: 'Admin receipt removal' }];
+    }
+    try {
+      await updateCloudGroomingBooking(booking);
+      localStorage.setItem(groomingBookingsKey, JSON.stringify(bookings));
+      void recordAdminAction('receipt_removed', 'grooming_booking', booking.reference || booking.id);
+      render();
+    } catch (error) {
+      window.alert(`Could not delete the receipt: ${friendlyAuthError(error)}`);
     }
   }));
 }
@@ -2575,7 +2601,6 @@ function wireForms() {
   setupAdminHotel();
   setupDaycareBooking();
   setupAdminDaycare();
-  setupAdminAddOns();
   setupAdminPetTaxi();
   setupAdminServiceBanners();
   setupServiceBannerCarousel();
@@ -2868,7 +2893,7 @@ async function render() {
     } catch { /* Keep the current page usable if local demo profile data is malformed. */ }
   }
   const directorPages = ['admin-customers', 'admin-product-insights'];
-  const managerPages = ['admin-promotions', 'admin-addons', 'admin-pet-taxi', 'admin-marketplace-manage'];
+  const managerPages = ['admin-promotions', 'admin-pet-taxi', 'admin-marketplace-manage'];
   const serviceAdminPages = ['admin-marketplace', 'admin-grooming', 'admin-hotel', 'admin-daycare'];
   const portalPages = ['admin', 'admin-orders', 'admin-access', 'admin-enquiries', 'admin-audit', ...managerPages, ...serviceAdminPages, ...directorPages];
   const driverPages = ['driver'];
@@ -2968,7 +2993,6 @@ async function render() {
     'admin-grooming': () => adminGroomingPage({ settingsOnly: routeParams.get('manage') === '1', stage: routeParams.get('stage') || 'new' }),
     'admin-hotel': () => adminHotelPage({ settingsOnly: routeParams.get('manage') === '1', stage: routeParams.get('stage') || 'new' }),
     'admin-daycare': () => adminDaycarePage({ settingsOnly: routeParams.get('manage') === '1', stage: routeParams.get('stage') || 'new' }),
-    'admin-addons': adminAddOnsPage,
     'admin-pet-taxi': adminPetTaxiPage,
     'admin-enquiries': adminEnquiriesPage,
     'admin-customers': () => adminCustomersPage(routeParams),
@@ -3009,7 +3033,6 @@ async function render() {
     'admin-grooming': 'Grooming — Furgo Admin',
     'admin-hotel': 'Pet Hotel — Furgo Admin',
     'admin-daycare': 'Pet Daycare — Furgo Admin',
-    'admin-addons': 'Manage Add-on — Furgo Admin',
     'admin-pet-taxi': 'Manage Pet Taxi — Furgo Admin',
     'admin-enquiries': 'Customer Enquiries — Furgo Admin',
     'admin-customers': 'Customer Profiles — Furgo Admin',
