@@ -8,6 +8,7 @@ import { groomingBookingsKey } from './grooming-data.js';
 import { hotelBookingsKey } from './hotel-data.js';
 import { daycareBookingsKey } from './daycare-data.js';
 import { customerOrderStatus, statusCategory } from '../order-status.js';
+import { petProfilesStorageKeyForCurrentUser } from './home.js';
 
 const orderServices = [
   { id: 'all', label: 'All' },
@@ -95,7 +96,7 @@ function orderPetCards(order) {
   if (!snapshots.length) return '';
   let profiles = [];
   try {
-    const saved = JSON.parse(localStorage.getItem('furgo-demo-pet-profiles') || '[]');
+    const saved = JSON.parse(localStorage.getItem(petProfilesStorageKeyForCurrentUser()) || '[]');
     if (Array.isArray(saved)) profiles = saved;
   } catch { profiles = []; }
   return `<div class="my-order-pet-list">${snapshots.map((snapshot, index) => {

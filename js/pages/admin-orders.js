@@ -91,19 +91,11 @@ function importantOrderRows(order) {
   ].filter(([, value]) => value != null && String(value).trim());
 }
 
-function petProfileForOrder(order) {
-  try {
-    const pets = JSON.parse(localStorage.getItem('furgo-demo-pet-profiles') || '[]');
-    const petId = order.petId || order.pet?.id;
-    return Array.isArray(pets) ? pets.find((pet) => String(pet.id) === String(petId) || (!petId && pet.name === order.petName)) || null : null;
-  } catch { return null; }
-}
-
 function checkInPreviewMarkup(preview) {
   const order = preview.order || {};
   const source = orderSources.find((item) => item.key === preview.orderKey);
   const service = order.serviceLabel || order.service || source?.label || 'Service';
-  const pet = petProfileForOrder(order);
+  const pet = order.pet || null;
   const petName = order.petName || order.pet?.name || pet?.name || 'Pet';
   const breed = order.petBreed || order.breed || order.pet?.breed || pet?.breed || '';
   const weight = order.petWeight || order.weight || order.pet?.weight || pet?.weight || '';

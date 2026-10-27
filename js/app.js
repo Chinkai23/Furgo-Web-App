@@ -1,5 +1,5 @@
 // Main app controller: routes between the individual page files and wires shared interactions.
-import { fitPetCardRemarks, homePage, loadPetProfiles, petCarouselMarkup } from './pages/home.js';
+import { fitPetCardRemarks, homePage, loadPetProfiles, petCarouselMarkup, petProfilesStorageKeyForCurrentUser } from './pages/home.js';
 import { loginPage } from './pages/login.js';
 import { registerPage } from './pages/register.js';
 import { onboardingPage } from './pages/onboarding.js';
@@ -35,7 +35,7 @@ import { adminOrdersPage, setupAdminOrders } from './pages/admin-orders.js';
 import { checkInPage, extractCheckInCode, formatCheckInToken, refreshCheckInTokens, setupCheckInInteractions } from './pages/check-in.js';
 import { adminBottomNavigation, escapeHTML } from './shared.js';
 import { adminEnquiriesPage, setupAdminEnquiries } from './pages/admin-enquiries.js';
-import { adminCustomersPage, assignUnownedPetProfiles, getCustomerAccountStatus, getCustomerRecordId, saveCustomerRecord, setupAdminCustomers } from './pages/admin-customers.js';
+import { adminCustomersPage, getCustomerAccountStatus, getCustomerRecordId, saveCustomerRecord, setupAdminCustomers } from './pages/admin-customers.js';
 import { driverPortalPage, setupDriverPortal } from './pages/driver.js';
 import { adminAccessPage, adminAuditPage, setupAdminAccess, setupAdminAuditPage } from './pages/admin-access.js';
 import { adminProductServiceInsightsPage, setupAdminProductServiceInsights } from './pages/admin-product-insights.js';
@@ -53,7 +53,7 @@ let groomingQrSyncListenerInstalled = false;
 let activeSupabaseUserId = '';
 
 // Section: Supabase pet records
-// Function: Convert the current browser pet model to and from the shared pet_profiles table.
+// Function: Convert the signed-in owner's browser pet model to and from their pet_profiles rows.
 const petProfilesStorageKey = 'furgo-demo-pet-profiles';
 
 function petFromDatabase(row, photo = '', vaccinationCards = []) {
@@ -88,15 +88,15 @@ async function loadCloudPetProfiles(userId) {
   let cachedPets = [];
   try { cachedPets = JSON.parse(localStorage.getItem(petProfilesStorageKey) || '[]'); } catch { cachedPets = []; }
   if (!Array.isArray(cachedPets)) cachedPets = [];
+  const profile = JSON.parse(sessionStorage.getItem('furgo-demo-user-profile') || '{}');
+  const email = String(profile.email || '').toLowerCase();
+  const phone = String(profile.phone || '').replace(/[\s-]/g, '');
+  const ownedPets = cachedPets.filter((pet) =>
+    (email && String(pet.ownerEmail || '').toLowerCase() === email)
+    || (phone && String(pet.ownerPhone || '').replace(/[\s-]/g, '') === phone));
   const backupKey = `furgo-demo-pet-profiles-backup-${userId}`;
-  if (cachedPets.length && !localStorage.getItem(backupKey)) localStorage.setItem(backupKey, JSON.stringify(cachedPets));
-  if (!data?.length && cachedPets.length) {
-    const profile = JSON.parse(sessionStorage.getItem('furgo-demo-user-profile') || '{}');
-    const email = String(profile.email || '').toLowerCase();
-    const phone = String(profile.phone || '').replace(/[\s-]/g, '');
-    const ownedPets = cachedPets.filter((pet) =>
-      (email && String(pet.ownerEmail || '').toLowerCase() === email)
-      || (phone && String(pet.ownerPhone || '').replace(/[\s-]/g, '') === phone));
+  if (ownedPets.length && !localStorage.getItem(backupKey)) localStorage.setItem(backupKey, JSON.stringify(ownedPets));
+  if (!data?.length && ownedPets.length) {
     for (const pet of ownedPets) {
       const id = /^[0-9a-f]{8}-[0-9a-f-]{27}$/i.test(pet.id || '') ? pet.id : crypto.randomUUID();
       await saveCloudPet({ ...pet, id }, userId);
@@ -116,7 +116,7 @@ async function loadCloudPetProfiles(userId) {
     })));
     return petFromDatabase(row, photo, vaccinationCards);
   }));
-  localStorage.setItem(petProfilesStorageKey, JSON.stringify(pets));
+  localStorage.setItem(petProfilesStorageKeyForCurrentUser(), JSON.stringify(pets));
   return pets;
 }
 
@@ -173,7 +173,7 @@ async function deleteCloudPet(petId, userId) {
   }
 }
 
-// Loads the full customer/pet directory from the normalized tables for the Admin Portal.
+// Loads customer account records and their pet profiles for the Admin Portal only.
 async function loadCloudAdminCustomers() {
   const [{ data: profiles, error: profileError }, { data: controls, error: controlsError }, { data: petRows, error: petsError }, { data: roles, error: rolesError }] = await Promise.all([
     supabase.from('profiles').select('id,display_name,email,phone_e164,created_at'),
@@ -210,12 +210,12 @@ async function loadCloudAdminCustomers() {
       name: card.name || 'Vaccination record', path: card.path || '', data: card.path ? await signedPetFile(card.path) : '',
     })));
     return {
-      ...petFromDatabase(row, photo, vaccinationCards), ownerId: owner.id,
+      ...petFromDatabase(row, photo, vaccinationCards), ownerId: owner.id, ownerUserId: owner.authUserId,
       ownerEmail: owner.email, ownerPhone: owner.phone,
     };
   }));
   localStorage.setItem('furgo-demo-customer-records', JSON.stringify(customers));
-  localStorage.setItem(petProfilesStorageKey, JSON.stringify(pets.filter(Boolean)));
+  localStorage.setItem('furgo-demo-admin-customer-pet-profiles', JSON.stringify(pets.filter(Boolean)));
 }
 
 // Section: Supabase grooming bookings
@@ -498,7 +498,7 @@ async function loadSupabaseIdentity(user) {
     try { await loadCloudAdminCustomers(); }
     catch (error) { console.warn('Could not load customer management records from Supabase:', error); }
   }
-  if (role === 'customer') await loadCloudPetProfiles(user.id);
+  await loadCloudPetProfiles(user.id);
   try {
     await loadCloudGroomingData(user.id, role);
   } catch (error) {
@@ -576,7 +576,7 @@ function setupHomePetProfiles() {
   const carousel = document.querySelector('[data-pet-carousel]');
   if (!carousel) return;
   const icon = (file) => `Image/Icon/${encodeURIComponent(file)}`;
-  const savePets = (items) => localStorage.setItem('furgo-demo-pet-profiles', JSON.stringify(items));
+  const savePets = (items) => localStorage.setItem(petProfilesStorageKeyForCurrentUser(), JSON.stringify(items));
   const renderPets = () => {
     carousel.innerHTML = petCarouselMarkup(icon, loadPetProfiles());
     fitPetCardRemarks(carousel);
@@ -648,7 +648,7 @@ function setupPetProfileForm() {
   let cropLayout = null;
   let vaccinationCards = (() => {
     try {
-      const savedPets = JSON.parse(localStorage.getItem('furgo-demo-pet-profiles') || '[]');
+      const savedPets = JSON.parse(localStorage.getItem(petProfilesStorageKeyForCurrentUser()) || '[]');
       const existingPet = savedPets.find((pet) => pet.id === form.dataset.petId);
       return Array.isArray(existingPet?.vaccinationCards) ? existingPet.vaccinationCards : [];
     } catch { return []; }
@@ -977,10 +977,10 @@ function setupPetProfileForm() {
     }
     let savedPets = [];
     try {
-      const storedPets = JSON.parse(localStorage.getItem('furgo-demo-pet-profiles') || '[]');
+      const storedPets = JSON.parse(localStorage.getItem(petProfilesStorageKeyForCurrentUser()) || '[]');
       savedPets = Array.isArray(storedPets) ? storedPets : [];
     } catch { savedPets = []; }
-    localStorage.setItem('furgo-demo-pet-profiles', JSON.stringify(savedPets.filter((pet) => pet.id !== petId)));
+    localStorage.setItem(petProfilesStorageKeyForCurrentUser(), JSON.stringify(savedPets.filter((pet) => pet.id !== petId)));
     deleteDialog.close();
     window.location.hash = petReturnTo;
   });
@@ -1022,7 +1022,7 @@ function setupPetProfileForm() {
       try {
         const savedPet = await saveCloudPet(pet, authData.user.id);
         const updatedPets = existingPet.id ? savedPets.map((item) => item.id === currentId ? savedPet : item) : [...savedPets, savedPet];
-        localStorage.setItem(petProfilesStorageKey, JSON.stringify(updatedPets));
+        localStorage.setItem(petProfilesStorageKeyForCurrentUser(), JSON.stringify(updatedPets));
       } catch (error) {
         feedback.textContent = `Could not save this pet profile: ${friendlyAuthError(error)}`;
         feedback.classList.add('visible');
@@ -1030,7 +1030,7 @@ function setupPetProfileForm() {
       }
     } else {
       const updatedPets = existingPet.id ? savedPets.map((item) => item.id === currentId ? pet : item) : [...savedPets, pet];
-      localStorage.setItem(petProfilesStorageKey, JSON.stringify(updatedPets));
+      localStorage.setItem(petProfilesStorageKeyForCurrentUser(), JSON.stringify(updatedPets));
     }
     window.location.hash = petReturnTo;
   });
@@ -2839,7 +2839,6 @@ function wireForms() {
           await supabase.auth.signOut();
           throw new Error('This account is blacklisted. Please contact Furgo Support for assistance.');
         }
-        assignUnownedPetProfiles(identity);
       }
       feedback.textContent = mode === 'register'
         ? 'Account created for development testing. Opening your Furgo home…'
@@ -2889,7 +2888,6 @@ async function render() {
     try {
       const currentCustomer = JSON.parse(sessionStorage.getItem('furgo-demo-user-profile') || '{}');
       saveCustomerRecord(currentCustomer);
-      assignUnownedPetProfiles(currentCustomer);
     } catch { /* Keep the current page usable if local demo profile data is malformed. */ }
   }
   const directorPages = ['admin-customers', 'admin-product-insights'];

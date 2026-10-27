@@ -7,7 +7,7 @@ import { recordAdminAction } from '../admin-audit.js';
 
 // Customer directory storage shared by customer sign-in and Admin customer management.
 export const customerRecordsKey = 'furgo-demo-customer-records';
-const petProfilesKey = 'furgo-demo-pet-profiles';
+const adminCustomerPetProfilesKey = 'furgo-demo-admin-customer-pet-profiles';
 const daycareKeys = ['furgo-demo-daycare-bookings', 'furgo-demo-pet-daycare-bookings', 'furgo-demo-daycare-orders'];
 
 function readArray(key) {
@@ -69,24 +69,6 @@ export function getCustomerAccountStatus(profile) {
   return customer?.status || 'Active';
 }
 
-// Associates legacy unassigned pet profiles with the customer who is signed in.
-export function assignUnownedPetProfiles(profile) {
-  const customer = saveCustomerRecord(profile);
-  if (!customer) return;
-  const pets = readArray(petProfilesKey);
-  let changed = false;
-  for (const pet of pets) {
-    const alreadyMatches = (pet.ownerId && pet.ownerId === customer.id)
-      || (pet.ownerEmail && normalizeEmail(pet.ownerEmail) === normalizeEmail(customer.email))
-      || (pet.ownerPhone && normalizePhone(pet.ownerPhone) === normalizePhone(customer.phone));
-    if (!alreadyMatches && !pet.ownerId && !pet.ownerEmail && !pet.ownerPhone) {
-      Object.assign(pet, { ownerId: customer.id, ownerEmail: customer.email, ownerPhone: customer.phone });
-      changed = true;
-    }
-  }
-  if (changed) localStorage.setItem(petProfilesKey, JSON.stringify(pets));
-}
-
 function collectCustomerData() {
   const customerMap = new Map();
   const aliases = new Map();
@@ -98,6 +80,7 @@ function collectCustomerData() {
       name: profile.name || customer.name,
       email: profile.email || customer.email,
       phone: profile.phone || customer.phone,
+      authUserId: profile.authUserId || customer.authUserId,
       status: profile.status || customer.status || 'Active',
       createdAt: profile.createdAt || customer.createdAt,
       authChannel: profile.authChannel || customer.authChannel,
@@ -131,9 +114,10 @@ function collectCustomerData() {
     }
   }
 
-  const pets = readArray(petProfilesKey);
+  const pets = readArray(adminCustomerPetProfilesKey);
   const customers = [...customerMap.values()].map((customer) => {
-    const matchedPets = pets.filter((pet) => pet.ownerId === customer.id
+    const matchedPets = pets.filter((pet) => pet.ownerUserId === customer.authUserId
+      || pet.ownerId === customer.id
       || (pet.ownerEmail && normalizeEmail(pet.ownerEmail) === normalizeEmail(customer.email))
       || (pet.ownerPhone && normalizePhone(pet.ownerPhone) === normalizePhone(customer.phone)));
     const customerOrders = customer.orders || [];
@@ -171,7 +155,7 @@ export function adminCustomersPage(routeParams = new URLSearchParams()) {
   return `<main class="admin-portal-page admin-customers-page"><header class="admin-portal-header"><a class="admin-portal-brand" href="#admin"><img src="Image/Icon/Logo.png" alt="Furgo" /><span>Admin Portal</span></a><div class="admin-portal-account"><a href="#admin">Dashboard</a><button type="button" data-logout>Log out</button></div></header>${body}${searchInsights}</main>`;
 }
 
-// Saves status and remark edits directly into the shared customer and pet records.
+// Saves Admin-managed customer status and pet care remarks.
 export function setupAdminCustomers() {
   document.querySelector('[data-save-customer-status]')?.addEventListener('click', (event) => {
     const button = event.currentTarget;
@@ -212,15 +196,16 @@ export function setupAdminCustomers() {
       const saveButton = event.target.closest('[data-save-customer-remarks]');
       if (!saveButton) return;
       const petId = saveButton.dataset.saveCustomerRemarks;
-      const pets = readArray(petProfilesKey);
+      const pets = readArray(adminCustomerPetProfilesKey);
       const pet = pets.find((item) => String(item.id) === petId);
       if (!pet) return;
       pet.remarks = [...section.querySelectorAll('[data-customer-remark-value]')].map((input) => input.value.trim()).filter(Boolean);
-      localStorage.setItem(petProfilesKey, JSON.stringify(pets));
+      localStorage.setItem(adminCustomerPetProfilesKey, JSON.stringify(pets));
       void recordAdminAction('pet_remarks_updated', 'pet_profile');
       document.dispatchEvent(new CustomEvent('furgo-admin-pet-remarks-updated', { detail: pet }));
       const message = section.querySelector('.admin-customer-save-message');
       if (message) message.textContent = 'Pet remarks saved.';
     });
   });
+
 }

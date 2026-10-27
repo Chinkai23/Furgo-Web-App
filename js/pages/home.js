@@ -2,15 +2,28 @@ import { bottomNavigation, escapeHTML } from '../shared.js';
 import { loadPromotions, normalizePromotionDestination } from './admin-promotions.js';
 
 const petStorageKey = 'furgo-demo-pet-profiles';
+const anonymousPetStorageKey = `${petStorageKey}-anonymous`;
 const defaultPets = [{ id: 'jojo-demo', name: 'Jojo', breed: 'Siberian Husky', sex: 'Female', weight: '3.8', tags: ['Big size', 'Sensitive skin'], photo: '' }];
 
-// Loads pet profiles saved in this browser, falling back to the sample pet shown in the prototype.
+// Pet caches are isolated by account; the unscoped key is read only as a legacy migration source.
+export function petProfilesStorageKeyForCurrentUser() {
+  try {
+    const profile = JSON.parse(sessionStorage.getItem('furgo-demo-user-profile') || '{}');
+    return profile.id ? `${petStorageKey}-user-${encodeURIComponent(profile.id)}` : anonymousPetStorageKey;
+  } catch {
+    return anonymousPetStorageKey;
+  }
+}
+
+// Loads this account's saved pets, falling back to the sample only outside an identified account.
 export function loadPetProfiles() {
   try {
-    const saved = JSON.parse(localStorage.getItem(petStorageKey) || 'null');
-    return Array.isArray(saved) ? saved : defaultPets;
+    const storageKey = petProfilesStorageKeyForCurrentUser();
+    const saved = JSON.parse(localStorage.getItem(storageKey) || 'null');
+    if (Array.isArray(saved)) return saved;
+    return storageKey === anonymousPetStorageKey ? defaultPets : [];
   } catch {
-    return defaultPets;
+    return petProfilesStorageKeyForCurrentUser() === anonymousPetStorageKey ? defaultPets : [];
   }
 }
 

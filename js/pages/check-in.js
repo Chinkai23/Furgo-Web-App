@@ -4,6 +4,7 @@ import { hotelBookingsKey, loadHotelBookings } from './hotel-data.js';
 import { supabase } from '../supabase.js';
 import { cacheSyncedRecords } from '../app-data-sync.js';
 import qrcode from '../vendor/qrcode-generator.mjs';
+import { petProfilesStorageKeyForCurrentUser } from './home.js';
 
 export const checkInTokensKey = 'furgo-demo-check-in-tokens';
 const daycareKeys = ['furgo-demo-daycare-bookings', 'furgo-demo-pet-daycare-bookings', 'furgo-demo-daycare-orders'];
@@ -286,7 +287,7 @@ function formatOrderReference(reference) {
 function petDetailsCards(order) {
   let pets = [];
   try {
-    const saved = JSON.parse(localStorage.getItem('furgo-demo-pet-profiles') || '[]');
+    const saved = JSON.parse(localStorage.getItem(petProfilesStorageKeyForCurrentUser()) || '[]');
     if (Array.isArray(saved)) pets = saved;
   } catch { pets = []; }
   const split = (value) => String(value ?? '').split(/\s*\|\s*/).map((part) => part.trim()).filter(Boolean);

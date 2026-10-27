@@ -1,6 +1,5 @@
 import { bottomNavigation, escapeHTML } from '../shared.js';
-
-const petStorageKey = 'furgo-demo-pet-profiles';
+import { petProfilesStorageKeyForCurrentUser } from './home.js';
 
 // Show up to 50 breed suggestions, ordered from commonly seen to less common in Malaysia.
 // Breed is still a free-text field, so owners can enter a breed that is not listed.
@@ -20,7 +19,7 @@ const dogBreeds = [
 // Reads the saved pet that the customer wants to view or edit.
 function findPet(petId) {
   try {
-    const pets = JSON.parse(localStorage.getItem(petStorageKey) || '[]');
+    const pets = JSON.parse(localStorage.getItem(petProfilesStorageKeyForCurrentUser()) || '[]');
     return pets.find((pet) => pet.id === petId) || null;
   } catch {
     return null;
