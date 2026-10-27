@@ -1522,22 +1522,24 @@ function setupAdminMarketplace() {
       const product = products.find((entry) => entry.id === item.productId);
       const variant = product?.variants.find((entry) => entry.id === item.variantId);
       const itemSupplier = item.supplierId || variant?.supplierId || variant?.supplier || 'Unassigned';
-      if (itemSupplier.toLowerCase() === supplierName.toLowerCase()) supplierProducts.push({ ...item, supplierSku: variant?.supplierSku || item.supplierSku || '—' });
+      if (String(itemSupplier).toLowerCase() === supplierName.toLowerCase()) supplierProducts.push(item);
     });
     if (!supplierProducts.length) { toastAdmin('No order products were found for this supplier.'); return; }
-    const supplier = loadMarketplaceSuppliers(products).find((entry) => entry.name.toLowerCase() === supplierName.toLowerCase());
     const recipientName = order.address?.name || order.customerName || 'Not provided';
     const recipientPhone = order.deliveryPhone || order.address?.phone || order.customerPhone || 'Not provided';
     const recipientAddress = [order.address?.street, order.address?.postcode, order.address?.city, order.address?.state].filter(Boolean).join(', ') || 'Not provided';
+    const orderDate = order.date || (order.createdAt ? new Date(order.createdAt).toLocaleDateString('en-MY') : 'Not provided');
     const text = [
-      `Supplier Name: ${supplierName}`,
-      `Supplier Phone: ${supplier?.phone || 'Not provided'}`,
-      `Supplier Order Link: ${supplier?.orderLink || 'Not provided'}`,
+      'FURGO ORDER DETAILS',
+      `Supplier : ${supplierName}`,
+      `Order No: ${order.reference || order.id || 'Not provided'}`,
+      `Date: ${orderDate}`,
+      '',
       `Recipient Name: ${recipientName}`,
       `Recipient Phone: ${recipientPhone}`,
       `Recipient Address: ${recipientAddress}`,
       'Products:',
-      ...supplierProducts.map((item) => `- ${item.name} — ${item.variantLabel} × ${item.quantity}${item.supplierSku && item.supplierSku !== '—' ? ` (Supplier SKU: ${item.supplierSku})` : ''}`),
+      ...supplierProducts.map((item) => `- ${item.name} — ${item.variantLabel} × ${item.quantity}`),
     ].join('\n');
     try { await navigator.clipboard.writeText(text); toastAdmin('Supplier order details copied.'); }
     catch { const field = document.createElement('textarea'); field.value = text; document.body.append(field); field.select(); document.execCommand('copy'); field.remove(); toastAdmin('Supplier order details copied.'); }
