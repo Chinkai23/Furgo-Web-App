@@ -718,6 +718,8 @@ h1, h2, h3, p { margin-top: 0; }
 .admin-market-form-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 0 12px; }
 .admin-market-form-grid label, .admin-market-tracking-form label, .admin-market-export label { display: grid; gap: 6px; margin-bottom: 12px; font-size: 10px; font-weight: 700; }
 .admin-market-form-grid input, .admin-market-form-grid select, .admin-market-form-grid textarea, .admin-market-tracking-form input, .admin-market-export select { width: 100%; min-height: 40px; padding: 8px 10px; border: 1px solid #e9e1da; border-radius: 9px; color: var(--ink); background: #fff; font: inherit; font-size: 11px; }
+.admin-market-form-grid .admin-market-retail-price-field { font-size: 12px; }
+.admin-market-form-grid .admin-market-retail-price-field input { min-height: 48px; font-size: 15px; }
 .admin-market-form-grid textarea { resize: vertical; }
 .admin-market-wide { grid-column: 1 / -1; }
 .admin-market-form-note { color: var(--muted); font-size: 10px; line-height: 1.5; }
@@ -2501,3 +2503,10 @@ select::-ms-expand { display: none; }
 .admin-outlet-readonly strong { font-size: 0.9rem; }
 .admin-outlet-readonly span { color: #635c58; overflow-wrap: anywhere; }
 .admin-outlet-readonly small { color: #8a817b; font-size: 0.78rem; }
+
+/* Keep entered values and placeholder text regular weight across Admin Portal forms. */
+.admin-portal-page form input:not([type="checkbox"]):not([type="radio"]):not([type="file"]):not([type="submit"]):not([type="button"]),
+.admin-portal-page form select,
+.admin-portal-page form textarea,
+.admin-portal-page form input::placeholder,
+.admin-portal-page form textarea::placeholder { font-weight: 400; }
