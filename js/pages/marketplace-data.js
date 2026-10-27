@@ -1,5 +1,6 @@
 // Shared marketplace demo records used by the customer catalog and Admin Portal.
 export const marketplaceProductsKey = 'furgo-demo-marketplace-products';
+export const marketplaceSuppliersKey = 'furgo-demo-marketplace-suppliers';
 export const marketplaceCartKey = 'furgo-demo-marketplace-cart';
 export const marketplaceFavoritesKey = 'furgo-demo-marketplace-favorites';
 export const marketplaceOrdersKey = 'furgo-demo-marketplace-orders';

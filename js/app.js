@@ -13,7 +13,7 @@ import { creditPage } from './pages/credit.js';
 import { marketplaceFavoritesPage, marketplacePage, marketplaceProductPage } from './pages/marketplace.js';
 import { marketplaceCartPage, marketplaceCheckoutPage } from './pages/cart.js';
 import { adminMarketplaceManagePage, adminMarketplacePage } from './pages/admin-marketplace.js';
-import { loadMarketplaceCart, loadMarketplaceFavorites, loadMarketplaceOfferSettings, loadMarketplaceOrders, loadMarketplaceProducts, marketplaceCartKey, marketplaceFavoritesKey, marketplaceLine, marketplaceOfferSettingsKey, marketplaceOrdersKey, marketplaceProductsKey, safeMarketplaceImage } from './pages/marketplace-data.js';
+import { loadMarketplaceCart, loadMarketplaceFavorites, loadMarketplaceOfferSettings, loadMarketplaceOrders, loadMarketplaceProducts, marketplaceCartKey, marketplaceFavoritesKey, marketplaceLine, marketplaceOfferSettingsKey, marketplaceOrdersKey, marketplaceProductsKey, marketplaceSuppliersKey, safeMarketplaceImage } from './pages/marketplace-data.js';
 import { petProfilePage } from './pages/pet-profile.js';
 import { adminPromotionsPage, loadPromotions, maximumPromotions, normalizePromotionDestination, promotionStorageKey } from './pages/admin-promotions.js';
 import { adminPortalPage, setupAdminPortal } from './pages/admin.js';
@@ -1300,6 +1300,29 @@ function setupAdminMarketplace() {
   });
 
   const productForm = document.querySelector('[data-admin-market-product]');
+  const supplierInput = productForm?.elements.supplierId;
+  supplierInput?.addEventListener('change', () => {
+    const supplierName = supplierInput.value.trim();
+    if (!supplierName) return;
+    const catalogSuppliers = loadMarketplaceProducts().flatMap((product) => product.variants.map((variant) => variant.supplierId || variant.supplier || '')).filter(Boolean);
+    let savedSuppliers = [];
+    try {
+      const stored = JSON.parse(localStorage.getItem(marketplaceSuppliersKey) || '[]');
+      if (Array.isArray(stored)) savedSuppliers = stored.filter((supplier) => typeof supplier === 'string');
+    } catch { savedSuppliers = []; }
+    const knownSuppliers = [...new Set([...catalogSuppliers, ...savedSuppliers].map((supplier) => supplier.trim()).filter(Boolean))];
+    const existingSupplier = knownSuppliers.find((supplier) => supplier.toLowerCase() === supplierName.toLowerCase());
+    if (existingSupplier) { supplierInput.value = existingSupplier; return; }
+    if (!window.confirm(`Save “${supplierName}” as a new supplier?`)) return;
+    try {
+      savedSuppliers.push(supplierName);
+      localStorage.setItem(marketplaceSuppliersKey, JSON.stringify([...new Set(savedSuppliers.map((supplier) => supplier.trim()).filter(Boolean))]));
+      const option = document.createElement('option');
+      option.value = supplierName;
+      document.querySelector('#marketplace-supplier-options')?.append(option);
+      toastAdmin(`${supplierName} was saved to the supplier list.`);
+    } catch { toastAdmin('The supplier could not be saved in this browser.'); }
+  });
   productForm?.addEventListener('submit', async (event) => {
     event.preventDefault();
     if (!productForm.reportValidity()) return;
@@ -1319,7 +1342,7 @@ function setupAdminMarketplace() {
     })));
     if (uploadedImages.some((image) => !image)) { toastAdmin('One or more product photos could not be read.'); return; }
     const variant = { id: `variant-${Date.now()}`, label: fields.variantLabel.value.trim(), price: Number(fields.price.value), stock: Number(fields.stock.value), sku: fields.sku.value.trim(), supplierId: fields.supplierId.value.trim(), supplier: fields.supplierId.value.trim(), supplierSku: fields.supplierSku.value.trim(), cost: Number(fields.cost.value) };
-    const productFields = { name: productName, category: fields.category.value, emoji: fields.emoji.value.trim() || '🐾', description: fields.description.value.trim(), suitableBreeds: fields.suitableBreeds.value.trim(), issues: fields.issues.value.trim(), ingredients: fields.ingredients.value.trim(), nutrition: fields.nutrition.value.trim() };
+    const productFields = { name: productName, category: fields.category.value, description: fields.description.value.trim(), suitableBreeds: fields.suitableBreeds.value.trim(), issues: fields.issues.value.trim(), ingredients: fields.ingredients.value.trim(), nutrition: fields.nutrition.value.trim() };
     const productId = fields.productId.value;
     const variantId = fields.variantId.value;
     if (productId) {
@@ -1368,7 +1391,6 @@ function setupAdminMarketplace() {
     fields.supplierId.value = variant.supplierId || variant.supplier || '';
     fields.supplierSku.value = variant.supplierSku || '';
     fields.cost.value = variant.cost ?? 0;
-    fields.emoji.value = product.emoji || '';
     fields.productPhotos.value = '';
     document.querySelector('[data-market-image-note]').textContent = `This product currently has ${(product.images || []).length} photo(s). Upload photos to replace them, or leave the field empty to keep them.`;
     document.querySelector('[data-market-editor-summary]').textContent = `Edit ${product.name} · ${variant.label}`;
