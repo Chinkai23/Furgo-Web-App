@@ -36,7 +36,7 @@ export function adminAccessPage() {
   const managerOptions = isDirector
     ? '<option value="executive">Executive</option><option value="manager">Manager</option><option value="director">Director</option><option value="driver">Driver</option>'
     : '<option value="executive">Executive</option>';
-  const outletSetup = isDirector ? `<section class="admin-market-panel admin-outlet-panel"><div class="admin-market-panel-heading"><div><span>Outlet setup</span><h2>Manage Outlets</h2></div><p>Add the exact outlet name used on service bookings, plus a shortform. The shortform appears beside an assigned admin’s name.</p></div><form class="admin-outlet-form" data-admin-outlet-form><label>Outlet name<input name="name" maxlength="100" placeholder="Furgo Pet Care - Petaling Jaya" required /></label><label>Shortform<input name="shortform" maxlength="8" minlength="2" pattern="[A-Za-z0-9]{2,8}" placeholder="PJ" required /></label><div class="admin-market-form-actions"><button class="button button-primary" type="submit">Add Outlet</button><span data-admin-outlet-feedback role="status" aria-live="polite"></span></div></form><div class="admin-outlet-list" data-admin-outlet-list role="status" aria-live="polite">Loading outlets…</div></section>` : '';
+  const outletSetup = isDirector ? `<section class="admin-market-panel admin-outlet-panel"><div class="admin-market-panel-heading"><div><span>Outlet setup</span><h2>Manage Outlets</h2></div><p>Add the exact outlet name used on service bookings, plus a shortform. The shortform appears beside an assigned admin’s name.</p></div><form class="admin-outlet-form" data-admin-outlet-form><input type="hidden" name="outletId" /><label>Outlet name<input name="name" maxlength="100" placeholder="Furgo Pet Care - Petaling Jaya" required /></label><label>Shortform<input name="shortform" maxlength="8" minlength="2" pattern="[A-Za-z0-9]{2,8}" placeholder="PJ" required /></label><div class="admin-market-form-actions"><button class="button button-primary" type="submit">Add Outlet</button><button class="button button-light" type="button" data-cancel-outlet-edit hidden>Cancel edit</button><span data-admin-outlet-feedback role="status" aria-live="polite"></span></div></form><div class="admin-outlet-list" data-admin-outlet-list role="status" aria-live="polite">Loading outlets…</div></section>` : '';
   const outletField = isDirector
     ? '<label data-team-outlet-field>Assigned outlet<select name="outletId" data-team-outlet required><option value="">Choose an outlet</option></select></label>'
     : `<label data-team-outlet-field>Assigned outlet<input value="${escapeHTML(profile.outletName ? `${profile.outletName} (${profile.outletShortform || ''})` : 'No outlet assigned') }" readonly /><input type="hidden" name="outletId" value="${escapeHTML(profile.outletId || '')}" /></label>`;
@@ -119,7 +119,7 @@ export function setupAdminAccess() {
       if (current === 'all' || outlets.some((outlet) => outlet.id === current)) outletFilter.value = current;
     }
     if (outletList) outletList.innerHTML = outlets.length
-      ? outlets.map((outlet) => `<article class="admin-outlet-item"><strong>${escapeHTML(outlet.name)}</strong><span>${escapeHTML(outlet.shortform)}</span></article>`).join('')
+      ? outlets.map((outlet) => `<article class="admin-outlet-item"><div><strong>${escapeHTML(outlet.name)}</strong><span>${escapeHTML(outlet.shortform)}</span></div><div class="admin-outlet-actions"><button class="button button-light" type="button" data-edit-admin-outlet="${escapeHTML(outlet.id)}">Edit</button><button class="button button-light" type="button" data-delete-admin-outlet="${escapeHTML(outlet.id)}">Delete</button></div></article>`).join('')
       : '<p class="admin-market-empty">No outlets yet. Add the first outlet above.</p>';
   };
   const renderTeam = async () => {
@@ -236,14 +236,68 @@ export function setupAdminAccess() {
     event.preventDefault();
     const feedback = outletForm.querySelector('[data-admin-outlet-feedback]');
     const values = new FormData(outletForm);
+    const outletId = String(values.get('outletId') || '');
     feedback.textContent = 'Saving…';
-    const { error } = await supabase.rpc('manage_admin_outlet', {
-      p_name: String(values.get('name') || '').trim(), p_shortform: String(values.get('shortform') || '').trim().toUpperCase(),
-    });
-    if (error) { feedback.textContent = error.message || 'The outlet could not be saved.'; return; }
-    feedback.textContent = 'Outlet added.';
+    const { error } = outletId
+      ? await supabase.rpc('update_admin_outlet', { p_id: outletId, p_name: String(values.get('name') || '').trim(), p_shortform: String(values.get('shortform') || '').trim().toUpperCase() })
+      : await supabase.rpc('manage_admin_outlet', { p_name: String(values.get('name') || '').trim(), p_shortform: String(values.get('shortform') || '').trim().toUpperCase() });
+    if (error) {
+      feedback.textContent = outletId && /update_admin_outlet|schema cache|function .*not found/i.test(error.message || '')
+        ? 'Apply Supabase migration 0029 to enable outlet editing.'
+        : error.message || 'The outlet could not be saved.';
+      return;
+    }
+    feedback.textContent = outletId ? 'Outlet updated.' : 'Outlet added.';
     outletForm.reset();
+    outletForm.querySelector('[type="submit"]').textContent = 'Add Outlet';
+    outletForm.querySelector('[data-cancel-outlet-edit]').hidden = true;
     await renderOutlets();
+    await renderTeam();
+  });
+  outletList?.addEventListener('click', async (event) => {
+    const edit = event.target.closest('[data-edit-admin-outlet]');
+    if (edit) {
+      const outlet = outlets.find((entry) => entry.id === edit.dataset.editAdminOutlet);
+      if (!outlet || !outletForm) return;
+      outletForm.elements.outletId.value = outlet.id;
+      outletForm.elements.name.value = outlet.name;
+      outletForm.elements.shortform.value = outlet.shortform;
+      outletForm.querySelector('[type="submit"]').textContent = 'Save Changes';
+      outletForm.querySelector('[data-cancel-outlet-edit]').hidden = false;
+      outletForm.querySelector('[data-admin-outlet-feedback]').textContent = '';
+      outletForm.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      return;
+    }
+    const remove = event.target.closest('[data-delete-admin-outlet]');
+    if (!remove) return;
+    const outlet = outlets.find((entry) => entry.id === remove.dataset.deleteAdminOutlet);
+    if (!outlet || !window.confirm(`Delete ${outlet.name}? Admins assigned to this outlet will become unassigned. Existing orders will keep the outlet name.`)) return;
+    const feedback = outletForm?.querySelector('[data-admin-outlet-feedback]');
+    if (feedback) feedback.textContent = 'Deleting outlet…';
+    const { data, error } = await supabase.rpc('delete_admin_outlet', { p_id: outlet.id });
+    if (error) {
+      if (feedback) feedback.textContent = /delete_admin_outlet|schema cache|function .*not found/i.test(error.message || '')
+        ? 'Apply Supabase migration 0029 to enable outlet deletion.'
+        : error.message || 'The outlet could not be deleted.';
+      return;
+    }
+    const unassignedCount = Number(data?.unassigned_admins || 0);
+    if (feedback) feedback.textContent = unassignedCount
+      ? `Outlet deleted. ${unassignedCount} assigned admin${unassignedCount === 1 ? ' is' : 's are'} now unassigned and need a new outlet.`
+      : 'Outlet deleted.';
+    outletForm?.reset();
+    if (outletForm) {
+      outletForm.querySelector('[type="submit"]').textContent = 'Add Outlet';
+      outletForm.querySelector('[data-cancel-outlet-edit]').hidden = true;
+    }
+    await renderOutlets();
+    await renderTeam();
+  });
+  outletForm?.querySelector('[data-cancel-outlet-edit]')?.addEventListener('click', () => {
+    outletForm.reset();
+    outletForm.querySelector('[type="submit"]').textContent = 'Add Outlet';
+    outletForm.querySelector('[data-cancel-outlet-edit]').hidden = true;
+    outletForm.querySelector('[data-admin-outlet-feedback]').textContent = '';
   });
   outletFilter?.addEventListener('change', renderTeamRows);
   levelFilter?.addEventListener('change', renderTeamRows);

@@ -857,6 +857,9 @@ h1, h2, h3, p { margin-top: 0; }
 .admin-outlet-form .admin-market-form-actions { grid-column: 1 / -1; }
 .admin-outlet-list { display: grid; gap: 8px; margin-top: 16px; }
 .admin-outlet-item { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px; border: 1px solid #f1e7df; border-radius: 12px; background: #fffaf6; }
+.admin-outlet-item > div:first-child { display: flex; align-items: center; justify-content: space-between; gap: 14px; min-width: 0; flex: 1; }
+.admin-outlet-actions { display: flex; align-items: center; gap: 7px; }
+.admin-outlet-actions .button { min-height: 34px; padding: 0 11px; font-size: 11px; }
 .admin-outlet-item strong { font-size: 13px; }
 .admin-outlet-item span { color: var(--orange); font-size: 12px; font-weight: 800; }
 .admin-team-list { display: grid; gap: 8px; margin-top: 14px; }
