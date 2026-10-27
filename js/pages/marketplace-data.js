@@ -55,6 +55,34 @@ export function loadMarketplaceProducts() {
   } catch { return starterCatalog; }
 }
 
+// Returns saved supplier contacts plus suppliers already referenced by catalog variants.
+export function loadMarketplaceSuppliers(products = loadMarketplaceProducts()) {
+  let saved = [];
+  try {
+    const parsed = JSON.parse(localStorage.getItem(marketplaceSuppliersKey) || '[]');
+    if (Array.isArray(parsed)) saved = parsed;
+  } catch { saved = []; }
+  const byName = new Map();
+  saved.forEach((entry) => {
+    const supplier = typeof entry === 'string' ? { name: entry } : entry;
+    const name = String(supplier?.name || '').trim();
+    if (!name) return;
+    const key = name.toLowerCase();
+    byName.set(key, { id: String(supplier.id || `supplier-${key.replace(/[^a-z0-9]+/g, '-')}`), name, phone: String(supplier.phone || ''), orderLink: String(supplier.orderLink || '') });
+  });
+  products.flatMap((product) => product.variants || []).forEach((variant) => {
+    const name = String(variant.supplierId || variant.supplier || '').trim();
+    if (!name || name.toLowerCase() === 'unassigned') return;
+    const key = name.toLowerCase();
+    if (!byName.has(key)) byName.set(key, { id: `supplier-${key.replace(/[^a-z0-9]+/g, '-')}`, name, phone: '', orderLink: '' });
+  });
+  return [...byName.values()].sort((a, b) => a.name.localeCompare(b.name));
+}
+
+export function saveMarketplaceSuppliers(suppliers) {
+  localStorage.setItem(marketplaceSuppliersKey, JSON.stringify(suppliers));
+}
+
 // Reads the current customer's locally stored multi-item cart.
 export function loadMarketplaceCart() {
   try {

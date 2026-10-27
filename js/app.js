@@ -13,7 +13,7 @@ import { creditPage } from './pages/credit.js';
 import { marketplaceFavoritesPage, marketplacePage, marketplaceProductPage } from './pages/marketplace.js';
 import { marketplaceCartPage, marketplaceCheckoutPage } from './pages/cart.js';
 import { adminMarketplaceManagePage, adminMarketplacePage } from './pages/admin-marketplace.js';
-import { loadMarketplaceCart, loadMarketplaceFavorites, loadMarketplaceOfferSettings, loadMarketplaceOrders, loadMarketplaceProducts, marketplaceCartKey, marketplaceFavoritesKey, marketplaceLine, marketplaceOfferSettingsKey, marketplaceOrdersKey, marketplaceProductsKey, marketplaceSuppliersKey, safeMarketplaceImage } from './pages/marketplace-data.js';
+import { loadMarketplaceCart, loadMarketplaceFavorites, loadMarketplaceOfferSettings, loadMarketplaceOrders, loadMarketplaceProducts, loadMarketplaceSuppliers, marketplaceCartKey, marketplaceFavoritesKey, marketplaceLine, marketplaceOfferSettingsKey, marketplaceOrdersKey, marketplaceProductsKey, saveMarketplaceSuppliers, safeMarketplaceImage } from './pages/marketplace-data.js';
 import { petProfilePage } from './pages/pet-profile.js';
 import { adminPromotionsPage, loadPromotions, maximumPromotions, normalizePromotionDestination, promotionStorageKey } from './pages/admin-promotions.js';
 import { adminPortalPage, setupAdminPortal } from './pages/admin.js';
@@ -1299,24 +1299,99 @@ function setupAdminMarketplace() {
     }
   });
 
+  const supplierForm = document.querySelector('[data-admin-market-supplier]');
+  supplierForm?.addEventListener('submit', (event) => {
+    event.preventDefault();
+    if (!supplierForm.reportValidity()) return;
+    const fields = supplierForm.elements;
+    const supplierName = fields.name.value.trim();
+    const suppliers = loadMarketplaceSuppliers();
+    const editing = suppliers.find((supplier) => supplier.id === fields.supplierId.value);
+    const duplicate = suppliers.find((supplier) => supplier.name.toLowerCase() === supplierName.toLowerCase() && supplier.id !== editing?.id);
+    if (duplicate) { toastAdmin('A supplier with that name already exists.'); return; }
+    const supplier = { id: editing?.id || `supplier-${Date.now()}`, name: supplierName, phone: fields.phone.value.trim(), orderLink: fields.orderLink.value.trim() };
+    const nextSuppliers = editing ? suppliers.map((entry) => entry.id === editing.id ? supplier : entry) : [...suppliers, supplier];
+    try {
+      saveMarketplaceSuppliers(nextSuppliers);
+      if (editing && editing.name !== supplier.name) {
+        const products = loadMarketplaceProducts();
+        products.forEach((product) => product.variants.forEach((variant) => {
+          if ((variant.supplierId || variant.supplier || '').toLowerCase() === editing.name.toLowerCase()) {
+            variant.supplierId = supplier.name;
+            variant.supplier = supplier.name;
+          }
+        }));
+        localStorage.setItem(marketplaceProductsKey, JSON.stringify(products));
+        const orders = loadMarketplaceOrders();
+        orders.forEach((order) => order.items?.forEach((item) => {
+          if ((item.supplierId || '').toLowerCase() === editing.name.toLowerCase()) item.supplierId = supplier.name;
+        }));
+        localStorage.setItem(marketplaceOrdersKey, JSON.stringify(orders));
+      }
+      void recordAdminAction(editing ? 'marketplace_supplier_updated' : 'marketplace_supplier_created', 'marketplace_supplier', supplier.id, { name: supplier.name });
+      render();
+    } catch { toastAdmin('Supplier details could not be saved in this browser.'); }
+  });
+  document.querySelectorAll('[data-edit-market-supplier]').forEach((button) => button.addEventListener('click', () => {
+    const supplier = loadMarketplaceSuppliers().find((entry) => entry.id === button.dataset.editMarketSupplier);
+    if (!supplier || !supplierForm) return;
+    const fields = supplierForm.elements;
+    fields.supplierId.value = supplier.id;
+    fields.name.value = supplier.name;
+    fields.phone.value = supplier.phone || '';
+    fields.orderLink.value = supplier.orderLink || '';
+    document.querySelector('[data-market-supplier-summary]').textContent = `Edit ${supplier.name}`;
+    document.querySelector('[data-market-supplier-submit]').textContent = 'Save Supplier Changes';
+    document.querySelector('[data-cancel-market-supplier]').hidden = false;
+    document.querySelector('[data-market-supplier-editor]').open = true;
+    document.querySelector('[data-market-supplier-editor]').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }));
+  document.querySelector('[data-cancel-market-supplier]')?.addEventListener('click', () => {
+    supplierForm?.reset();
+    if (!supplierForm) return;
+    supplierForm.elements.supplierId.value = '';
+    document.querySelector('[data-market-supplier-summary]').textContent = 'Add supplier details';
+    document.querySelector('[data-market-supplier-submit]').textContent = 'Save Supplier';
+    document.querySelector('[data-cancel-market-supplier]').hidden = true;
+  });
+  document.querySelectorAll('[data-delete-market-supplier]').forEach((button) => button.addEventListener('click', () => {
+    const suppliers = loadMarketplaceSuppliers();
+    const supplier = suppliers.find((entry) => entry.id === button.dataset.deleteMarketSupplier);
+    if (!supplier || !window.confirm(`Delete ${supplier.name} from the supplier directory? Product mappings will be set to Unassigned.`)) return;
+    const products = loadMarketplaceProducts();
+    products.forEach((product) => product.variants.forEach((variant) => {
+      if ((variant.supplierId || variant.supplier || '').toLowerCase() === supplier.name.toLowerCase()) {
+        variant.supplierId = '';
+        variant.supplier = '';
+      }
+    }));
+    const orders = loadMarketplaceOrders();
+    orders.forEach((order) => order.items?.forEach((item) => {
+      if ((item.supplierId || '').toLowerCase() === supplier.name.toLowerCase()) item.supplierId = 'Unassigned';
+    }));
+    try {
+      saveMarketplaceSuppliers(suppliers.filter((entry) => entry.id !== supplier.id));
+      localStorage.setItem(marketplaceProductsKey, JSON.stringify(products));
+      localStorage.setItem(marketplaceOrdersKey, JSON.stringify(orders));
+      void recordAdminAction('marketplace_supplier_deleted', 'marketplace_supplier', supplier.id, { name: supplier.name });
+      render();
+    } catch { toastAdmin('Supplier details could not be deleted in this browser.'); }
+  }));
+
   const productForm = document.querySelector('[data-admin-market-product]');
   const supplierInput = productForm?.elements.supplierId;
   supplierInput?.addEventListener('change', () => {
     const supplierName = supplierInput.value.trim();
     if (!supplierName) return;
-    const catalogSuppliers = loadMarketplaceProducts().flatMap((product) => product.variants.map((variant) => variant.supplierId || variant.supplier || '')).filter(Boolean);
-    let savedSuppliers = [];
+    const suppliers = loadMarketplaceSuppliers();
+    const existingSupplier = suppliers.find((supplier) => supplier.name.toLowerCase() === supplierName.toLowerCase());
+    if (existingSupplier) { supplierInput.value = existingSupplier.name; return; }
+    if (!window.confirm(`Save “${supplierName}” as a new supplier?`)) { supplierInput.value = ''; return; }
+    const phone = window.prompt(`Enter ${supplierName}'s phone number:`, '') || '';
+    const orderLink = window.prompt(`Enter ${supplierName}'s order link:`, '') || '';
+    const supplier = { id: `supplier-${Date.now()}`, name: supplierName, phone: phone.trim(), orderLink: orderLink.trim() };
     try {
-      const stored = JSON.parse(localStorage.getItem(marketplaceSuppliersKey) || '[]');
-      if (Array.isArray(stored)) savedSuppliers = stored.filter((supplier) => typeof supplier === 'string');
-    } catch { savedSuppliers = []; }
-    const knownSuppliers = [...new Set([...catalogSuppliers, ...savedSuppliers].map((supplier) => supplier.trim()).filter(Boolean))];
-    const existingSupplier = knownSuppliers.find((supplier) => supplier.toLowerCase() === supplierName.toLowerCase());
-    if (existingSupplier) { supplierInput.value = existingSupplier; return; }
-    if (!window.confirm(`Save “${supplierName}” as a new supplier?`)) return;
-    try {
-      savedSuppliers.push(supplierName);
-      localStorage.setItem(marketplaceSuppliersKey, JSON.stringify([...new Set(savedSuppliers.map((supplier) => supplier.trim()).filter(Boolean))]));
+      saveMarketplaceSuppliers([...suppliers, supplier]);
       const option = document.createElement('option');
       option.value = supplierName;
       document.querySelector('#marketplace-supplier-options')?.append(option);
@@ -1441,24 +1516,29 @@ function setupAdminMarketplace() {
     const order = loadMarketplaceOrders().find((item) => item.id === button.dataset.copySupplierOrder);
     if (!order) return;
     const products = loadMarketplaceProducts();
-    const grouped = new Map();
+    const supplierName = button.dataset.copySupplierName || '';
+    const supplierProducts = [];
     order.items.forEach((item) => {
-      const variant = products.find((product) => product.id === item.productId)?.variants.find((entry) => entry.id === item.variantId);
-      const supplier = variant?.supplierId || variant?.supplier || item.supplierId || 'Unassigned';
-      if (!grouped.has(supplier)) grouped.set(supplier, []);
-      grouped.get(supplier).push({ ...item, supplierSku: variant?.supplierSku || item.supplierSku || '—' });
+      const product = products.find((entry) => entry.id === item.productId);
+      const variant = product?.variants.find((entry) => entry.id === item.variantId);
+      const itemSupplier = item.supplierId || variant?.supplierId || variant?.supplier || 'Unassigned';
+      if (itemSupplier.toLowerCase() === supplierName.toLowerCase()) supplierProducts.push({ ...item, supplierSku: variant?.supplierSku || item.supplierSku || '—' });
     });
+    if (!supplierProducts.length) { toastAdmin('No order products were found for this supplier.'); return; }
+    const supplier = loadMarketplaceSuppliers(products).find((entry) => entry.name.toLowerCase() === supplierName.toLowerCase());
     const recipientName = order.address?.name || order.customerName || 'Not provided';
     const recipientPhone = order.deliveryPhone || order.address?.phone || order.customerPhone || 'Not provided';
     const recipientAddress = [order.address?.street, order.address?.postcode, order.address?.city, order.address?.state].filter(Boolean).join(', ') || 'Not provided';
-    const text = [...grouped.entries()].map(([supplier, items]) => [
-      `Supplier ${supplier}:`,
+    const text = [
+      `Supplier Name: ${supplierName}`,
+      `Supplier Phone: ${supplier?.phone || 'Not provided'}`,
+      `Supplier Order Link: ${supplier?.orderLink || 'Not provided'}`,
       `Recipient Name: ${recipientName}`,
       `Recipient Phone: ${recipientPhone}`,
       `Recipient Address: ${recipientAddress}`,
       'Products:',
-      ...items.map((item) => `- ${item.name} — ${item.variantLabel} × ${item.quantity}${item.supplierSku && item.supplierSku !== '—' ? ` (Supplier SKU: ${item.supplierSku})` : ''}`),
-    ].join('\n')).join('\n\n');
+      ...supplierProducts.map((item) => `- ${item.name} — ${item.variantLabel} × ${item.quantity}${item.supplierSku && item.supplierSku !== '—' ? ` (Supplier SKU: ${item.supplierSku})` : ''}`),
+    ].join('\n');
     try { await navigator.clipboard.writeText(text); toastAdmin('Supplier order details copied.'); }
     catch { const field = document.createElement('textarea'); field.value = text; document.body.append(field); field.select(); document.execCommand('copy'); field.remove(); toastAdmin('Supplier order details copied.'); }
   }));
