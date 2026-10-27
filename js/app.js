@@ -1426,7 +1426,17 @@ function setupAdminMarketplace() {
       if (!grouped.has(supplier)) grouped.set(supplier, []);
       grouped.get(supplier).push({ ...item, supplierSku: variant?.supplierSku || item.supplierSku || '—' });
     });
-    const text = [...grouped.entries()].map(([supplier, items]) => [`Supplier: ${supplier}`, ...items.map((item) => `Supplier SKU: ${item.supplierSku}\nItem: ${item.name} ${item.variantLabel} x ${item.quantity}`), `Ship To: ${order.address?.name || order.customerName} | ${order.deliveryPhone || order.address?.phone || order.customerPhone}${order.customerEmail ? ` | ${order.customerEmail}` : ''}`, `Address: ${order.address?.street || ''}, ${order.address?.postcode || ''} ${order.address?.city || ''}, ${order.address?.state || ''}`].join('\n')).join('\n\n');
+    const recipientName = order.address?.name || order.customerName || 'Not provided';
+    const recipientPhone = order.deliveryPhone || order.address?.phone || order.customerPhone || 'Not provided';
+    const recipientAddress = [order.address?.street, order.address?.postcode, order.address?.city, order.address?.state].filter(Boolean).join(', ') || 'Not provided';
+    const text = [...grouped.entries()].map(([supplier, items]) => [
+      `Supplier ${supplier}:`,
+      `Recipient Name: ${recipientName}`,
+      `Recipient Phone: ${recipientPhone}`,
+      `Recipient Address: ${recipientAddress}`,
+      'Products:',
+      ...items.map((item) => `- ${item.name} — ${item.variantLabel} × ${item.quantity}${item.supplierSku && item.supplierSku !== '—' ? ` (Supplier SKU: ${item.supplierSku})` : ''}`),
+    ].join('\n')).join('\n\n');
     try { await navigator.clipboard.writeText(text); toastAdmin('Supplier order details copied.'); }
     catch { const field = document.createElement('textarea'); field.value = text; document.body.append(field); field.select(); document.execCommand('copy'); field.remove(); toastAdmin('Supplier order details copied.'); }
   }));
