@@ -17,6 +17,12 @@ const orderServices = [
   { id: 'hotel', label: 'Pet Hotel' },
   { id: 'daycare', label: 'Pet Daycare' },
 ];
+const orderServiceIcons = {
+  marketplace: 'MVP Icon-01.png',
+  grooming: 'MVP Icon-02.png',
+  daycare: 'MVP Icon-03.png',
+  hotel: 'MVP Icon-04.png',
+};
 const orderStatuses = [
   { id: 'all', label: 'All statuses' },
   { id: 'completed', label: 'Completed' },
@@ -203,6 +209,7 @@ export function myOrdersPage(routeParams = new URLSearchParams()) {
 
   const orderCard = (order) => {
     const serviceName = order.serviceLabel;
+    const serviceIcon = orderServiceIcons[order.serviceId] ? icon(orderServiceIcons[order.serviceId]) : '';
     const statusLabel = customerOrderStatus(order);
     const isCanceled = statusCategory(statusLabel) === 'canceled';
     const isNoShow = statusCategory(statusLabel) === 'no-show';
@@ -231,7 +238,7 @@ export function myOrdersPage(routeParams = new URLSearchParams()) {
     const receiptAction = order.receipt?.data
       ? `<a class="button button-primary my-order-receipt-button" href="${escapeHTML(order.receipt.data)}" download="${escapeHTML(order.receipt.name || 'receipt')}">Download Receipt</a>`
       : `<button class="button button-light my-order-receipt-button" type="button" data-show-receipt-message>Download Receipt</button><p class="my-order-receipt-empty" data-receipt-unavailable-message hidden>Your receipt will be available to download once the outlet has received your order.</p>`;
-    return `<details class="my-order-card"><summary class="my-order-card-summary"><div class="my-order-card-top"><span class="my-order-service-label">${escapeHTML(serviceName)}</span><b class="my-order-status ${isCanceled ? 'is-canceled' : isNoShow ? 'is-no-show' : statusCategory(statusLabel) === 'completed' ? 'is-complete' : ''}">${escapeHTML(statusLabel)}</b></div><h2>${escapeHTML(order.title)}</h2><p class="my-order-summary">${escapeHTML(summary)}</p><div class="my-order-card-bottom"><small>${[reference, date].filter(Boolean).map(escapeHTML).join(' · ')}</small><strong>MYR ${order.totalAmount.toFixed(2)}</strong></div><span class="my-order-expand-hint">View Order Details <span aria-hidden="true">⌄</span></span></summary><div class="my-order-expanded"><dl class="my-order-detail-list">${orderDetails}</dl>${petsDetails}${marketplaceDetails}${groomingDetails}${hotelDetails}${daycareDetails}${taxiTracking}${receiptAction}${order.trackingUrl ? `<a class="my-order-tracking" href="${escapeHTML(order.trackingUrl)}" target="_blank" rel="noopener noreferrer">Track Delivery</a>` : ''}${cancelAction}</div></details>`;
+    return `<details class="my-order-card"><summary class="my-order-card-summary"><div class="my-order-card-top"><span class="my-order-service-label">${serviceIcon ? `<img src="${serviceIcon}" alt="" />` : ''}${escapeHTML(serviceName)}</span><b class="my-order-status ${isCanceled ? 'is-canceled' : isNoShow ? 'is-no-show' : statusCategory(statusLabel) === 'completed' ? 'is-complete' : ''}">${escapeHTML(statusLabel)}</b></div><h2>${escapeHTML(order.title)}</h2><p class="my-order-summary">${escapeHTML(summary)}</p><div class="my-order-card-bottom"><small>${[reference, date].filter(Boolean).map(escapeHTML).join(' · ')}</small><strong>MYR ${order.totalAmount.toFixed(2)}</strong></div><span class="my-order-expand-hint">View Order Details <span aria-hidden="true">⌄</span></span></summary><div class="my-order-expanded"><dl class="my-order-detail-list">${orderDetails}</dl>${petsDetails}${marketplaceDetails}${groomingDetails}${hotelDetails}${daycareDetails}${taxiTracking}${receiptAction}${order.trackingUrl ? `<a class="my-order-tracking" href="${escapeHTML(order.trackingUrl)}" target="_blank" rel="noopener noreferrer">Track Delivery</a>` : ''}${cancelAction}</div></details>`;
   };
 
   const groups = service === 'all'

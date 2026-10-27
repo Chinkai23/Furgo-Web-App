@@ -1341,7 +1341,8 @@ h1, h2, h3, p { margin-top: 0; }
 .admin-order-receipt-badge.is-missing { color: #c43d32; }
 .admin-order-receipt-badge.is-uploaded { color: #357a45; }
 .admin-order-receipt-badge svg { width: 14px; height: 14px; flex: 0 0 14px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
-.my-order-service-label { color: #d85f00; font-size: 10px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
+.my-order-service-label { display: inline-flex; align-items: center; gap: .45em; color: #d85f00; font-size: 10px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
+.my-order-service-label img { width: 1.35em; height: 1.35em; flex: 0 0 1.35em; object-fit: contain; }
 .my-order-status { padding: 5px 9px; border-radius: 20px; color: #d85f00; background: #fff1d7; font-size: 10px; }
 .my-order-status.is-complete { color: #d85f00; background: #e8f5eb; }
 .my-order-status.is-canceled { color: #d85f00; background: #fff0ee; }
