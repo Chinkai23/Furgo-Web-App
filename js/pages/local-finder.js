@@ -302,11 +302,12 @@ export function bindLocalFinderLocationPicker(form, supabase = null) {
     if (event.key === 'Enter') { event.preventDefault(); searchPlaces(); }
   });
 
-  results.addEventListener('click', (event) => {
+  results.addEventListener('click', async (event) => {
     const button = event.target.closest('[data-place-result]');
     if (!button) return;
     const suggestion = results._suggestions?.[Number(button.dataset.placeResult)];
     if (!suggestion?.placePrediction) return;
+    const prediction = suggestion.placePrediction;
     button.disabled = true;
     results.setAttribute('aria-busy', 'true');
     try {
