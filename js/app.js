@@ -10,10 +10,13 @@ import { feedbackPage } from './pages/feedback.js';
 import { addressPage } from './pages/address.js';
 import { paymentMethodPage } from './pages/payment-method.js';
 import { creditPage } from './pages/credit.js';
-import { marketplaceFavoritesPage, marketplacePage, marketplaceProductPage } from './pages/marketplace.js';
+import { marketplaceFavoritesPage, marketplacePage, marketplaceProductPage, marketplaceSellerPage } from './pages/marketplace.js';
 import { marketplaceCartPage, marketplaceCheckoutPage } from './pages/cart.js';
-import { adminMarketplaceManagePage, adminMarketplacePage } from './pages/admin-marketplace.js';
-import { loadMarketplaceCart, loadMarketplaceFavorites, loadMarketplaceOfferSettings, loadMarketplaceOrders, loadMarketplaceProducts, loadMarketplaceSuppliers, marketplaceCartKey, marketplaceFavoritesKey, marketplaceLine, marketplaceOfferSettingsKey, marketplaceOrdersKey, marketplaceProductsKey, saveMarketplaceSuppliers, safeMarketplaceImage } from './pages/marketplace-data.js';
+import { adminMarketplaceManagePage, adminMarketplacePage, adminMarketplaceProductsPage } from './pages/admin-marketplace.js';
+import { marketplaceSupplierPage, supplierOrderRows, supplierProductRows } from './pages/marketplace-supplier.js';
+import { adminOrderStage } from './admin-order-ui.js';
+import { setupPortalNotifications } from './portal-notifications.js';
+import { loadMarketplaceCart, loadMarketplaceFavorites, loadMarketplaceOfferSettings, loadMarketplaceOrders, loadMarketplaceProducts, marketplaceCartKey, marketplaceFavoritesKey, marketplaceLine, marketplaceOfferSettingsKey, marketplaceOrdersKey, marketplaceProductsKey, safeMarketplaceImage } from './pages/marketplace-data.js';
 import { petProfilePage } from './pages/pet-profile.js';
 import { adminPromotionsPage, loadPromotions, maximumPromotions, normalizePromotionDestination, promotionStorageKey } from './pages/admin-promotions.js';
 import { adminPortalPage, setupAdminPortal } from './pages/admin.js';
@@ -41,6 +44,8 @@ import { adminAccessPage, adminAuditPage, setupAdminAccess, setupAdminAuditPage 
 import { adminProductServiceInsightsPage, setupAdminProductServiceInsights } from './pages/admin-product-insights.js';
 import { recordAdminAction } from './admin-audit.js';
 import { recentSearchesKey, searchPage } from './pages/search.js';
+import { localFinderListPage, localFinderPage, localFinderPlacePage, setupLocalFinder } from './pages/local-finder.js';
+import { adminLocalFinderPage, setupAdminLocalFinder } from './pages/admin-local-finder.js';
 import { supabase, toMalaysianE164 } from './supabase.js';
 import { refreshSharedOutlets } from './pages/outlet-directory.js';
 import { cacheSyncedRecords, loadCloudAppData } from './app-data-sync.js';
@@ -450,11 +455,12 @@ function friendlyAuthError(error) {
 // Function: Load the signed-in user's trusted role, profile, and account status from Supabase.
 async function loadSupabaseIdentity(user) {
   activeSupabaseUserId = user.id;
-  const [{ data: roleRows, error: roleError }, { data: profile, error: profileError }, { data: account, error: accountError }, portalAccessResult] = await Promise.all([
+  const [{ data: roleRows, error: roleError }, { data: profile, error: profileError }, { data: account, error: accountError }, portalAccessResult, supplierAccessResult] = await Promise.all([
     supabase.from('user_roles').select('role').eq('user_id', user.id),
     supabase.from('profiles').select('display_name,email,phone_e164').eq('id', user.id).maybeSingle(),
     supabase.from('account_controls').select('status').eq('user_id', user.id).maybeSingle(),
     supabase.from('portal_access').select('level,outlet_id,admin_outlets(name,shortform)').eq('user_id', user.id).maybeSingle(),
+    supabase.from('marketplace_supplier_access').select('supplier_name').eq('supplier_user_id', user.id).maybeSingle(),
   ]);
   if (roleError) throw roleError;
   if (profileError) throw profileError;
@@ -470,7 +476,7 @@ async function loadSupabaseIdentity(user) {
   const legacyPortalRole = roleRows?.some(({ role: value }) => value === 'admin') ? 'director'
     : roleRows?.some(({ role: value }) => value === 'staff') ? 'executive' : '';
   const role = ['executive', 'manager', 'director'].includes(portalLevel) ? portalLevel
-    : legacyPortalRole || (roleRows?.some(({ role: value }) => value === 'driver') ? 'driver' : 'customer');
+    : legacyPortalRole || (roleRows?.some(({ role: value }) => value === 'driver') ? 'driver' : supplierAccessResult.data?.supplier_name ? 'supplier' : 'customer');
   const phone = user.phone || profile?.phone_e164 || user.user_metadata?.phone_e164 || '';
   const snapshot = {
     id: user.id,
@@ -481,6 +487,7 @@ async function loadSupabaseIdentity(user) {
     outletId: portalAccessResult.data?.outlet_id || '',
     outletName: portalAccessResult.data?.admin_outlets?.name || '',
     outletShortform: portalAccessResult.data?.admin_outlets?.shortform || '',
+    supplierName: supplierAccessResult.data?.supplier_name || '',
     authChannel: user.phone ? 'phone_password' : 'email_password',
   };
   sessionStorage.setItem('furgo-demo-user-profile', JSON.stringify(snapshot));
@@ -488,6 +495,7 @@ async function loadSupabaseIdentity(user) {
   sessionStorage.setItem('furgo-demo-profile-complete', 'true');
   sessionStorage.setItem('furgo-demo-user-role', role);
   sessionStorage.setItem('furgo-demo-auth-channel', snapshot.authChannel);
+  if (role === 'supplier') return snapshot;
   try {
     await loadCloudAppData(user.id, role);
   } catch (error) {
@@ -1067,8 +1075,8 @@ function setupMarketplaceInteractions() {
     toast(isSaved ? 'Removed from your favourites.' : 'Saved to your favourites.');
   }));
   document.querySelectorAll('[data-favorite-repurchase]').forEach((button) => button.addEventListener('click', () => {
-    const product = loadMarketplaceProducts().find((item) => item.id === button.dataset.favoriteRepurchase && !item.hidden);
-    const variant = product?.variants.find((item) => Number(item.stock) > 0);
+    const product = loadMarketplaceProducts().find((item) => item.id === button.dataset.favoriteRepurchase && !item.hidden && !item.frozenByAdmin);
+    const variant = product?.variants.find((item) => !item.frozen && Number(item.stock) > 0);
     if (!variant) return;
     const cart = loadMarketplaceCart();
     const existing = cart.find((item) => item.productId === product.id && item.variantId === variant.id);
@@ -1103,6 +1111,29 @@ function setupMarketplaceInteractions() {
   }
 
   const variantSelect = document.querySelector('[data-product-variant]');
+  const supplierCard = document.querySelector('[data-marketplace-supplier-profile]');
+  let supplierProfilesByName = new Map();
+  const updateSupplierCard = (supplierName) => {
+    if (!supplierCard) return;
+    const name = String(supplierName || '').trim();
+    supplierCard.dataset.marketplaceSupplierProfile = name;
+    if (supplierCard instanceof HTMLAnchorElement) supplierCard.href = `#seller?name=${encodeURIComponent(name)}`;
+    supplierCard.querySelector('[data-marketplace-supplier-name]').textContent = name || 'Furgo Marketplace';
+    const supplier = supplierProfilesByName.get(name.toLocaleLowerCase());
+    const image = supplierCard.querySelector('[data-marketplace-supplier-photo]');
+    image.alt = `${name || 'Supplier'} profile photo`;
+    image.src = supplier?.avatar_path
+      ? supabase.storage.from('supplier-profile-photos').getPublicUrl(supplier.avatar_path).data.publicUrl
+      : 'Image/Icon/Supplier%20Profile%20Picture.png';
+  };
+  if (supplierCard) {
+    updateSupplierCard(supplierCard.dataset.marketplaceSupplierProfile);
+    void supabase.rpc('get_marketplace_supplier_profiles').then(({ data, error }) => {
+      if (error) throw error;
+      supplierProfilesByName = new Map((data || []).map((supplier) => [String(supplier.supplier_name || '').toLocaleLowerCase(), supplier]));
+      updateSupplierCard(supplierCard.dataset.marketplaceSupplierProfile);
+    }).catch((error) => console.warn('Marketplace supplier profiles could not load:', error));
+  }
   const updateVariant = () => {
     if (!variantSelect) return;
     const option = variantSelect.selectedOptions[0];
@@ -1112,19 +1143,30 @@ function setupMarketplaceInteractions() {
     quantity.max = option.dataset.stock;
     quantity.value = '1';
     document.querySelector('[data-add-to-cart]').disabled = Number(option.dataset.stock) < 1;
+    updateSupplierCard(option.dataset.supplier);
   };
   variantSelect?.addEventListener('change', updateVariant);
   document.querySelectorAll('[data-gallery-image]').forEach((button) => button.addEventListener('click', () => {
     const image = document.querySelector('[data-pdp-image]');
-    if (image && button.dataset.imageSrc) image.src = button.dataset.imageSrc;
+    if (image && button.dataset.imageSrc) {
+      image.src = button.dataset.imageSrc;
+      image.alt = `${document.querySelector('[data-pdp-visual]')?.ariaLabel || 'Product'} image ${Number(button.dataset.galleryImage) + 1}`;
+    }
     document.querySelectorAll('[data-gallery-image]').forEach((item) => item.classList.toggle('selected', item === button));
+  }));
+  document.querySelectorAll('[data-gallery-step]').forEach((button) => button.addEventListener('click', () => {
+    const dots = [...document.querySelectorAll('[data-gallery-image]')];
+    if (dots.length < 2) return;
+    const currentIndex = Math.max(0, dots.findIndex((dot) => dot.classList.contains('selected')));
+    const nextIndex = (currentIndex + Number(button.dataset.galleryStep) + dots.length) % dots.length;
+    dots[nextIndex].click();
   }));
   document.querySelector('[data-add-to-cart]')?.addEventListener('click', (event) => {
     const productId = event.currentTarget.dataset.addToCart;
     const variantId = variantSelect.value;
     const quantity = Math.max(1, Number(document.querySelector('[data-product-quantity]').value) || 1);
     const variant = loadMarketplaceProducts().find((product) => product.id === productId)?.variants.find((item) => item.id === variantId);
-    if (!variant || variant.stock < quantity) { toast('That quantity is not currently available.'); return; }
+    if (!variant || variant.frozen || variant.stock < quantity) { toast('That quantity is not currently available.'); return; }
     const cart = loadMarketplaceCart();
     const existing = cart.find((item) => item.productId === productId && item.variantId === variantId);
     if (existing) existing.quantity = Math.min(variant.stock, Number(existing.quantity) + quantity);
@@ -1156,16 +1198,76 @@ function setupMarketplaceInteractions() {
     const lines = loadMarketplaceCart().map((item) => marketplaceLine(item)).filter(Boolean);
     const subtotal = lines.reduce((sum, item) => sum + item.total, 0);
     const offerSettings = loadMarketplaceOfferSettings();
-    const voucherSettings = offerSettings.voucher;
+    const furgoVouchers = Array.isArray(offerSettings.furgoVouchers) ? offerSettings.furgoVouchers : [offerSettings.voucher].filter(Boolean);
     const freeShippingMinimum = Number(offerSettings.freeShippingMinimum) || 0;
     const shipping = subtotal >= freeShippingMinimum ? 0 : Number(offerSettings.deliveryFee) || 0;
     const discountRow = form.querySelector('[data-checkout-discount]');
+    const shippingDiscountRow = form.querySelector('[data-checkout-shipping-discount]');
+    const shopVoucherTarget = form.querySelector('[data-marketplace-shop-vouchers]');
+    const shopVoucherFeedback = form.querySelector('[data-shop-voucher-feedback]');
+    let shopVouchers = [];
+    let appliedShopVoucher = null;
+    let appliedFurgoVoucher = null;
+    const allocateCents = (amount, weights) => {
+      const cents = Math.max(0, Math.round(Number(amount || 0) * 100));
+      const weightTotal = weights.reduce((sum, weight) => sum + Math.max(0, Number(weight) || 0), 0);
+      let assigned = 0;
+      return weights.map((weight, index) => {
+        const share = index === weights.length - 1
+          ? cents - assigned
+          : weightTotal ? Math.floor(cents * Math.max(0, Number(weight) || 0) / weightTotal) : Math.floor(cents / weights.length);
+        assigned += share;
+        return share / 100;
+      });
+    };
+    const lineTotals = lines.map((line) => Math.max(0, Number(line.total) || 0));
+    const allocatedShippingBase = allocateCents(shipping, lineTotals);
+    const lineMatchesSupplier = (line, supplierName) => String(line.variant.supplierId || line.variant.supplier || '').trim().toLowerCase() === String(supplierName || '').trim().toLowerCase();
+    const shopEligibleSubtotal = (voucher) => lines.reduce((sum, line) => sum + (lineMatchesSupplier(line, voucher.supplier_name) ? Number(line.total) || 0 : 0), 0);
+    const currentFurgoDiscount = () => Number(form.dataset.furgoDiscount || 0);
+    const currentFurgoShippingDiscount = () => form.dataset.furgoFreeShipping === 'true' ? shipping : 0;
+    const currentShopDiscount = () => {
+      if (!appliedShopVoucher || appliedShopVoucher.discount_type === 'free_shipping') return 0;
+      const eligible = shopEligibleSubtotal(appliedShopVoucher);
+      if (eligible < Number(appliedShopVoucher.minimum_spend || 0)) return 0;
+      const raw = appliedShopVoucher.discount_type === 'percent' ? eligible * Number(appliedShopVoucher.discount_value) / 100 : Number(appliedShopVoucher.discount_value);
+      const furgoCents = Math.max(0, Math.round(currentFurgoDiscount() * 100));
+      let allocatedFurgoCents = 0;
+      let eligibleFurgoCents = 0;
+      lines.forEach((line, index) => {
+        const share = index === lines.length - 1
+          ? furgoCents - allocatedFurgoCents
+          : subtotal ? Math.floor(furgoCents * (Number(line.total) || 0) / subtotal) : Math.floor(furgoCents / lines.length);
+        allocatedFurgoCents += share;
+        if (lineMatchesSupplier(line, appliedShopVoucher.supplier_name)) eligibleFurgoCents += share;
+      });
+      const remainingEligible = Math.max(0, eligible - eligibleFurgoCents / 100);
+      return Math.min(eligible, Math.max(0, subtotal - currentFurgoDiscount()), remainingEligible, Math.round(raw * 100) / 100);
+    };
+    const currentShopShippingDiscount = () => {
+      if (!appliedShopVoucher || appliedShopVoucher.discount_type !== 'free_shipping' || form.dataset.furgoFreeShipping === 'true') return 0;
+      if (shopEligibleSubtotal(appliedShopVoucher) < Number(appliedShopVoucher.minimum_spend || 0)) return 0;
+      return allocatedShippingBase.reduce((sum, amount, index) => sum + (lineMatchesSupplier(lines[index], appliedShopVoucher.supplier_name) ? amount : 0), 0);
+    };
     const updateTotals = () => {
-      const discount = Number(form.dataset.discount || 0);
-      form.querySelector('[data-checkout-shipping]').textContent = shipping ? `MYR ${shipping.toFixed(2)}` : 'Free';
+      const discount = Math.min(subtotal, currentFurgoDiscount() + currentShopDiscount());
+      const shippingDiscount = Math.min(shipping, currentFurgoShippingDiscount() + currentShopShippingDiscount());
+      form.dataset.discount = String(discount);
+      form.dataset.shippingDiscount = String(shippingDiscount);
+      const payableShipping = Math.max(0, shipping - shippingDiscount);
+      form.querySelector('[data-checkout-shipping]').textContent = payableShipping ? `MYR ${payableShipping.toFixed(2)}` : 'Free';
       discountRow.hidden = discount <= 0;
       discountRow.querySelector('b').textContent = `− MYR ${discount.toFixed(2)}`;
-      form.querySelector('[data-checkout-total]').textContent = `MYR ${Math.max(0, subtotal + shipping - discount).toFixed(2)}`;
+      shippingDiscountRow.hidden = shippingDiscount <= 0;
+      shippingDiscountRow.querySelector('b').textContent = `− MYR ${shippingDiscount.toFixed(2)}`;
+      form.querySelector('[data-checkout-total]').textContent = `MYR ${Math.max(0, subtotal + shipping - discount - shippingDiscount).toFixed(2)}`;
+      if (appliedShopVoucher && shopVoucherFeedback) {
+        const eligible = shopEligibleSubtotal(appliedShopVoucher);
+        shopVoucherFeedback.textContent = eligible < Number(appliedShopVoucher.minimum_spend || 0)
+          ? `${appliedShopVoucher.code} needs MYR ${Number(appliedShopVoucher.minimum_spend).toFixed(2)} of ${appliedShopVoucher.supplier_name} products.`
+          : `${appliedShopVoucher.code} from ${appliedShopVoucher.supplier_name} applied.`;
+        shopVoucherFeedback.className = `market-coupon-feedback ${eligible < Number(appliedShopVoucher.minimum_spend || 0) ? 'error' : 'success'}`;
+      }
     };
     const updateAddressFields = () => {
       const saved = addressSelect && addressSelect.value !== 'manual';
@@ -1182,20 +1284,67 @@ function setupMarketplaceInteractions() {
     updateAddressFields();
     updateTransferField();
     updateTotals();
+    if (shopVoucherTarget) {
+      void supabase.rpc('get_marketplace_shop_vouchers').then(({ data, error }) => {
+        if (error) throw error;
+        shopVouchers = data || [];
+        shopVoucherTarget.innerHTML = shopVouchers.length ? shopVouchers.map((voucher) => {
+          const expiry = voucher.expires_at ? ` · Expires ${new Date(`${voucher.expires_at}T00:00:00`).toLocaleDateString()}` : '';
+          const discountLabel = voucher.discount_type === 'free_shipping' ? 'Free shipping' : voucher.discount_type === 'percent' ? `${Number(voucher.discount_value)}% off` : `MYR ${Number(voucher.discount_value).toFixed(2)} off`;
+          return `<article class="market-shop-voucher-card"><div><span>${escapeHTML(voucher.supplier_name)}</span><strong>${escapeHTML(voucher.code)}</strong><small>${escapeHTML(discountLabel)}${Number(voucher.minimum_spend) ? ` · Min. MYR ${Number(voucher.minimum_spend).toFixed(2)}` : ''}${escapeHTML(expiry)}</small></div><button type="button" data-apply-shop-voucher="${escapeHTML(voucher.id)}">${appliedShopVoucher?.id === voucher.id ? 'Applied' : 'Apply'}</button></article>`;
+        }).join('') : '<p class="market-checkout-note">No active Shop Vouchers are available right now.</p>';
+      }).catch((error) => { shopVoucherTarget.innerHTML = `<p class="market-checkout-note">Shop Vouchers could not be loaded: ${escapeHTML(error.message || 'Please try again later.')}</p>`; });
+      shopVoucherTarget.addEventListener('click', (event) => {
+        const button = event.target.closest('[data-apply-shop-voucher]');
+        if (!button) return;
+        const voucher = shopVouchers.find((entry) => entry.id === button.dataset.applyShopVoucher);
+        if (!voucher) return;
+        if (appliedShopVoucher?.id === voucher.id) {
+          appliedShopVoucher = null;
+          shopVoucherFeedback.textContent = `${voucher.code} removed.`;
+          shopVoucherFeedback.className = 'market-coupon-feedback';
+          shopVoucherTarget.querySelectorAll('[data-apply-shop-voucher]').forEach((item) => { item.textContent = 'Apply'; });
+          updateTotals();
+          return;
+        }
+        const eligible = shopEligibleSubtotal(voucher);
+        if (eligible < Number(voucher.minimum_spend || 0)) {
+          appliedShopVoucher = null;
+          shopVoucherFeedback.textContent = `Add more products from ${voucher.supplier_name} to meet the MYR ${Number(voucher.minimum_spend).toFixed(2)} minimum spend.`;
+          shopVoucherFeedback.className = 'market-coupon-feedback error';
+        } else {
+          appliedShopVoucher = voucher;
+          shopVoucherFeedback.textContent = `${voucher.code} from ${voucher.supplier_name} applied.`;
+          shopVoucherFeedback.className = 'market-coupon-feedback success';
+        }
+        shopVoucherTarget.querySelectorAll('[data-apply-shop-voucher]').forEach((item) => { item.textContent = appliedShopVoucher?.id === item.dataset.applyShopVoucher ? 'Applied' : 'Apply'; });
+        updateTotals();
+      });
+    }
     form.querySelector('[data-apply-coupon]')?.addEventListener('click', () => {
       const code = form.querySelector('[data-market-coupon]').value.trim().toUpperCase();
       const message = form.querySelector('[data-coupon-feedback]');
-      const voucherCode = String(voucherSettings.code || '').trim().toUpperCase();
-      const minimumSpend = Number(voucherSettings.minimumSpend) || 0;
-      if (voucherSettings.enabled && code === voucherCode && subtotal >= minimumSpend) {
-        const rawDiscount = voucherSettings.discountType === 'percent' ? subtotal * (Number(voucherSettings.discountValue) / 100) : Number(voucherSettings.discountValue);
-        const discount = Math.min(subtotal, Math.round(rawDiscount * 100) / 100);
-        form.dataset.discount = String(discount);
-        message.textContent = `${voucherCode} applied.`;
+      const matchingVoucher = furgoVouchers.find((voucher) => voucher.enabled && String(voucher.code || '').trim().toUpperCase() === code);
+      const minimumSpend = Number(matchingVoucher?.minimumSpend) || 0;
+      if (matchingVoucher && subtotal >= minimumSpend) {
+        appliedFurgoVoucher = matchingVoucher;
+        if (matchingVoucher.discountType === 'free_shipping') {
+          form.dataset.furgoDiscount = '0';
+          form.dataset.furgoFreeShipping = 'true';
+          message.textContent = `${matchingVoucher.code} applied. Free shipping added.`;
+        } else {
+          const rawDiscount = matchingVoucher.discountType === 'percent' ? subtotal * (Number(matchingVoucher.discountValue) / 100) : Number(matchingVoucher.discountValue);
+          const discount = Math.min(subtotal, Math.round(rawDiscount * 100) / 100);
+          form.dataset.furgoDiscount = String(discount);
+          form.dataset.furgoFreeShipping = 'false';
+          message.textContent = `${matchingVoucher.code} applied.`;
+        }
         message.className = 'market-coupon-feedback success';
       } else {
-        form.dataset.discount = '0';
-        message.textContent = voucherSettings.enabled && code === voucherCode ? `This voucher requires a MYR ${minimumSpend.toFixed(2)} minimum subtotal.` : 'That voucher code is not valid.';
+        appliedFurgoVoucher = null;
+        form.dataset.furgoDiscount = '0';
+        form.dataset.furgoFreeShipping = 'false';
+        message.textContent = matchingVoucher && subtotal < minimumSpend ? `This voucher requires a MYR ${minimumSpend.toFixed(2)} minimum subtotal.` : 'That voucher code is not valid.';
         message.className = 'market-coupon-feedback error';
       }
       updateTotals();
@@ -1211,7 +1360,12 @@ function setupMarketplaceInteractions() {
       if (!address) { feedback.textContent = 'Choose or enter a delivery address.'; feedback.classList.add('visible'); return; }
       const payment = form.elements.payment.value;
       const discount = Number(form.dataset.discount || 0);
-      const total = Math.max(0, subtotal + shipping - discount);
+      const furgoDiscount = Math.min(currentFurgoDiscount(), discount);
+      const shopDiscount = Math.max(0, discount - furgoDiscount);
+      const shippingDiscount = Number(form.dataset.shippingDiscount || 0);
+      const furgoShippingDiscount = currentFurgoShippingDiscount();
+      const shopShippingDiscount = Math.max(0, shippingDiscount - furgoShippingDiscount);
+      const total = Math.max(0, subtotal + shipping - discount - shippingDiscount);
       if (payment === 'wallet') {
         const balance = Number(localStorage.getItem('furgo-demo-credit-balance') || 0);
         if (balance < total) {
@@ -1235,19 +1389,35 @@ function setupMarketplaceInteractions() {
         localStorage.setItem('furgo-demo-addresses', JSON.stringify(addresses));
       }
       const products = loadMarketplaceProducts();
-      const items = lines.map(({ product, variant, quantity, total: lineTotal }) => ({ productId: product.id, variantId: variant.id, name: product.name, category: product.category || 'Uncategorised', nutrition: product.nutrition || '', ingredients: product.ingredients || '', variantLabel: variant.label, sku: variant.sku, supplierId: variant.supplierId || variant.supplier || '', supplierSku: variant.supplierSku || '', cost: Number(variant.cost) || 0, quantity, unitPrice: variant.price, total: lineTotal }));
+      const allocatedFurgoDiscounts = allocateCents(furgoDiscount, lineTotals);
+      const shopWeights = lines.map((line) => appliedShopVoucher && lineMatchesSupplier(line, appliedShopVoucher.supplier_name) ? line.total : 0);
+      const allocatedShopDiscounts = allocateCents(shopDiscount, shopWeights);
+      const allocatedDiscounts = lineTotals.map((_, index) => Math.min(lineTotals[index], (allocatedFurgoDiscounts[index] || 0) + (allocatedShopDiscounts[index] || 0)));
+      const allocatedShipping = allocatedShippingBase.map((amount, index) => {
+        if (form.dataset.furgoFreeShipping === 'true') return 0;
+        if (appliedShopVoucher?.discount_type === 'free_shipping' && lineMatchesSupplier(lines[index], appliedShopVoucher.supplier_name)) return 0;
+        return amount;
+      });
+      const items = lines.map(({ product, variant, quantity, total: lineTotal }, index) => {
+        const allocatedDiscount = allocatedDiscounts[index] || 0;
+        const shippingFeeAllocated = allocatedShipping[index] || 0;
+        const paidAmount = Math.max(0, Math.round((Number(lineTotal) - allocatedDiscount) * 100) / 100);
+        return { lineNumber: index + 1, productId: product.id, variantId: variant.id, name: product.name, category: product.category || 'Uncategorised', nutrition: product.nutrition || '', ingredients: product.ingredients || '', variantLabel: variant.label, supplierId: variant.supplierId || variant.supplier || '', cost: Number(variant.cost) || 0, quantity, unitPrice: variant.price, total: lineTotal, allocatedDiscount, shippingFeeAllocated, paidAmount, refundableAmount: Math.round((paidAmount + shippingFeeAllocated) * 100) / 100 };
+      });
       const profile = JSON.parse(sessionStorage.getItem('furgo-demo-user-profile') || '{}');
       const reference = `FG-${new Date().toISOString().slice(2, 10).replace(/-/g, '')}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
-      const status = payment === 'bank-transfer' ? 'Pending Payment Verification' : 'Paid / Processing';
+      const now = new Date();
+      const awaitingOnlinePayment = payment === 'gateway';
+      const status = payment === 'bank-transfer' ? 'Pending Payment Verification' : awaitingOnlinePayment ? 'Pending Payment' : 'Paid / Processing';
       const orders = loadMarketplaceOrders();
       if (payment === 'wallet') {
         const transactions = JSON.parse(localStorage.getItem('furgo-demo-credit-transactions') || '[]');
         transactions.unshift({ label: `Marketplace order ${reference}`, amount: -total, date: new Date().toLocaleDateString() });
         localStorage.setItem('furgo-demo-credit-transactions', JSON.stringify(transactions));
       }
-      orders.unshift({ id: `order-${Date.now()}`, userId: profile.id || '', reference, date: new Date().toLocaleDateString(), createdAt: new Date().toISOString(), customerEmail: profile.email || '', customerName: profile.name || address.name, customerPhone: profile.phone || address.phone, deliveryPhone: address.phone, address: { name: address.name, phone: address.phone, street: address.street, postcode: address.postcode, city: address.city, state: address.state }, items, subtotal, shipping, discount, total, paymentMethod: payment === 'wallet' ? 'Furgo Credit' : payment === 'gateway' ? 'Online payment' : 'Manual bank transfer', paymentStatus: payment === 'bank-transfer' ? 'Pending Payment Verification' : 'Paid', transferSlip, status, coupon: discount ? String(voucherSettings.code || '').toUpperCase() : '', trackingNumber: '', courier: '', trackingUrl: '' });
+      orders.unshift({ id: `order-${Date.now()}`, userId: profile.id || '', reference, date: now.toLocaleDateString(), createdAt: now.toISOString(), customerEmail: profile.email || '', customerName: profile.name || address.name, customerPhone: profile.phone || address.phone, deliveryPhone: address.phone, address: { name: address.name, phone: address.phone, street: address.street, postcode: address.postcode, city: address.city, state: address.state }, items, subtotal, shipping, shippingDiscount, discount, furgoVoucherDiscount: furgoDiscount, furgoShippingDiscount, furgoVoucherId: appliedFurgoVoucher?.id || '', shopVoucherDiscount: shopDiscount, shopShippingDiscount, shopVoucher: appliedShopVoucher ? { id: appliedShopVoucher.id, code: appliedShopVoucher.code, supplierName: appliedShopVoucher.supplier_name } : null, total, paymentMethod: payment === 'wallet' ? 'Furgo Credit' : payment === 'gateway' ? 'Online Payment' : 'Manual bank transfer', paymentStatus: payment === 'bank-transfer' ? 'Pending Payment Verification' : awaitingOnlinePayment ? 'Pending Payment' : 'Paid', paymentDeadlineAt: awaitingOnlinePayment ? new Date(now.getTime() + 60 * 60 * 1000).toISOString() : '', transferSlip, status, coupon: appliedFurgoVoucher && (furgoDiscount || furgoShippingDiscount) ? String(appliedFurgoVoucher.code || '').toUpperCase() : '', trackingNumber: '', courier: '', trackingUrl: '' });
       localStorage.setItem(marketplaceOrdersKey, JSON.stringify(orders));
-      items.forEach((item) => {
+      if (!awaitingOnlinePayment) items.forEach((item) => {
         const variant = products.find((product) => product.id === item.productId)?.variants.find((entry) => entry.id === item.variantId);
         if (variant) variant.stock = Math.max(0, Number(variant.stock) - item.quantity);
       });
@@ -1259,16 +1429,356 @@ function setupMarketplaceInteractions() {
   }
 }
 
-// Saves admin product mappings and processes supplier fulfillment and shipment updates.
+// Handles live product filters and marketplace order fulfillment.
 function setupAdminMarketplace() {
-  // Saves the Admin Portal's free-shipping, voucher, and offer settings for customer checkout.
+  const liveProductFilters = document.querySelector('[data-live-product-filters]');
+  if (liveProductFilters) {
+    const filterRows = () => {
+      const category = liveProductFilters.querySelector('[data-live-filter-trigger="category"]')?.dataset.value || '';
+      const supplier = liveProductFilters.querySelector('[data-live-filter-trigger="supplier"]')?.dataset.value || '';
+      const listingStatus = liveProductFilters.querySelector('[data-live-filter-trigger="status"]')?.dataset.value || 'all';
+      const rows = [...document.querySelectorAll('[data-live-product-row]')];
+      let visible = 0;
+      rows.forEach((row) => {
+        const statusMatches = listingStatus === 'all' || (listingStatus === 'frozen' ? row.dataset.frozen === 'true' : row.dataset.active === 'true');
+        const matches = (!category || row.dataset.category === category) && (!supplier || row.dataset.supplier === supplier) && statusMatches;
+        row.hidden = !matches;
+        const detail = row.nextElementSibling;
+        if (detail?.matches('[data-live-product-detail]') && !matches) detail.hidden = true;
+        if (matches) visible += 1;
+      });
+      const empty = document.querySelector('[data-live-product-empty]');
+      if (empty) empty.hidden = visible > 0;
+    };
+    liveProductFilters.addEventListener('click', (event) => {
+      const filterTrigger = event.target.closest('[data-live-filter-trigger]');
+      const filterChoice = event.target.closest('[data-live-filter-option]');
+      const filterMenus = [...liveProductFilters.querySelectorAll('[data-live-filter-menu]')];
+      const sortOptions = liveProductFilters.querySelector('[data-live-sort-options]');
+      const closeMenus = (except = null) => {
+        filterMenus.forEach((menu) => {
+          if (menu === except) return;
+          menu.querySelector('[data-live-filter-options]')?.setAttribute('hidden', '');
+          menu.querySelector('[data-live-filter-trigger]')?.setAttribute('aria-expanded', 'false');
+        });
+        if (!except) {
+          if (sortOptions) sortOptions.hidden = true;
+          liveProductFilters.querySelector('[data-live-sort-trigger]')?.setAttribute('aria-expanded', 'false');
+        }
+      };
+      if (filterTrigger && liveProductFilters.contains(filterTrigger)) {
+        const menu = filterTrigger.closest('[data-live-filter-menu]');
+        const options = menu?.querySelector('[data-live-filter-options]');
+        const shouldOpen = Boolean(options?.hidden);
+        closeMenus(menu);
+        if (sortOptions) sortOptions.hidden = true;
+        liveProductFilters.querySelector('[data-live-sort-trigger]')?.setAttribute('aria-expanded', 'false');
+        if (options) options.hidden = !shouldOpen;
+        filterTrigger.setAttribute('aria-expanded', String(shouldOpen));
+        return;
+      }
+      if (filterChoice && liveProductFilters.contains(filterChoice)) {
+        const key = filterChoice.dataset.liveFilterOption;
+        const menu = filterChoice.closest('[data-live-filter-menu]');
+        const trigger = menu?.querySelector(`[data-live-filter-trigger="${key}"]`);
+        if (trigger) {
+          trigger.dataset.value = filterChoice.dataset.value || '';
+          const label = menu.querySelector(`[data-live-filter-label="${key}"]`);
+          if (label) label.textContent = filterChoice.textContent.trim();
+          trigger.setAttribute('aria-label', `${trigger.querySelector('small')?.textContent || key} filter: ${filterChoice.textContent.trim()}`);
+        }
+        menu?.querySelectorAll('[data-live-filter-option]').forEach((option) => {
+          option.setAttribute('aria-checked', String(option === filterChoice));
+        });
+        closeMenus();
+        filterRows();
+        return;
+      }
+      const sortTrigger = event.target.closest('[data-live-sort-trigger]');
+      if (sortTrigger && sortOptions) {
+        const shouldOpen = sortOptions.hidden;
+        closeMenus();
+        sortOptions.hidden = !shouldOpen;
+        sortTrigger.setAttribute('aria-expanded', String(shouldOpen));
+        return;
+      }
+      const sortChoice = event.target.closest('[data-live-sort]');
+      if (sortChoice && sortOptions) {
+        liveProductFilters.querySelectorAll('[data-live-sort]').forEach((option) => {
+          const active = option === sortChoice;
+          option.classList.toggle('is-active', active);
+          option.setAttribute('aria-checked', String(active));
+        });
+        sortOptions.hidden = true;
+        liveProductFilters.querySelector('[data-live-sort-trigger]')?.setAttribute('aria-expanded', 'false');
+        sortRows();
+        return;
+      }
+      closeMenus();
+    });
+    const sortRows = () => {
+      const mode = liveProductFilters.querySelector('[data-live-sort].is-active')?.dataset.liveSort || 'sold-desc';
+      const body = document.querySelector('[data-live-product-rows]');
+      if (!body) return;
+      const rows = [...body.querySelectorAll('[data-live-product-row]')];
+      const compare = mode === 'price-asc' ? (a, b) => Number(a.dataset.price) - Number(b.dataset.price)
+        : mode === 'price-desc' ? (a, b) => Number(b.dataset.price) - Number(a.dataset.price)
+          : mode === 'name-asc' ? (a, b) => a.dataset.name.localeCompare(b.dataset.name)
+            : mode === 'supplier-asc' ? (a, b) => a.dataset.supplier.localeCompare(b.dataset.supplier)
+              : (a, b) => Number(b.dataset.sold) - Number(a.dataset.sold);
+      rows.sort((a, b) => compare(a, b) || a.dataset.name.localeCompare(b.dataset.name));
+      rows.forEach((row) => {
+        const detail = row.nextElementSibling;
+        body.append(row);
+        if (detail?.matches('[data-live-product-detail]')) body.append(detail);
+      });
+    };
+    sortRows();
+    filterRows();
+    document.querySelector('[data-live-product-rows]')?.addEventListener('click', async (event) => {
+      const detailsButton = event.target.closest('[data-live-product-details]');
+      if (detailsButton) {
+        const detail = document.querySelector(`[data-live-product-detail="${CSS.escape(detailsButton.dataset.liveProductDetails)}"]`);
+        if (detail) {
+          detail.hidden = !detail.hidden;
+          detailsButton.setAttribute('aria-expanded', String(!detail.hidden));
+        }
+        return;
+      }
+      const freezeButton = event.target.closest('[data-toggle-live-product]');
+      if (!freezeButton) return;
+      const products = loadMarketplaceProducts();
+      const product = products.find((entry) => entry.id === freezeButton.dataset.toggleLiveProduct);
+      if (!product) return;
+      freezeButton.disabled = true;
+      const frozen = !Boolean(product.frozenByAdmin);
+      const { data, error } = await supabase.rpc('set_marketplace_product_frozen', {
+        p_product_id: product.id,
+        p_is_frozen: frozen,
+      });
+      if (error) {
+        freezeButton.disabled = false;
+        toastAdmin(error.message || 'Product status could not be updated. Apply migration 0047 and try again.');
+        return;
+      }
+      if (Array.isArray(data)) cacheSyncedRecords(marketplaceProductsKey, data);
+      toastAdmin(frozen ? 'Product frozen. The supplier was notified.' : 'Product is live again. The supplier was notified.');
+      render();
+    });
+    document.querySelector('[data-live-product-rows]')?.addEventListener('submit', (event) => {
+      const form = event.target.closest('[data-live-product-extra-details]');
+      if (!form) return;
+      event.preventDefault();
+      const products = loadMarketplaceProducts();
+      const product = products.find((entry) => entry.id === form.dataset.liveProductExtraDetails);
+      if (!product) return;
+      product.suitableBreeds = form.elements.suitableBreeds.value.trim();
+      product.issues = form.elements.issues.value.trim();
+      product.extraDescription = form.elements.extraDescription.value.trim();
+      product.petTypes = form.elements.petTypes.value.trim();
+      product.ingredients = form.elements.ingredients.value.trim();
+      product.nutrition = form.elements.nutrition.value.trim();
+      localStorage.setItem(marketplaceProductsKey, JSON.stringify(products));
+      render();
+      toastAdmin('Product details saved.');
+    });
+  }
+  const returnCasesTarget = document.querySelector('[data-marketplace-return-cases]');
+  const loadReturnCases = async () => {
+    if (!returnCasesTarget) return;
+    const { data, error } = await supabase.rpc('get_marketplace_item_return_review_queue');
+    if (error) {
+      returnCasesTarget.innerHTML = `<p class="admin-market-empty">Return review is unavailable. Apply migration 0035 to enable this workflow. (${escapeHTML(error.message || 'Supabase function unavailable')})</p>`;
+      return;
+    }
+    const cases = data || [];
+    returnCasesTarget.innerHTML = cases.length ? `<div class="admin-market-return-case-list">${cases.map((itemReturn) => `<article class="admin-market-return-case"><header><strong>${escapeHTML(itemReturn.productName || 'Product')} · ${escapeHTML(itemReturn.variantLabel || 'Variant')} × ${Number(itemReturn.quantity) || 1}</strong><span>${escapeHTML(itemReturn.status)}</span></header><p>Order ${escapeHTML(itemReturn.orderReference || itemReturn.orderId)} · Supplier ${escapeHTML(itemReturn.supplierName || '—')}</p><p>Customer: ${escapeHTML(itemReturn.customerName || '—')} · ${escapeHTML(itemReturn.customerPhone || '—')}</p><p>Reason: ${escapeHTML(itemReturn.reason || '—')}</p>${itemReturn.supplierResponse ? `<p>Supplier response: ${escapeHTML(itemReturn.supplierResponse)}</p>` : ''}<b>Refund: MYR ${Number(itemReturn.refundAmount || 0).toFixed(2)} (product ${Number(itemReturn.paidAmount || 0).toFixed(2)} + shipping ${Number(itemReturn.shippingRefund || 0).toFixed(2)})</b>${itemReturn.photoPath ? `<a href="#" data-marketplace-return-photo="${escapeHTML(itemReturn.photoPath)}" target="_blank" rel="noopener noreferrer">View customer photo</a>` : ''}<div class="admin-market-return-actions">${itemReturn.status === 'Admin Review' ? `<button type="button" class="button button-primary" data-admin-return-action="approve" data-return-id="${escapeHTML(itemReturn.returnId)}">Approve Return</button><button type="button" class="button button-light" data-admin-return-action="reject" data-return-id="${escapeHTML(itemReturn.returnId)}">Reject Return</button>` : `<button type="button" class="button button-light" data-admin-return-action="refunded" data-return-id="${escapeHTML(itemReturn.returnId)}">Mark Refund Sent</button><small>Use only after the refund has been sent through the original payment method.</small>`}</div></article>`).join('')}</div>` : '<p class="admin-market-empty">No return cases need Manager or Director review.</p>';
+    for (const link of returnCasesTarget.querySelectorAll('[data-marketplace-return-photo]')) {
+      const { data: signed } = await supabase.storage.from('marketplace-return-evidence').createSignedUrl(link.dataset.marketplaceReturnPhoto, 300);
+      if (signed?.signedUrl) link.href = signed.signedUrl;
+      else { link.removeAttribute('href'); link.setAttribute('aria-disabled', 'true'); }
+    }
+  };
+  if (returnCasesTarget) void loadReturnCases();
+  returnCasesTarget?.addEventListener('marketplace-return-change', () => { void loadReturnCases(); });
+  returnCasesTarget?.addEventListener('click', async (event) => {
+    const button = event.target.closest('[data-admin-return-action]');
+    if (!button) return;
+    const action = button.dataset.adminReturnAction;
+    const reason = action === 'reject' ? window.prompt('Enter the reason for rejecting this return request.') : '';
+    if (action === 'reject' && !reason?.trim()) return;
+    if (action !== 'reject' && !window.confirm(action === 'approve' ? 'Approve this return? The supplier will coordinate the return shipment.' : 'Confirm that the refund has already been sent through the original payment method?')) return;
+    button.disabled = true;
+    const result = action === 'refunded'
+      ? await supabase.rpc('complete_marketplace_item_refund', { p_return_id: button.dataset.returnId })
+      : await supabase.rpc('review_marketplace_item_return', { p_return_id: button.dataset.returnId, p_decision: action, p_reason: reason || '' });
+    if (result.error) {
+      button.disabled = false;
+      toastAdmin(result.error.message || 'The return request could not be updated.');
+      return;
+    }
+    toastAdmin(action === 'approve' ? 'Return approved. The supplier can coordinate its return.' : action === 'reject' ? 'Return rejected with the recorded reason.' : 'Refund marked as sent.');
+    await loadReturnCases();
+  });
+  const orderList = document.querySelector('.admin-market-order-list');
+  if (orderList) {
+    for (const link of orderList.querySelectorAll('[data-marketplace-return-photo]')) {
+      void supabase.storage.from('marketplace-return-evidence').createSignedUrl(link.dataset.marketplaceReturnPhoto, 300).then(({ data }) => {
+        if (data?.signedUrl) link.href = data.signedUrl;
+        else { link.removeAttribute('href'); link.setAttribute('aria-disabled', 'true'); }
+      });
+    }
+    orderList.addEventListener('click', async (event) => {
+      const cancellationRefundButton = event.target.closest('[data-marketplace-cancellation-refund]');
+      if (cancellationRefundButton) {
+        if (!window.confirm('Confirm that the refund has already been sent through the original payment method?')) return;
+        cancellationRefundButton.disabled = true;
+        const { error } = await supabase.rpc('complete_marketplace_order_cancellation_refund', {
+          p_order_id: cancellationRefundButton.dataset.marketplaceCancellationRefund,
+        });
+        if (error) {
+          cancellationRefundButton.disabled = false;
+          toastAdmin(error.message || 'The cancellation refund could not be updated.');
+          return;
+        }
+        toastAdmin('Cancellation refund marked as sent.');
+        window.setTimeout(() => window.dispatchEvent(new Event('hashchange')), 400);
+        return;
+      }
+      const button = event.target.closest('[data-admin-return-action]');
+      if (!button) return;
+      const action = button.dataset.adminReturnAction;
+      const reason = action === 'reject' ? window.prompt('Enter the reason for rejecting this return request.') : '';
+      if (action === 'reject' && !reason?.trim()) return;
+      if (action !== 'reject' && !window.confirm(action === 'approve' ? 'Approve the return request? The supplier will coordinate the return shipment.' : 'Confirm that the refund has already been sent through the original payment method?')) return;
+      button.disabled = true;
+      const result = action === 'refunded'
+        ? await supabase.rpc('complete_marketplace_item_refund', { p_return_id: button.dataset.returnId })
+        : await supabase.rpc('review_marketplace_item_return', { p_return_id: button.dataset.returnId, p_decision: action, p_reason: reason || '' });
+      if (result.error) {
+        button.disabled = false;
+        toastAdmin(result.error.message || 'The return request could not be updated.');
+        return;
+      }
+      toastAdmin(action === 'approve' ? 'Return approved. The supplier can coordinate its return.' : action === 'reject' ? 'Return rejected with the recorded reason.' : 'Refund marked as sent.');
+      window.setTimeout(() => window.dispatchEvent(new Event('hashchange')), 400);
+    });
+  }
+  // Shipping and Furgo Voucher settings save independently so each can be managed on its own.
+  const saveMarketplaceSettings = (settings, feedback, successMessage, actionKey) => {
+    try {
+      localStorage.setItem(marketplaceOfferSettingsKey, JSON.stringify(settings));
+      void recordAdminAction('marketplace_offer_settings_updated', 'marketplace', actionKey);
+      feedback.textContent = successMessage;
+      feedback.className = 'admin-market-offer-feedback success';
+    } catch {
+      feedback.textContent = 'Settings could not be saved in this browser.';
+      feedback.className = 'admin-market-offer-feedback error';
+    }
+  };
+  const shippingForm = document.querySelector('[data-admin-market-shipping]');
+  shippingForm?.addEventListener('submit', (event) => {
+    event.preventDefault();
+    if (!shippingForm.reportValidity()) return;
+    const fields = shippingForm.elements;
+    const settings = loadMarketplaceOfferSettings();
+    settings.freeShippingMinimum = Number(fields.freeShippingMinimum.value);
+    settings.deliveryFee = Number(fields.deliveryFee.value);
+    saveMarketplaceSettings(settings, shippingForm.querySelector('[data-market-shipping-feedback]'), 'Shipping settings saved and applied to customer checkout.', 'shipping');
+  });
   const offerForm = document.querySelector('[data-admin-market-offer]');
+  const voucherStatusLabel = offerForm?.querySelector('[data-admin-voucher-status]');
+  const voucherList = document.querySelector('[data-admin-furgo-voucher-list]');
+  const voucherSubmit = offerForm?.querySelector('[data-admin-voucher-submit]');
+  const cancelVoucherEdit = offerForm?.querySelector('[data-cancel-furgo-voucher-edit]');
+  const updateAdminVoucherTypeFields = () => {
+    if (!offerForm) return;
+    const freeShipping = offerForm.elements.discountType.value === 'free_shipping';
+    const valueField = offerForm.querySelector('[data-admin-discount-value-field]');
+    if (valueField) valueField.hidden = freeShipping;
+    offerForm.elements.discountValue.required = !freeShipping;
+    offerForm.elements.discountValue.disabled = freeShipping;
+  };
+  offerForm?.elements.discountType.addEventListener('change', updateAdminVoucherTypeFields);
+  updateAdminVoucherTypeFields();
+  const updateAdminVoucherStatus = () => {
+    if (!voucherStatusLabel || !offerForm) return;
+    const active = offerForm.elements.voucherEnabled.checked;
+    voucherStatusLabel.textContent = `Status: ${active ? 'Active' : 'Not Active'}`;
+    voucherStatusLabel.classList.toggle('is-active', active);
+    voucherStatusLabel.classList.toggle('is-inactive', !active);
+  };
+  offerForm?.elements.voucherEnabled.addEventListener('change', updateAdminVoucherStatus);
+  const resetFurgoVoucherForm = (newVoucher = false) => {
+    if (!offerForm) return;
+    offerForm.reset();
+    offerForm.elements.voucherId.value = '';
+    if (newVoucher) {
+      offerForm.elements.voucherCode.value = '';
+      offerForm.elements.discountValue.value = '';
+      offerForm.elements.minimumSpend.value = '0';
+      offerForm.elements.voucherEnabled.checked = true;
+    }
+    if (voucherSubmit) voucherSubmit.textContent = newVoucher ? 'Create Voucher' : 'Save Voucher & Offer';
+    if (cancelVoucherEdit) cancelVoucherEdit.hidden = true;
+    const feedback = offerForm.querySelector('[data-market-offer-feedback]');
+    feedback.textContent = '';
+    feedback.className = 'admin-market-offer-feedback';
+    updateAdminVoucherTypeFields();
+    updateAdminVoucherStatus();
+  };
+  const renderAdminFurgoVouchers = () => {
+    if (!voucherList) return;
+    const vouchers = loadMarketplaceOfferSettings().furgoVouchers || [];
+    voucherList.innerHTML = vouchers.length ? vouchers.map((voucher) => {
+      const value = voucher.discountType === 'free_shipping' ? 'Free shipping' : voucher.discountType === 'percent' ? `${Number(voucher.discountValue)}% off` : `MYR ${Number(voucher.discountValue || 0).toFixed(2)} off`;
+      const active = Boolean(voucher.enabled);
+      return `<article class="admin-furgo-voucher-card"><div class="admin-furgo-voucher-details"><strong>${escapeHTML(voucher.code || 'Voucher')}</strong><span>${value}${Number(voucher.minimumSpend) ? ` · Minimum spend MYR ${Number(voucher.minimumSpend).toFixed(2)}` : ''}</span></div><span class="admin-voucher-status-pill ${active ? 'is-active' : 'is-inactive'}">${active ? 'Active' : 'Not Active'}</span><div class="admin-furgo-voucher-actions"><button type="button" class="button button-light" data-edit-furgo-voucher="${escapeHTML(voucher.id || '')}">Edit</button><button type="button" class="button button-light" data-delete-furgo-voucher="${escapeHTML(voucher.id || '')}">Delete</button></div></article>`;
+    }).join('') : '<p class="market-checkout-note">No Furgo vouchers have been saved.</p>';
+  };
+  document.querySelector('[data-add-furgo-voucher]')?.addEventListener('click', () => {
+    resetFurgoVoucherForm(true);
+    offerForm?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    offerForm?.elements.voucherCode.focus();
+  });
+  cancelVoucherEdit?.addEventListener('click', () => resetFurgoVoucherForm());
+  voucherList?.addEventListener('click', (event) => {
+    const editButton = event.target.closest('[data-edit-furgo-voucher]');
+    const deleteButton = event.target.closest('[data-delete-furgo-voucher]');
+    if (editButton && offerForm) {
+      const voucher = (loadMarketplaceOfferSettings().furgoVouchers || []).find((entry) => String(entry.id) === editButton.dataset.editFurgoVoucher);
+      if (!voucher) return;
+      offerForm.elements.voucherId.value = voucher.id || '';
+      offerForm.elements.voucherCode.value = voucher.code || '';
+      offerForm.elements.discountType.value = voucher.discountType || 'percent';
+      offerForm.elements.discountValue.value = voucher.discountValue ?? '';
+      offerForm.elements.minimumSpend.value = Number(voucher.minimumSpend) || 0;
+      offerForm.elements.voucherEnabled.checked = Boolean(voucher.enabled);
+      if (voucherSubmit) voucherSubmit.textContent = 'Update Voucher';
+      if (cancelVoucherEdit) cancelVoucherEdit.hidden = false;
+      offerForm.querySelector('[data-market-offer-feedback]').textContent = '';
+      updateAdminVoucherTypeFields();
+      updateAdminVoucherStatus();
+      offerForm.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+    if (deleteButton) {
+      const settings = loadMarketplaceOfferSettings();
+      const voucher = (settings.furgoVouchers || []).find((entry) => String(entry.id) === deleteButton.dataset.deleteFurgoVoucher);
+      if (!voucher || !window.confirm(`Delete the ${voucher.code} Furgo voucher?`)) return;
+      settings.furgoVouchers = settings.furgoVouchers.filter((entry) => String(entry.id) !== String(voucher.id));
+      settings.voucher = settings.furgoVouchers[0] || { ...settings.voucher, enabled: false };
+      localStorage.setItem(marketplaceOfferSettingsKey, JSON.stringify(settings));
+      void recordAdminAction('marketplace_furgo_voucher_deleted', 'marketplace', voucher.id || voucher.code);
+      if (offerForm?.elements.voucherId.value === String(voucher.id || '')) resetFurgoVoucherForm(true);
+      renderAdminFurgoVouchers();
+    }
+  });
   offerForm?.addEventListener('submit', (event) => {
     event.preventDefault();
     if (!offerForm.reportValidity()) return;
     const fields = offerForm.elements;
     const discountType = fields.discountType.value;
-    const discountValue = Number(fields.discountValue.value);
+    const discountValue = fields.discountType.value === 'free_shipping' ? null : Number(fields.discountValue.value);
     const feedback = offerForm.querySelector('[data-market-offer-feedback]');
     if (discountType === 'percent' && discountValue > 100) {
       feedback.textContent = 'Percentage discounts cannot exceed 100%.';
@@ -1281,237 +1791,35 @@ function setupAdminMarketplace() {
       feedback.className = 'admin-market-offer-feedback error';
       return;
     }
-    const settings = {
-      freeShippingMinimum: Number(fields.freeShippingMinimum.value),
-      deliveryFee: Number(fields.deliveryFee.value),
-      offerTitle: fields.offerTitle.value.trim(),
-      offerDescription: fields.offerDescription.value.trim(),
-      voucher: { code: voucherCode, discountType, discountValue, minimumSpend: Number(fields.minimumSpend.value), enabled: fields.voucherEnabled.checked },
-    };
-    try {
-      localStorage.setItem(marketplaceOfferSettingsKey, JSON.stringify(settings));
-      void recordAdminAction('marketplace_offer_settings_updated', 'marketplace', 'offers');
-      feedback.textContent = 'Offer settings saved and applied to customer Marketplace checkout.';
-      feedback.className = 'admin-market-offer-feedback success';
-    } catch {
-      feedback.textContent = 'Settings could not be saved in this browser.';
+    const settings = loadMarketplaceOfferSettings();
+    const editingId = fields.voucherId.value;
+    const vouchers = [...(settings.furgoVouchers || [])];
+    const duplicate = vouchers.some((entry) => entry.id !== editingId && String(entry.code || '').toUpperCase() === voucherCode);
+    if (duplicate) {
+      feedback.textContent = 'That voucher code is already in use. Choose a unique code.';
       feedback.className = 'admin-market-offer-feedback error';
-    }
-  });
-
-  const supplierForm = document.querySelector('[data-admin-market-supplier]');
-  supplierForm?.addEventListener('submit', (event) => {
-    event.preventDefault();
-    if (!supplierForm.reportValidity()) return;
-    const fields = supplierForm.elements;
-    const supplierName = fields.name.value.trim();
-    const suppliers = loadMarketplaceSuppliers();
-    const editing = suppliers.find((supplier) => supplier.id === fields.supplierId.value);
-    const duplicate = suppliers.find((supplier) => supplier.name.toLowerCase() === supplierName.toLowerCase() && supplier.id !== editing?.id);
-    if (duplicate) { toastAdmin('A supplier with that name already exists.'); return; }
-    const supplier = { id: editing?.id || `supplier-${Date.now()}`, name: supplierName, phone: fields.phone.value.trim(), orderLink: fields.orderLink.value.trim() };
-    const nextSuppliers = editing ? suppliers.map((entry) => entry.id === editing.id ? supplier : entry) : [...suppliers, supplier];
-    try {
-      saveMarketplaceSuppliers(nextSuppliers);
-      if (editing && editing.name !== supplier.name) {
-        const products = loadMarketplaceProducts();
-        products.forEach((product) => product.variants.forEach((variant) => {
-          if ((variant.supplierId || variant.supplier || '').toLowerCase() === editing.name.toLowerCase()) {
-            variant.supplierId = supplier.name;
-            variant.supplier = supplier.name;
-          }
-        }));
-        localStorage.setItem(marketplaceProductsKey, JSON.stringify(products));
-        const orders = loadMarketplaceOrders();
-        orders.forEach((order) => order.items?.forEach((item) => {
-          if ((item.supplierId || '').toLowerCase() === editing.name.toLowerCase()) item.supplierId = supplier.name;
-        }));
-        localStorage.setItem(marketplaceOrdersKey, JSON.stringify(orders));
-      }
-      void recordAdminAction(editing ? 'marketplace_supplier_updated' : 'marketplace_supplier_created', 'marketplace_supplier', supplier.id, { name: supplier.name });
-      render();
-    } catch { toastAdmin('Supplier details could not be saved in this browser.'); }
-  });
-  document.querySelectorAll('[data-edit-market-supplier]').forEach((button) => button.addEventListener('click', () => {
-    const supplier = loadMarketplaceSuppliers().find((entry) => entry.id === button.dataset.editMarketSupplier);
-    if (!supplier || !supplierForm) return;
-    const fields = supplierForm.elements;
-    fields.supplierId.value = supplier.id;
-    fields.name.value = supplier.name;
-    fields.phone.value = supplier.phone || '';
-    fields.orderLink.value = supplier.orderLink || '';
-    document.querySelector('[data-market-supplier-summary]').textContent = `Edit ${supplier.name}`;
-    document.querySelector('[data-market-supplier-submit]').textContent = 'Save Supplier Changes';
-    document.querySelector('[data-cancel-market-supplier]').hidden = false;
-    document.querySelector('[data-market-supplier-editor]').open = true;
-    document.querySelector('[data-market-supplier-editor]').scrollIntoView({ behavior: 'smooth', block: 'start' });
-  }));
-  document.querySelector('[data-cancel-market-supplier]')?.addEventListener('click', () => {
-    supplierForm?.reset();
-    if (!supplierForm) return;
-    supplierForm.elements.supplierId.value = '';
-    document.querySelector('[data-market-supplier-summary]').textContent = 'Add supplier details';
-    document.querySelector('[data-market-supplier-submit]').textContent = 'Save Supplier';
-    document.querySelector('[data-cancel-market-supplier]').hidden = true;
-  });
-  document.querySelectorAll('[data-delete-market-supplier]').forEach((button) => button.addEventListener('click', () => {
-    const suppliers = loadMarketplaceSuppliers();
-    const supplier = suppliers.find((entry) => entry.id === button.dataset.deleteMarketSupplier);
-    if (!supplier || !window.confirm(`Delete ${supplier.name} from the supplier directory? Product mappings will be set to Unassigned.`)) return;
-    const products = loadMarketplaceProducts();
-    products.forEach((product) => product.variants.forEach((variant) => {
-      if ((variant.supplierId || variant.supplier || '').toLowerCase() === supplier.name.toLowerCase()) {
-        variant.supplierId = '';
-        variant.supplier = '';
-      }
-    }));
-    const orders = loadMarketplaceOrders();
-    orders.forEach((order) => order.items?.forEach((item) => {
-      if ((item.supplierId || '').toLowerCase() === supplier.name.toLowerCase()) item.supplierId = 'Unassigned';
-    }));
-    try {
-      saveMarketplaceSuppliers(suppliers.filter((entry) => entry.id !== supplier.id));
-      localStorage.setItem(marketplaceProductsKey, JSON.stringify(products));
-      localStorage.setItem(marketplaceOrdersKey, JSON.stringify(orders));
-      void recordAdminAction('marketplace_supplier_deleted', 'marketplace_supplier', supplier.id, { name: supplier.name });
-      render();
-    } catch { toastAdmin('Supplier details could not be deleted in this browser.'); }
-  }));
-
-  const productForm = document.querySelector('[data-admin-market-product]');
-  const supplierInput = productForm?.elements.supplierId;
-  supplierInput?.addEventListener('change', () => {
-    const supplierName = supplierInput.value.trim();
-    if (!supplierName) return;
-    const suppliers = loadMarketplaceSuppliers();
-    const existingSupplier = suppliers.find((supplier) => supplier.name.toLowerCase() === supplierName.toLowerCase());
-    if (existingSupplier) { supplierInput.value = existingSupplier.name; return; }
-    if (!window.confirm(`Save “${supplierName}” as a new supplier?`)) { supplierInput.value = ''; return; }
-    const phone = window.prompt(`Enter ${supplierName}'s phone number:`, '') || '';
-    const orderLink = window.prompt(`Enter ${supplierName}'s order link:`, '') || '';
-    const supplier = { id: `supplier-${Date.now()}`, name: supplierName, phone: phone.trim(), orderLink: orderLink.trim() };
-    try {
-      saveMarketplaceSuppliers([...suppliers, supplier]);
-      const option = document.createElement('option');
-      option.value = supplierName;
-      document.querySelector('#marketplace-supplier-options')?.append(option);
-      toastAdmin(`${supplierName} was saved to the supplier list.`);
-    } catch { toastAdmin('The supplier could not be saved in this browser.'); }
-  });
-  productForm?.addEventListener('submit', async (event) => {
-    event.preventDefault();
-    if (!productForm.reportValidity()) return;
-    const fields = productForm.elements;
-    const products = loadMarketplaceProducts();
-    const productName = fields.name.value.trim();
-    const uploadedFiles = [...fields.productPhotos.files];
-    if (uploadedFiles.length > 5 || uploadedFiles.some((file) => file.size > 1.5 * 1024 * 1024 || !file.type.startsWith('image/'))) {
-      toastAdmin('Upload up to five image files, each no larger than 1.5 MB.');
       return;
     }
-    const uploadedImages = await Promise.all(uploadedFiles.map((file) => new Promise((resolve) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(safeMarketplaceImage(reader.result));
-      reader.onerror = () => resolve('');
-      reader.readAsDataURL(file);
-    })));
-    if (uploadedImages.some((image) => !image)) { toastAdmin('One or more product photos could not be read.'); return; }
-    const variant = { id: `variant-${Date.now()}`, label: fields.variantLabel.value.trim(), price: Number(fields.price.value), stock: Number(fields.stock.value), sku: fields.sku.value.trim(), supplierId: fields.supplierId.value.trim(), supplier: fields.supplierId.value.trim(), supplierSku: fields.supplierSku.value.trim(), cost: Number(fields.cost.value) };
-    const productFields = { name: productName, category: fields.category.value, description: fields.description.value.trim(), suitableBreeds: fields.suitableBreeds.value.trim(), issues: fields.issues.value.trim(), ingredients: fields.ingredients.value.trim(), nutrition: fields.nutrition.value.trim() };
-    const productId = fields.productId.value;
-    const variantId = fields.variantId.value;
-    if (productId) {
-      const product = products.find((item) => item.id === productId);
-      const existingVariant = product?.variants.find((item) => item.id === variantId);
-      if (!product || !existingVariant) { toastAdmin('This product or variant is no longer available.'); return; }
-      Object.assign(product, productFields);
-      Object.assign(existingVariant, variant, { id: variantId });
-      if (uploadedImages.length) product.images = uploadedImages;
-    } else {
-      // Reusing the same product name adds a new size or package option to the existing listing.
-      const existingProduct = products.find((product) => product.name.trim().toLowerCase() === productName.toLowerCase());
-      if (existingProduct) {
-        Object.assign(existingProduct, productFields);
-        existingProduct.variants.push(variant);
-        if (uploadedImages.length) existingProduct.images = uploadedImages;
-      } else {
-        products.push({ id: `product-${Date.now()}`, ...productFields, images: uploadedImages, variants: [variant] });
-      }
-    }
-    try { localStorage.setItem(marketplaceProductsKey, JSON.stringify(products)); }
-    catch { toastAdmin('The selected photos are too large for this browser prototype. Choose smaller images.'); return; }
-    const savedProduct = products.find((product) => product.id === productId) || products.find((product) => product.name.trim().toLowerCase() === productName.toLowerCase());
-    void recordAdminAction('marketplace_product_saved', 'marketplace_product', savedProduct?.id || '', { name: productName });
-    render();
+    const voucher = { id: editingId || (globalThis.crypto?.randomUUID?.() || `furgo-voucher-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`), code: voucherCode, discountType, discountValue, minimumSpend: Number(fields.minimumSpend.value), enabled: fields.voucherEnabled.checked };
+    if (editingId) {
+      const index = vouchers.findIndex((entry) => String(entry.id) === editingId);
+      if (index < 0) return;
+      vouchers[index] = voucher;
+    } else vouchers.unshift(voucher);
+    settings.furgoVouchers = vouchers;
+    settings.offerTitle = fields.offerTitle.value.trim();
+    settings.offerDescription = fields.offerDescription.value.trim();
+    settings.voucher = vouchers[0] || { ...settings.voucher, enabled: false };
+    saveMarketplaceSettings(settings, feedback, editingId ? 'Furgo voucher updated.' : 'Furgo voucher created.', 'furgo-voucher');
+    renderAdminFurgoVouchers();
+    resetFurgoVoucherForm(true);
+    fields.offerTitle.value = settings.offerTitle;
+    fields.offerDescription.value = settings.offerDescription;
+    feedback.textContent = editingId ? 'Furgo voucher updated.' : 'Furgo voucher created.';
+    feedback.className = 'admin-market-offer-feedback success';
   });
-  document.querySelectorAll('[data-edit-market-product]').forEach((button) => button.addEventListener('click', () => {
-    const product = loadMarketplaceProducts().find((item) => item.id === button.dataset.editMarketProduct);
-    const variant = product?.variants.find((item) => item.id === button.dataset.editMarketVariant);
-    const form = document.querySelector('[data-admin-market-product]');
-    if (!product || !variant || !form) return;
-    const fields = form.elements;
-    fields.productId.value = product.id;
-    fields.variantId.value = variant.id;
-    fields.name.value = product.name;
-    fields.category.value = product.category;
-    fields.description.value = product.description || '';
-    fields.suitableBreeds.value = product.suitableBreeds || '';
-    fields.issues.value = product.issues || '';
-    fields.ingredients.value = product.ingredients || '';
-    fields.nutrition.value = product.nutrition || '';
-    fields.price.value = variant.price;
-    fields.variantLabel.value = variant.label;
-    fields.stock.value = variant.stock;
-    fields.sku.value = variant.sku || '';
-    fields.supplierId.value = variant.supplierId || variant.supplier || '';
-    fields.supplierSku.value = variant.supplierSku || '';
-    fields.cost.value = variant.cost ?? 0;
-    fields.productPhotos.value = '';
-    document.querySelector('[data-market-image-note]').textContent = `This product currently has ${(product.images || []).length} photo(s). Upload photos to replace them, or leave the field empty to keep them.`;
-    document.querySelector('[data-market-editor-summary]').textContent = `Edit ${product.name} · ${variant.label}`;
-    document.querySelector('[data-market-product-submit]').textContent = 'Save Product Changes';
-    document.querySelector('[data-cancel-market-edit]').hidden = false;
-    document.querySelector('[data-market-product-editor]').open = true;
-    document.querySelector('[data-market-product-editor]').scrollIntoView({ behavior: 'smooth', block: 'start' });
-  }));
-  document.querySelector('[data-cancel-market-edit]')?.addEventListener('click', () => {
-    const form = document.querySelector('[data-admin-market-product]');
-    form?.reset();
-    if (!form) return;
-    form.elements.productId.value = '';
-    form.elements.variantId.value = '';
-    document.querySelector('[data-market-image-note]').textContent = 'Upload up to 5 photos (maximum 1.5 MB each). Enter an existing product name to add another variant. Product names, suitable breeds, and issues are searchable by customers.';
-    document.querySelector('[data-market-editor-summary]').textContent = 'Add product and supplier mapping';
-    document.querySelector('[data-market-product-submit]').textContent = 'Add Product';
-    document.querySelector('[data-cancel-market-edit]').hidden = true;
-  });
-  document.querySelectorAll('[data-toggle-market-product]').forEach((button) => button.addEventListener('click', () => {
-    const products = loadMarketplaceProducts();
-    const product = products.find((item) => item.id === button.dataset.toggleMarketProduct);
-    if (!product) return;
-    product.hidden = !product.hidden;
-    localStorage.setItem(marketplaceProductsKey, JSON.stringify(products));
-    void recordAdminAction(product.hidden ? 'marketplace_product_hidden' : 'marketplace_product_published', 'marketplace_product', product.id, { name: product.name });
-    if (product.hidden) localStorage.setItem(marketplaceCartKey, JSON.stringify(loadMarketplaceCart().filter((item) => item.productId !== product.id)));
-    render();
-  }));
-  document.querySelectorAll('[data-delete-market-product]').forEach((button) => button.addEventListener('click', () => {
-    const products = loadMarketplaceProducts();
-    const product = products.find((item) => item.id === button.dataset.deleteMarketProduct);
-    if (!product || !window.confirm(`Delete ${product.name} from the marketplace catalog? Existing order records will be kept.`)) return;
-    const orders = loadMarketplaceOrders();
-    orders.forEach((order) => order.items.forEach((item) => {
-      if (item.productId !== product.id) return;
-      const variant = product.variants.find((entry) => entry.id === item.variantId);
-      if (variant) Object.assign(item, { supplierId: item.supplierId || variant.supplierId || variant.supplier || '', supplierSku: item.supplierSku || variant.supplierSku || '', cost: item.cost ?? variant.cost ?? 0 });
-    }));
-    const cart = loadMarketplaceCart().filter((item) => item.productId !== product.id);
-    localStorage.setItem(marketplaceProductsKey, JSON.stringify(products.filter((item) => item.id !== product.id)));
-    localStorage.setItem(marketplaceOrdersKey, JSON.stringify(orders));
-    localStorage.setItem(marketplaceCartKey, JSON.stringify(cart));
-    void recordAdminAction('marketplace_product_removed', 'marketplace_product', product.id, { name: product.name });
-    render();
-  }));
+  renderAdminFurgoVouchers();
+
   document.querySelectorAll('[data-copy-supplier-order]').forEach((button) => button.addEventListener('click', async () => {
     const order = loadMarketplaceOrders().find((item) => item.id === button.dataset.copySupplierOrder);
     if (!order) return;
@@ -1574,10 +1882,19 @@ function setupAdminMarketplace() {
       const reason = window.prompt('Enter a reason for rejecting this transfer:');
       if (!reason?.trim()) return;
       order.paymentStatus = 'Payment Rejected'; order.status = 'Payment Rejected'; order.paymentRejectionReason = reason.trim();
+      order.inventoryRestoredAt = new Date().toISOString();
       const products = loadMarketplaceProducts();
       order.items.forEach((item) => { const variant = products.find((product) => product.id === item.productId)?.variants.find((entry) => entry.id === item.variantId); if (variant) variant.stock = Number(variant.stock) + Number(item.quantity); });
       localStorage.setItem(marketplaceProductsKey, JSON.stringify(products));
-    } else { order.paymentStatus = 'Paid'; order.status = 'Paid / Processing'; }
+    } else {
+      if (order.inventoryRestoredAt) {
+        const products = loadMarketplaceProducts();
+        order.items.forEach((item) => { const variant = products.find((product) => product.id === item.productId)?.variants.find((entry) => entry.id === item.variantId); if (variant) variant.stock = Math.max(0, Number(variant.stock) - Number(item.quantity)); });
+        localStorage.setItem(marketplaceProductsKey, JSON.stringify(products));
+        delete order.inventoryRestoredAt;
+      }
+      order.paymentStatus = 'Paid'; order.status = 'Paid / Processing';
+    }
     localStorage.setItem(marketplaceOrdersKey, JSON.stringify(orders));
     void recordAdminAction(button.hasAttribute('data-reject-payment') ? 'marketplace_payment_rejected' : 'marketplace_payment_approved', 'marketplace_order', order.reference || order.id, { status: order.paymentStatus });
     render();
@@ -1594,11 +1911,11 @@ function setupAdminMarketplace() {
   document.querySelector('[data-export-market-csv]')?.addEventListener('click', () => {
     const supplier = document.querySelector('[data-market-export-supplier]').value;
     const products = loadMarketplaceProducts();
-    const rows = [['Order Reference', 'Date', 'Status', 'Customer', 'Phone', 'Address', 'Supplier', 'Supplier SKU', 'Item', 'Variant', 'Quantity', 'Retail Unit Price', 'Cost Unit Price']];
+    const rows = [['Order Reference', 'Date', 'Status', 'Customer', 'Phone', 'Address', 'Supplier', 'Item', 'Variant', 'Quantity', 'Retail Unit Price', 'Cost Unit Price']];
     loadMarketplaceOrders().forEach((order) => order.items.forEach((item) => {
       const variant = products.find((product) => product.id === item.productId)?.variants.find((entry) => entry.id === item.variantId);
       const supplierName = variant?.supplierId || variant?.supplier || item.supplierId || 'Unassigned';
-      if (!supplier || supplier === supplierName) rows.push([order.reference, order.date, order.status, order.customerName, order.deliveryPhone || order.address?.phone || order.customerPhone, `${order.address?.street || ''}, ${order.address?.postcode || ''} ${order.address?.city || ''}, ${order.address?.state || ''}`, supplierName, variant?.supplierSku || item.supplierSku || '', item.name, item.variantLabel, item.quantity, item.unitPrice, variant?.cost ?? item.cost ?? 0]);
+      if (!supplier || supplier === supplierName) rows.push([order.reference, order.date, order.status, order.customerName, order.deliveryPhone || order.address?.phone || order.customerPhone, `${order.address?.street || ''}, ${order.address?.postcode || ''} ${order.address?.city || ''}, ${order.address?.state || ''}`, supplierName, item.name, item.variantLabel, item.quantity, item.unitPrice, variant?.cost ?? item.cost ?? 0]);
     }));
     const csv = rows.map((row) => row.map((cell) => `"${String(cell ?? '').replace(/"/g, '""')}"`).join(',')).join('\r\n');
     const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
@@ -1614,6 +1931,846 @@ function setupAdminMarketplace() {
     window.addEventListener('afterprint', () => document.querySelectorAll('.market-print-hidden').forEach((item) => item.classList.remove('market-print-hidden')), { once: true });
     window.print();
   });
+}
+
+// Supplier users can submit products and see only order lines assigned to their supplier.
+function setupMarketplaceSupplierPortal() {
+  setupPortalNotifications();
+  const supplierProfile = (() => { try { return JSON.parse(sessionStorage.getItem('furgo-demo-user-profile') || '{}'); } catch { return {}; } })();
+  const supplierProfileForm = document.querySelector('[data-supplier-profile-form]');
+  if (supplierProfileForm) {
+    const photoInput = supplierProfileForm.querySelector('[data-supplier-profile-photo]');
+    const photoPreview = supplierProfileForm.querySelector('[data-supplier-profile-preview]');
+    const cropDialog = supplierProfileForm.querySelector('[data-supplier-crop-dialog]');
+    const cropViewport = supplierProfileForm.querySelector('[data-supplier-crop-viewport]');
+    const cropImage = supplierProfileForm.querySelector('[data-supplier-crop-image]');
+    const cropZoom = supplierProfileForm.querySelector('[data-supplier-crop-zoom]');
+    const feedback = supplierProfileForm.querySelector('[data-supplier-profile-feedback]');
+    let cropObjectUrl = '';
+    let cropLayout = null;
+    let cropSourceImage = null;
+    let pendingPhoto = '';
+    const setProfileFeedback = (message, isError = false) => {
+      feedback.textContent = message;
+      feedback.classList.toggle('is-error', isError);
+    };
+    const clampCropPosition = () => {
+      if (!cropLayout) return;
+      cropLayout.left = Math.min(0, Math.max(cropLayout.size - cropLayout.width, cropLayout.left));
+      cropLayout.top = Math.min(0, Math.max(cropLayout.size - cropLayout.height, cropLayout.top));
+      cropImage.style.width = `${cropLayout.width}px`;
+      cropImage.style.height = `${cropLayout.height}px`;
+      cropImage.style.left = `${cropLayout.left}px`;
+      cropImage.style.top = `${cropLayout.top}px`;
+    };
+    const closeCropper = () => {
+      cropSourceImage = null;
+      cropImage.removeAttribute('src');
+      if (cropObjectUrl) URL.revokeObjectURL(cropObjectUrl);
+      cropObjectUrl = '';
+      cropLayout = null;
+      photoInput.value = '';
+    };
+    const openCropper = async (file) => {
+      if (!file.type.startsWith('image/')) throw new Error('Choose an image file.');
+      cropObjectUrl = URL.createObjectURL(file);
+      cropImage.src = cropObjectUrl;
+      await cropImage.decode();
+      cropSourceImage = cropImage;
+      cropDialog.showModal();
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+      const size = cropViewport.getBoundingClientRect().width || Math.min(window.innerWidth * 0.72, 300);
+      const scale = Math.max(size / cropImage.naturalWidth, size / cropImage.naturalHeight);
+      cropLayout = { size, baseWidth: cropImage.naturalWidth * scale, baseHeight: cropImage.naturalHeight * scale };
+      cropLayout.width = cropLayout.baseWidth;
+      cropLayout.height = cropLayout.baseHeight;
+      cropLayout.left = (size - cropLayout.width) / 2;
+      cropLayout.top = (size - cropLayout.height) / 2;
+      cropZoom.value = '1';
+      clampCropPosition();
+    };
+    photoInput.addEventListener('change', async () => {
+      const file = photoInput.files?.[0];
+      if (!file) return;
+      try { await openCropper(file); setProfileFeedback(''); }
+      catch (error) { if (cropDialog.open) cropDialog.close(); setProfileFeedback(error.message || 'That photo could not be loaded.', true); }
+    });
+    cropZoom.addEventListener('input', () => {
+      if (!cropLayout) return;
+      const centerX = cropLayout.left + cropLayout.width / 2;
+      const centerY = cropLayout.top + cropLayout.height / 2;
+      const zoom = Number(cropZoom.value);
+      cropLayout.width = cropLayout.baseWidth * zoom;
+      cropLayout.height = cropLayout.baseHeight * zoom;
+      cropLayout.left = centerX - cropLayout.width / 2;
+      cropLayout.top = centerY - cropLayout.height / 2;
+      clampCropPosition();
+    });
+    cropViewport.addEventListener('pointerdown', (event) => {
+      if (!cropLayout) return;
+      cropViewport.setPointerCapture(event.pointerId);
+      cropViewport.dataset.dragX = String(event.clientX);
+      cropViewport.dataset.dragY = String(event.clientY);
+    });
+    cropViewport.addEventListener('pointermove', (event) => {
+      if (!cropLayout || !cropViewport.hasPointerCapture(event.pointerId)) return;
+      cropLayout.left += event.clientX - Number(cropViewport.dataset.dragX);
+      cropLayout.top += event.clientY - Number(cropViewport.dataset.dragY);
+      cropViewport.dataset.dragX = String(event.clientX);
+      cropViewport.dataset.dragY = String(event.clientY);
+      clampCropPosition();
+    });
+    cropViewport.addEventListener('keydown', (event) => {
+      if (!cropLayout) return;
+      const step = event.shiftKey ? 10 : 2;
+      if (event.key === 'ArrowLeft') cropLayout.left -= step;
+      else if (event.key === 'ArrowRight') cropLayout.left += step;
+      else if (event.key === 'ArrowUp') cropLayout.top -= step;
+      else if (event.key === 'ArrowDown') cropLayout.top += step;
+      else return;
+      event.preventDefault();
+      clampCropPosition();
+    });
+    supplierProfileForm.querySelector('[data-supplier-cancel-crop]').addEventListener('click', () => cropDialog.close());
+    supplierProfileForm.querySelector('[data-supplier-use-crop]').addEventListener('click', () => {
+      if (!cropSourceImage || !cropLayout) return;
+      const scale = cropLayout.width / cropSourceImage.naturalWidth;
+      const canvas = document.createElement('canvas');
+      canvas.width = canvas.height = 512;
+      canvas.getContext('2d').drawImage(cropSourceImage, -cropLayout.left / scale, -cropLayout.top / scale, cropLayout.size / scale, cropLayout.size / scale, 0, 0, 512, 512);
+      pendingPhoto = canvas.toDataURL('image/jpeg', 0.88);
+      photoPreview.src = pendingPhoto;
+      supplierProfileForm.querySelector('.supplier-profile-photo').classList.add('has-photo');
+      supplierProfileForm.querySelector('.pet-photo-prompt').textContent = 'Change Photo';
+      cropDialog.close();
+      setProfileFeedback('Photo ready. Save your profile to apply the change.');
+    });
+    cropDialog.addEventListener('close', closeCropper);
+    void (async () => {
+      const { data: authData } = await supabase.auth.getUser();
+      if (!authData.user) return;
+      const { data, error } = await supabase.from('profiles').select('avatar_path,supplier_contact_phone').eq('id', authData.user.id).maybeSingle();
+      if (error) { console.warn('Supplier profile details could not load:', error); return; }
+      const phoneInput = supplierProfileForm.elements.contactPhone;
+      if (phoneInput && data?.supplier_contact_phone) phoneInput.value = data.supplier_contact_phone;
+      if (data?.avatar_path) {
+        const { data: signed, error: photoError } = await supabase.storage.from('supplier-profile-photos').createSignedUrl(data.avatar_path, 3600);
+        if (!photoError && signed?.signedUrl) {
+          photoPreview.src = signed.signedUrl;
+          supplierProfileForm.querySelector('.supplier-profile-photo').classList.add('has-photo');
+          supplierProfileForm.querySelector('.pet-photo-prompt').textContent = 'Change Photo';
+        }
+      }
+    })();
+    supplierProfileForm.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      if (!supplierProfileForm.reportValidity()) return;
+      const saveButton = supplierProfileForm.querySelector('[type="submit"]');
+      saveButton.disabled = true;
+      setProfileFeedback('Saving profile…');
+      let uploadedPath = '';
+      try {
+        const { data: authData, error: authError } = await supabase.auth.getUser();
+        if (authError) throw authError;
+        if (!authData.user) throw new Error('Please sign in again to update your profile.');
+        const { data: existing, error: existingError } = await supabase.from('profiles').select('avatar_path').eq('id', authData.user.id).maybeSingle();
+        if (existingError) throw existingError;
+        if (pendingPhoto) {
+          const blob = await (await fetch(pendingPhoto)).blob();
+          uploadedPath = `${authData.user.id}/profile-${crypto.randomUUID()}.jpg`;
+          const { error: uploadError } = await supabase.storage.from('supplier-profile-photos').upload(uploadedPath, blob, { contentType: 'image/jpeg', upsert: false });
+          if (uploadError) throw uploadError;
+        }
+        const displayName = supplierProfileForm.elements.displayName.value.trim();
+        const contactPhone = supplierProfileForm.elements.contactPhone.value.trim();
+        const updates = { display_name: displayName, supplier_contact_phone: contactPhone };
+        if (uploadedPath) updates.avatar_path = uploadedPath;
+        const { error: profileError } = await supabase.from('profiles').update(updates).eq('id', authData.user.id);
+        if (profileError) throw profileError;
+        const { error: metadataError } = await supabase.auth.updateUser({ data: { display_name: displayName } });
+        if (metadataError) console.warn('Supplier profile name saved, but Auth metadata could not be refreshed:', metadataError);
+        if (uploadedPath && existing?.avatar_path) await supabase.storage.from('supplier-profile-photos').remove([existing.avatar_path]);
+        const savedProfile = { ...supplierProfile, name: displayName, supplierContactPhone: contactPhone, ...(uploadedPath ? { avatarPath: uploadedPath } : {}) };
+        sessionStorage.setItem('furgo-demo-user-profile', JSON.stringify(savedProfile));
+        supplierProfile.name = displayName;
+        supplierProfile.supplierContactPhone = contactPhone;
+        if (uploadedPath) {
+          supplierProfile.avatarPath = uploadedPath;
+          const { data: signed } = await supabase.storage.from('supplier-profile-photos').createSignedUrl(uploadedPath, 3600);
+          if (signed?.signedUrl) photoPreview.src = signed.signedUrl;
+        }
+        pendingPhoto = '';
+        setProfileFeedback('Profile saved.');
+      } catch (error) {
+        if (uploadedPath) await supabase.storage.from('supplier-profile-photos').remove([uploadedPath]);
+        console.error('Supplier profile could not be saved:', error);
+        setProfileFeedback(error.message || 'Your profile could not be saved. Please try again.', true);
+      } finally { saveButton.disabled = false; }
+    });
+  }
+  const directorNotification = document.querySelector('[data-marketplace-director-notification]');
+  if (directorNotification) {
+    void supabase.from('marketplace_product_submissions').select('id', { count: 'exact', head: true }).eq('status', 'Pending Review')
+      .then(({ count, error }) => {
+        if (error) throw error;
+        if (!count) { directorNotification.hidden = true; return; }
+        directorNotification.hidden = false;
+        directorNotification.textContent = String(count);
+        directorNotification.setAttribute('aria-label', `${count} supplier product requests need review`);
+      }).catch((error) => console.warn('Director Marketplace notification could not load:', error));
+  }
+  const supplierForm = document.querySelector('[data-marketplace-supplier-product]');
+  const supplierEditor = document.querySelector('[data-supplier-editor]');
+  const supplierPhotoList = document.querySelector('[data-supplier-photo-list]');
+  let supplierEditorImages = [];
+  const clearSupplierPhotoPreviews = () => supplierEditorImages.forEach((photo) => {
+    if (photo.previewUrl?.startsWith('blob:')) URL.revokeObjectURL(photo.previewUrl);
+  });
+  const renderSupplierPhotoList = () => {
+    if (!supplierPhotoList) return;
+    supplierPhotoList.hidden = supplierEditorImages.length === 0;
+    supplierPhotoList.innerHTML = supplierEditorImages.map((photo, index) => {
+      const preview = photo.previewUrl?.startsWith('blob:') ? photo.previewUrl : safeMarketplaceImage(photo.url);
+      return `<article class="supplier-photo-item"><img src="${escapeHTML(preview || '')}" alt="Product photo ${index + 1}" /><span>${index === 0 ? 'Cover photo' : `Photo ${index + 1}`}</span><label class="supplier-photo-change">Change<input type="file" accept="image/png,image/jpeg,image/webp,image/gif" data-replace-supplier-photo="${index}" aria-label="Change product photo ${index + 1}" /></label><button type="button" data-remove-supplier-photo="${index}" aria-label="Delete product photo ${index + 1}">Delete</button></article>`;
+    }).join('');
+  };
+  const resetSupplierEditor = () => {
+    supplierForm?.reset();
+    clearSupplierPhotoPreviews();
+    supplierEditorImages = [];
+    renderSupplierPhotoList();
+    if (supplierForm) {
+      supplierForm.elements.productId.value = '';
+      supplierForm.elements.variantId.value = '';
+      supplierForm.elements.pendingSubmissionId.value = '';
+      supplierForm.querySelector('[data-supplier-submit-label]').textContent = 'Submit Product';
+      supplierForm.querySelector('[data-supplier-cancel-edit]').textContent = 'Cancel';
+    }
+    const title = document.querySelector('[data-supplier-form-title]');
+    if (title) title.textContent = 'Add a Product';
+  };
+  document.querySelector('[data-supplier-add-product]')?.addEventListener('click', () => {
+    resetSupplierEditor();
+    if (supplierEditor) supplierEditor.hidden = false;
+    supplierEditor?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  });
+  document.querySelectorAll('[data-supplier-tab]').forEach((button) => button.addEventListener('click', () => {
+    const target = button.dataset.supplierTab;
+    const supplierNavIcons = { home: ['Icon-01.png', 'Icon-02.png'], orders: ['Icon-03.png', 'Icon-04.png'], help: ['Icon-05.png', 'Icon-06.png'], profile: ['Icon-07.png', 'Icon-08.png'] };
+    document.querySelectorAll('[data-supplier-section]').forEach((section) => { section.hidden = section.dataset.supplierSection !== target; });
+    document.querySelectorAll('[data-supplier-tab]').forEach((tab) => {
+      const active = tab === button;
+      tab.classList.toggle('active', active);
+      const icons = supplierNavIcons[tab.dataset.supplierTab];
+      const image = tab.querySelector('img');
+      if (image && icons) image.src = `Image/Icon/${active ? icons[1] : icons[0]}`;
+    });
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }));
+  const supplierVoucherForm = document.querySelector('[data-supplier-voucher-form]');
+  const supplierVoucherList = document.querySelector('[data-supplier-voucher-list]');
+  const supplierVoucherFeedback = document.querySelector('[data-supplier-voucher-feedback]');
+  const setSupplierVoucherFeedback = (message, isError = false) => {
+    if (!supplierVoucherFeedback) return;
+    supplierVoucherFeedback.textContent = message;
+    supplierVoucherFeedback.classList.toggle('is-error', isError);
+  };
+  const updateSupplierVoucherEnabledLabel = () => {
+    if (!supplierVoucherForm) return;
+    const label = supplierVoucherForm.querySelector('[data-voucher-enabled-label]');
+    if (label) {
+      const active = supplierVoucherForm.elements.enabled.checked;
+      label.textContent = `Status: ${active ? 'Active' : 'Not Active'}`;
+      label.classList.toggle('is-active', active);
+      label.classList.toggle('is-inactive', !active);
+    }
+  };
+  const updateSupplierVoucherTypeFields = () => {
+    if (!supplierVoucherForm) return;
+    const freeShipping = supplierVoucherForm.elements.discountType.value === 'free_shipping';
+    const valueField = supplierVoucherForm.querySelector('[data-supplier-discount-value-field]');
+    const valueInput = supplierVoucherForm.elements.discountValue;
+    if (valueField) valueField.hidden = freeShipping;
+    valueInput.required = !freeShipping;
+    valueInput.disabled = freeShipping;
+  };
+  supplierVoucherForm?.elements.discountType.addEventListener('change', updateSupplierVoucherTypeFields);
+  updateSupplierVoucherTypeFields();
+  supplierVoucherForm?.elements.enabled.addEventListener('change', updateSupplierVoucherEnabledLabel);
+  const resetSupplierVoucherForm = () => {
+    supplierVoucherForm?.reset();
+    if (!supplierVoucherForm) return;
+    supplierVoucherForm.elements.voucherId.value = '';
+    supplierVoucherForm.elements.minimumSpend.value = '0';
+    supplierVoucherForm.elements.enabled.checked = true;
+    updateSupplierVoucherEnabledLabel();
+    updateSupplierVoucherTypeFields();
+    supplierVoucherForm.querySelector('[data-voucher-submit]').textContent = 'Save Voucher';
+    supplierVoucherForm.querySelector('[data-voucher-cancel]').hidden = true;
+  };
+  const loadSupplierVouchers = async () => {
+    if (!supplierVoucherList) return [];
+    const { data, error } = await supabase.from('marketplace_supplier_vouchers').select('*').order('created_at', { ascending: false });
+    if (error) throw error;
+    supplierVoucherList.innerHTML = data?.length ? data.map((voucher) => {
+      const discount = voucher.discount_type === 'free_shipping' ? 'Free shipping' : voucher.discount_type === 'percent' ? `${Number(voucher.discount_value)}% off` : `MYR ${Number(voucher.discount_value).toFixed(2)} off`;
+      const expiry = voucher.expires_at ? ` · Expires ${new Date(`${voucher.expires_at}T00:00:00`).toLocaleDateString()}` : '';
+      return `<article class="supplier-voucher-card"><div><span class="supplier-voucher-state ${voucher.enabled ? 'is-active' : ''}">${voucher.enabled ? 'Active' : 'Inactive'}</span><h3>${escapeHTML(voucher.code)}</h3><p>${escapeHTML(discount)}${Number(voucher.minimum_spend) ? ` · Minimum spend MYR ${Number(voucher.minimum_spend).toFixed(2)}` : ''}${escapeHTML(expiry)}</p></div><div class="supplier-voucher-actions"><button type="button" data-edit-supplier-voucher="${escapeHTML(voucher.id)}">Edit</button><button type="button" data-delete-supplier-voucher="${escapeHTML(voucher.id)}">Delete</button></div></article>`;
+    }).join('') : '<p class="supplier-empty">You have not created any Shop Vouchers yet.</p>';
+    supplierVoucherList.dataset.vouchers = JSON.stringify(data || []);
+    return data || [];
+  };
+  supplierVoucherForm?.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const submit = supplierVoucherForm.querySelector('[data-voucher-submit]');
+    submit.disabled = true;
+    try {
+      const { data: authData, error: authError } = await supabase.auth.getUser();
+      if (authError || !authData.user) throw authError || new Error('Sign in to manage your vouchers.');
+      const discountType = supplierVoucherForm.elements.discountType.value;
+      const discountValue = discountType === 'free_shipping' ? null : Number(supplierVoucherForm.elements.discountValue.value);
+      const minimumSpend = Number(supplierVoucherForm.elements.minimumSpend.value || 0);
+      if (discountType !== 'free_shipping' && (!Number.isFinite(discountValue) || discountValue <= 0 || (discountType === 'percent' && discountValue > 100))) throw new Error('Enter a valid discount (percentage must be 100 or less).');
+      if (!Number.isFinite(minimumSpend) || minimumSpend < 0) throw new Error('Minimum spend cannot be negative.');
+      const payload = { supplier_user_id: authData.user.id, discount_type: discountType, discount_value: discountValue, minimum_spend: minimumSpend, expires_at: supplierVoucherForm.elements.expiresAt.value || null, enabled: supplierVoucherForm.elements.enabled.checked };
+      const voucherId = supplierVoucherForm.elements.voucherId.value;
+      const query = voucherId
+        ? supabase.from('marketplace_supplier_vouchers').update(payload).eq('id', voucherId)
+        : supabase.from('marketplace_supplier_vouchers').insert(payload);
+      const { error } = await query;
+      if (error) throw error;
+      resetSupplierVoucherForm();
+      setSupplierVoucherFeedback(voucherId ? 'Voucher updated.' : 'Voucher saved.');
+      await loadSupplierVouchers();
+    } catch (error) { setSupplierVoucherFeedback(error.message || 'Voucher could not be saved.', true); }
+    finally { submit.disabled = false; }
+  });
+  supplierVoucherForm?.querySelector('[data-voucher-cancel]')?.addEventListener('click', resetSupplierVoucherForm);
+  supplierVoucherList?.addEventListener('click', async (event) => {
+    const editButton = event.target.closest('[data-edit-supplier-voucher]');
+    const deleteButton = event.target.closest('[data-delete-supplier-voucher]');
+    const vouchers = (() => { try { return JSON.parse(supplierVoucherList.dataset.vouchers || '[]'); } catch { return []; } })();
+    if (editButton) {
+      const voucher = vouchers.find((entry) => entry.id === editButton.dataset.editSupplierVoucher);
+      if (!voucher || !supplierVoucherForm) return;
+      supplierVoucherForm.elements.voucherId.value = voucher.id;
+      supplierVoucherForm.elements.discountType.value = voucher.discount_type;
+      updateSupplierVoucherTypeFields();
+      supplierVoucherForm.elements.discountValue.value = voucher.discount_value;
+      supplierVoucherForm.elements.minimumSpend.value = voucher.minimum_spend;
+      supplierVoucherForm.elements.expiresAt.value = voucher.expires_at || '';
+      supplierVoucherForm.elements.enabled.checked = voucher.enabled;
+      updateSupplierVoucherEnabledLabel();
+      supplierVoucherForm.querySelector('[data-voucher-submit]').textContent = 'Update Voucher';
+      supplierVoucherForm.querySelector('[data-voucher-cancel]').hidden = false;
+      supplierVoucherForm.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+    if (deleteButton) {
+      if (!window.confirm('Delete this Shop Voucher?')) return;
+      const { error } = await supabase.from('marketplace_supplier_vouchers').delete().eq('id', deleteButton.dataset.deleteSupplierVoucher);
+      if (error) { setSupplierVoucherFeedback(error.message || 'Voucher could not be deleted.', true); return; }
+      setSupplierVoucherFeedback('Voucher deleted.');
+      try { await loadSupplierVouchers(); } catch (loadError) { setSupplierVoucherFeedback(loadError.message, true); }
+    }
+  });
+  if (supplierVoucherList) void loadSupplierVouchers().catch((error) => { supplierVoucherList.innerHTML = `<p class="supplier-empty">Shop Vouchers could not be loaded: ${escapeHTML(error.message || 'Supabase request failed')}</p>`; });
+
+  let supplierCatalog = [];
+  let supplierSubmissions = [];
+  let supplierOrderStatusFilter = 'new';
+  const applySupplierOrderStatusFilter = () => {
+    const ordersTarget = document.querySelector('[data-supplier-orders]');
+    if (!ordersTarget) return;
+    const cards = [...ordersTarget.querySelectorAll('[data-supplier-order-status]')];
+    let visibleCount = 0;
+    cards.forEach((card) => {
+      const matches = card.dataset.supplierOrderStatus.split(',').includes(supplierOrderStatusFilter);
+      card.hidden = !matches;
+      if (matches) visibleCount += 1;
+    });
+    const empty = ordersTarget.querySelector('[data-supplier-filter-empty]');
+    if (cards.length && !visibleCount) {
+      const notice = empty || document.createElement('p');
+      notice.className = 'supplier-empty';
+      notice.dataset.supplierFilterEmpty = '';
+      notice.textContent = `No orders in ${({ new: 'New Order', progressing: 'Progressing Order', completed: 'Completed', cancelled: 'Cancelled', returns: 'Return or Refund' })[supplierOrderStatusFilter]}.`;
+      if (!empty) ordersTarget.append(notice);
+    } else empty?.remove();
+    document.querySelectorAll('[data-supplier-order-status-filter]').forEach((button) => {
+      const active = button.dataset.supplierOrderStatusFilter === supplierOrderStatusFilter;
+      button.classList.toggle('is-active', active);
+      button.setAttribute('aria-pressed', String(active));
+    });
+  };
+  document.querySelector('[data-supplier-order-status-tabs]')?.addEventListener('click', (event) => {
+    const button = event.target.closest('[data-supplier-order-status-filter]');
+    if (!button) return;
+    supplierOrderStatusFilter = button.dataset.supplierOrderStatusFilter;
+    applySupplierOrderStatusFilter();
+  });
+  const setSupplierFeedback = (message, isError = false) => {
+    const feedback = document.querySelector('[data-supplier-feedback]');
+    if (!feedback) return;
+    feedback.textContent = message;
+    feedback.classList.toggle('is-error', isError);
+  };
+  const validateSupplierPhotos = async (files, totalCount = files.length) => {
+    if (totalCount > 5) return 'A product can have up to five photos.';
+    for (const file of files) {
+      if (!file.type.startsWith('image/')) return `${file.name} is not a supported image.`;
+      if (file.size > 2 * 1024 * 1024) return `${file.name} is larger than 2 MB.`;
+      const imageUrl = URL.createObjectURL(file);
+      const dimensions = await new Promise((resolve) => {
+        const image = new Image();
+        image.onload = () => resolve({ width: image.naturalWidth, height: image.naturalHeight });
+        image.onerror = () => resolve(null);
+        image.src = imageUrl;
+      });
+      URL.revokeObjectURL(imageUrl);
+      if (!dimensions) return `${file.name} could not be read as an image.`;
+      const { width, height } = dimensions;
+      if (width !== height) return `${file.name} must be square (1:1).`;
+      if (width < 500 || width > 2000) return `${file.name} must be between 500 × 500 and 2000 × 2000 pixels.`;
+    }
+    return '';
+  };
+  supplierForm?.elements.photos.addEventListener('change', async (event) => {
+    const input = event.currentTarget;
+    const files = [...input.files];
+    if (!files.length) return;
+    const validationError = await validateSupplierPhotos(files, supplierEditorImages.length + files.length);
+    input.value = '';
+    if (validationError) { setSupplierFeedback(validationError, true); return; }
+    supplierEditorImages.push(...files.map((file) => ({ file, previewUrl: URL.createObjectURL(file) })));
+    renderSupplierPhotoList();
+    setSupplierFeedback('Photo added. Save the product to apply photo changes.');
+  });
+  supplierPhotoList?.addEventListener('click', (event) => {
+    const removeButton = event.target.closest('[data-remove-supplier-photo]');
+    if (!removeButton) return;
+    const index = Number(removeButton.dataset.removeSupplierPhoto);
+    const [removed] = supplierEditorImages.splice(index, 1);
+    if (removed?.previewUrl?.startsWith('blob:')) URL.revokeObjectURL(removed.previewUrl);
+    renderSupplierPhotoList();
+    setSupplierFeedback('Photo removed. Save the product to apply photo changes.');
+  });
+  supplierPhotoList?.addEventListener('change', async (event) => {
+    const input = event.target.closest('[data-replace-supplier-photo]');
+    const file = input?.files?.[0];
+    if (!input || !file) return;
+    const index = Number(input.dataset.replaceSupplierPhoto);
+    const validationError = await validateSupplierPhotos([file], supplierEditorImages.length);
+    input.value = '';
+    if (validationError) { setSupplierFeedback(validationError, true); return; }
+    const previous = supplierEditorImages[index];
+    if (previous?.previewUrl?.startsWith('blob:')) URL.revokeObjectURL(previous.previewUrl);
+    supplierEditorImages[index] = { file, previewUrl: URL.createObjectURL(file) };
+    renderSupplierPhotoList();
+    setSupplierFeedback('Photo changed. Save the product to apply photo changes.');
+  });
+  const refreshSupplierPortal = async () => {
+    const submissionsTarget = document.querySelector('[data-supplier-products]');
+    const ordersTarget = document.querySelector('[data-supplier-orders]');
+    if (!submissionsTarget && !ordersTarget) return;
+    const [submissionsResult, catalogResult, ordersResult] = await Promise.all([
+      supabase.from('marketplace_product_submissions').select('*').order('submitted_at', { ascending: false }),
+      supabase.rpc('get_marketplace_supplier_catalog'),
+      supabase.rpc('get_marketplace_supplier_orders'),
+    ]);
+    if (submissionsResult.error) throw submissionsResult.error;
+    if (catalogResult.error) throw catalogResult.error;
+    if (ordersResult.error) throw ordersResult.error;
+    supplierSubmissions = submissionsResult.data || [];
+    supplierCatalog = catalogResult.data || [];
+    const supplierOrders = (ordersResult.data || []).map((row) => row.order_details || row);
+    const newOrderCount = supplierOrders.filter((order) => adminOrderStage({ ...order, serviceId: 'marketplace' }) === 'new').length;
+    const progressingOrderCount = supplierOrders.filter((order) => adminOrderStage({ ...order, serviceId: 'marketplace' }) === 'progressing').length;
+    const newOrderCountTarget = document.querySelector('[data-supplier-new-order-count]');
+    const progressingOrderCountTarget = document.querySelector('[data-supplier-progressing-order-count]');
+    if (newOrderCountTarget) newOrderCountTarget.textContent = String(newOrderCount);
+    if (progressingOrderCountTarget) progressingOrderCountTarget.textContent = String(progressingOrderCount);
+    if (submissionsTarget) submissionsTarget.innerHTML = supplierProductRows(supplierCatalog, supplierSubmissions);
+    if (ordersTarget) {
+      ordersTarget.innerHTML = supplierOrderRows(supplierOrders);
+      applySupplierOrderStatusFilter();
+      for (const link of ordersTarget.querySelectorAll('[data-marketplace-return-photo]')) {
+        const { data } = await supabase.storage.from('marketplace-return-evidence').createSignedUrl(link.dataset.marketplaceReturnPhoto, 300);
+        if (data?.signedUrl) link.href = data.signedUrl;
+        else { link.removeAttribute('href'); link.setAttribute('aria-disabled', 'true'); }
+      }
+    }
+  };
+  const setShipmentFeedback = (message, isError = false) => {
+    const feedback = document.querySelector('[data-supplier-shipment-feedback]');
+    if (!feedback) return;
+    feedback.textContent = message;
+    feedback.classList.toggle('is-error', isError);
+  };
+  const setSupplierListFeedback = (message, isError = false) => {
+    const feedback = document.querySelector('[data-supplier-list-feedback]');
+    if (!feedback) return;
+    feedback.textContent = message;
+    feedback.classList.toggle('is-error', isError);
+  };
+  supplierForm?.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    if (!supplierForm.reportValidity()) return;
+    const fields = supplierForm.elements;
+    const files = supplierEditorImages.filter((photo) => photo.file).map((photo) => photo.file);
+    const photoValidationError = await validateSupplierPhotos(files, supplierEditorImages.length);
+    if (photoValidationError) {
+      setSupplierFeedback(photoValidationError, true);
+      return;
+    }
+    const submit = supplierForm.querySelector('[type="submit"]');
+    submit.disabled = true;
+    const editingProductId = fields.productId.value.trim();
+    const pendingSubmissionId = fields.pendingSubmissionId.value.trim();
+    const action = pendingSubmissionId ? 'pending_edit' : editingProductId ? 'edit' : 'add';
+    setSupplierFeedback(action === 'edit' ? 'Saving product details…' : action === 'pending_edit' ? 'Updating pending product request…' : 'Submitting product for Director review…');
+    try {
+      const submissionId = crypto.randomUUID();
+      const existingProduct = supplierCatalog.find((entry) => entry.id === editingProductId);
+      const pendingSubmission = supplierSubmissions.find((entry) => entry.id === pendingSubmissionId);
+      const pendingProduct = pendingSubmission?.product_data || {};
+      const existingVariant = existingProduct?.variants?.find((entry) => entry.id === fields.variantId.value) || existingProduct?.variants?.[0] || pendingProduct.variants?.find((entry) => entry.id === fields.variantId.value) || pendingProduct.variants?.[0];
+      const images = [];
+      for (const [index, photo] of supplierEditorImages.entries()) {
+        if (!photo.file) { images.push(photo.url); continue; }
+        const extension = photo.file.type === 'image/jpeg' ? 'jpg' : photo.file.type.split('/')[1];
+        const path = `${supplierProfile.id}/${submissionId}/${index + 1}.${extension}`;
+        const { error: uploadError } = await supabase.storage.from('marketplace-submissions').upload(path, photo.file, { contentType: photo.file.type, upsert: false });
+        if (uploadError) throw uploadError;
+        images.push(supabase.storage.from('marketplace-submissions').getPublicUrl(path).data.publicUrl);
+      }
+      const product = {
+        id: editingProductId || pendingProduct.id || `supplier-${submissionId}`,
+        name: fields.name.value.trim(),
+        category: fields.category.value,
+        description: fields.description.value.trim(),
+        petTypes: fields.petTypes.value.trim(),
+        suitableBreeds: existingProduct?.suitableBreeds || pendingProduct.suitableBreeds || '',
+        issues: existingProduct?.issues || pendingProduct.issues || '',
+        ingredients: fields.ingredients.value.trim(),
+        nutrition: fields.nutrition.value.trim(),
+        images,
+        hidden: false,
+        productCode: existingProduct?.productCode || pendingProduct.productCode || '',
+        variants: [{ id: existingVariant?.id || `variant-${submissionId}`, label: fields.variantLabel.value.trim(), price: Number(fields.price.value), stock: Number(fields.stock.value), supplierId: supplierProfile.supplierName, supplier: supplierProfile.supplierName, cost: existingVariant?.cost ?? 0, frozen: Boolean(existingVariant?.frozen) }],
+      };
+      let feedbackMessage;
+      if (action === 'pending_edit') {
+        const { error } = await supabase.rpc('update_marketplace_pending_product_request', { p_submission_id: pendingSubmissionId, p_product_data: product });
+        if (error) throw error;
+        feedbackMessage = 'Product request updated and resubmitted. It is waiting for Director approval.';
+      } else if (action === 'edit') {
+        const { data, error } = await supabase.rpc('edit_marketplace_supplier_product', { p_product_id: editingProductId, p_product_data: product });
+        if (error) throw error;
+        feedbackMessage = data?.variant_change_pending
+          ? 'Product details saved. Price or variant changes are pending Director approval.'
+          : 'Product details saved and are now live in the Marketplace.';
+      } else {
+        const { error } = await supabase.rpc('submit_marketplace_supplier_product', { p_action: 'add', p_product_id: null, p_product_data: product });
+        if (error) throw error;
+        feedbackMessage = 'Product submitted. It will appear in the Marketplace after Director approval.';
+      }
+      supplierForm.reset();
+      resetSupplierEditor();
+      supplierEditor.hidden = true;
+      setSupplierFeedback(feedbackMessage);
+      await refreshSupplierPortal();
+    } catch (error) {
+      console.error('Supplier product submission failed:', error);
+      setSupplierFeedback(error.message || 'The product could not be submitted. Please try again.', true);
+    } finally { submit.disabled = false; }
+  });
+  supplierForm?.querySelector('[data-supplier-cancel-edit]')?.addEventListener('click', () => {
+    resetSupplierEditor();
+    if (supplierEditor) supplierEditor.hidden = true;
+  });
+  document.querySelector('[data-supplier-products]')?.addEventListener('click', async (event) => {
+    const editButton = event.target.closest('[data-supplier-edit-product]');
+    const actionButton = event.target.closest('[data-supplier-product-action]');
+    const editRequestButton = event.target.closest('[data-supplier-edit-request]');
+    const deleteRequestButton = event.target.closest('[data-supplier-delete-request]');
+    if (editRequestButton) {
+      const submission = supplierSubmissions.find((entry) => entry.id === editRequestButton.dataset.supplierEditRequest && entry.action === 'add' && ['Pending Review', 'Rejected'].includes(entry.status));
+      if (!submission) return;
+      const product = submission.product_data || {};
+      const variant = product.variants?.[0] || {};
+      const fields = supplierForm.elements;
+      resetSupplierEditor();
+      fields.pendingSubmissionId.value = submission.id;
+      fields.name.value = product.name || '';
+      fields.category.value = product.category || 'Other';
+      fields.description.value = product.description || '';
+      fields.petTypes.value = product.petTypes || '';
+      fields.ingredients.value = product.ingredients || '';
+      fields.nutrition.value = product.nutrition || '';
+      fields.price.value = Number(variant.price || 0);
+      fields.variantLabel.value = variant.label || '';
+      fields.stock.value = Number(variant.stock || 0);
+      clearSupplierPhotoPreviews();
+      supplierEditorImages = (product.images || []).map((url) => ({ url }));
+      renderSupplierPhotoList();
+      document.querySelector('[data-supplier-form-title]').textContent = `Edit ${submission.status === 'Rejected' ? 'rejected' : 'pending'} ${product.name || 'product'}`;
+      supplierForm.querySelector('[data-supplier-submit-label]').textContent = submission.status === 'Rejected' ? 'Save & Resubmit' : 'Save Request';
+      if (supplierEditor) supplierEditor.hidden = false;
+      supplierForm.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      return;
+    }
+    if (deleteRequestButton) {
+      const submission = supplierSubmissions.find((entry) => entry.id === deleteRequestButton.dataset.supplierDeleteRequest && entry.action === 'add' && ['Pending Review', 'Rejected'].includes(entry.status));
+      if (!submission) return;
+      const productName = submission.product_data?.name || 'this product';
+      if (!window.confirm(`Delete the ${submission.status === 'Rejected' ? 'rejected' : 'pending'} request for “${productName}”? This request will be withdrawn.`)) return;
+      deleteRequestButton.disabled = true;
+      setSupplierListFeedback('Deleting pending product request…');
+      const { error } = await supabase.rpc('delete_marketplace_pending_product_request', { p_submission_id: submission.id });
+      if (error) {
+        deleteRequestButton.disabled = false;
+        setSupplierListFeedback(error.message || 'The pending request could not be deleted.', true);
+        return;
+      }
+      setSupplierListFeedback('Pending product request deleted.');
+      try { await refreshSupplierPortal(); }
+      catch (refreshError) { setSupplierListFeedback(refreshError.message || 'The request was deleted, but the product list could not refresh.', true); }
+      return;
+    }
+    if (editButton) {
+      const product = supplierCatalog.find((entry) => entry.id === editButton.dataset.supplierEditProduct);
+      const variant = product?.variants?.find((entry) => entry.id === editButton.dataset.supplierVariantId) || product?.variants?.[0];
+      if (!product || !variant) return;
+      const fields = supplierForm.elements;
+      fields.productId.value = product.id;
+      fields.variantId.value = variant.id || '';
+      fields.name.value = product.name || '';
+      fields.category.value = product.category || 'Other';
+      fields.description.value = product.description || '';
+      fields.petTypes.value = product.petTypes || '';
+      fields.ingredients.value = product.ingredients || '';
+      fields.nutrition.value = product.nutrition || '';
+      fields.price.value = Number(variant.price || 0);
+      fields.variantLabel.value = variant.label || '';
+      fields.stock.value = Number(variant.stock || 0);
+      clearSupplierPhotoPreviews();
+      supplierEditorImages = (product.images || []).map((url) => ({ url }));
+      renderSupplierPhotoList();
+      document.querySelector('[data-supplier-form-title]').textContent = `Edit ${product.name}`;
+      supplierForm.querySelector('[data-supplier-submit-label]').textContent = 'Save Product';
+      if (supplierEditor) supplierEditor.hidden = false;
+      supplierForm.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      return;
+    }
+    if (!actionButton) return;
+    const product = supplierCatalog.find((entry) => entry.id === actionButton.dataset.supplierProductId);
+    if (!product) return;
+    const isHide = actionButton.dataset.supplierProductAction === 'hide';
+    const label = isHide ? (product.hidden ? 'show' : 'hide') : 'permanently delete';
+    if (!window.confirm(`${isHide ? `Do you want to ${label}` : 'Permanently delete'} “${product.name}” ${isHide ? 'in the Marketplace' : 'from the Marketplace catalog'}? This takes effect immediately.`)) return;
+    actionButton.disabled = true;
+    setSupplierFeedback(`${isHide ? 'Updating listing visibility' : 'Deleting product'}…`);
+    const { error } = await supabase.rpc('manage_marketplace_supplier_product', { p_action: isHide ? (product.hidden ? 'show' : 'hide') : 'delete', p_product_id: product.id });
+    if (error) {
+      actionButton.disabled = false;
+      setSupplierFeedback(error.message || 'The request could not be sent.', true);
+      return;
+    }
+    setSupplierFeedback(isHide ? `The listing is now ${product.hidden ? 'visible' : 'hidden'} in the Marketplace.` : 'The product has been deleted from the Marketplace catalog.');
+    try { await refreshSupplierPortal(); }
+    catch (refreshError) { setSupplierFeedback(refreshError.message || 'Request sent, but the product list could not refresh.', true); }
+  });
+  const ordersTarget = document.querySelector('[data-supplier-orders]');
+  ordersTarget?.addEventListener('click', async (event) => {
+    const button = event.target.closest('[data-supplier-return-action]');
+    if (!button) return;
+    const action = button.dataset.supplierReturnAction;
+    const reason = action === 'reject' ? window.prompt('Why are you rejecting this return? The reason will be sent to a Manager or Director for review.') : '';
+    if (action === 'reject' && !reason?.trim()) return;
+    if (action !== 'reject' && !window.confirm(action === 'approve' ? 'Approve this return request? The customer will be asked to send the product back to you.' : 'Confirm that you received the returned product?')) return;
+    button.disabled = true;
+    setShipmentFeedback(action === 'reject' ? 'Sending the case for Manager / Director review…' : 'Updating return status…');
+    const rpc = action === 'received' ? 'mark_marketplace_item_return_received' : 'respond_marketplace_item_return';
+    const args = action === 'received'
+      ? { p_return_id: button.dataset.returnId }
+      : { p_return_id: button.dataset.returnId, p_decision: action, p_reason: reason || '' };
+    const { error } = await supabase.rpc(rpc, args);
+    if (error) {
+      button.disabled = false;
+      setShipmentFeedback(error.message || 'The return status could not be updated.', true);
+      return;
+    }
+    setShipmentFeedback(action === 'reject' ? 'The case has been sent to a Manager or Director for review.' : action === 'approve' ? 'Return approved. Coordinate the return shipment with the customer.' : 'The returned product is recorded as received. A Manager or Director can now record the refund after it is sent through the original payment method.');
+    try { await refreshSupplierPortal(); }
+    catch (refreshError) { setShipmentFeedback(refreshError.message || 'The return was updated, but the order list could not refresh.', true); }
+  });
+  ordersTarget?.addEventListener('click', async (event) => {
+    const copyButton = event.target.closest('[data-copy-supplier-recipient]');
+    if (!copyButton) return;
+    const card = copyButton.closest('[data-supplier-recipient-card]');
+    if (!card) return;
+    const recipientName = card.querySelector('[data-recipient-name]')?.textContent.trim() || 'Not provided';
+    const recipientPhone = card.querySelector('[data-recipient-phone]')?.textContent.trim() || 'Not provided';
+    const recipientAddress = card.querySelector('[data-recipient-address]')?.textContent.trim() || 'Not provided';
+    const text = `Recipient Name: ${recipientName}\nRecipient Phone: ${recipientPhone}\nRecipient Address: ${recipientAddress}`;
+    const feedback = card.querySelector('[data-copy-recipient-feedback]');
+    const showCopied = (message) => { if (feedback) feedback.textContent = message; };
+    try {
+      if (!navigator.clipboard?.writeText) throw new Error('Clipboard access is unavailable.');
+      await navigator.clipboard.writeText(text);
+      showCopied('Recipient details copied.');
+    } catch {
+      const field = document.createElement('textarea');
+      field.value = text;
+      field.setAttribute('readonly', '');
+      field.style.position = 'fixed';
+      field.style.opacity = '0';
+      document.body.append(field);
+      field.select();
+      const copied = document.execCommand('copy');
+      field.remove();
+      showCopied(copied ? 'Recipient details copied.' : 'Could not copy recipient details.');
+    }
+  });
+  ordersTarget?.addEventListener('submit', async (event) => {
+    const form = event.target.closest('[data-supplier-shipping-form]');
+    if (!form) return;
+    event.preventDefault();
+    if (!form.reportValidity()) return;
+    const submit = form.querySelector('[type="submit"]');
+    submit.disabled = true;
+    setShipmentFeedback('Saving shipment details…');
+    const { error } = await supabase.rpc('update_marketplace_supplier_shipment', {
+      p_order_id: form.dataset.supplierShippingForm,
+      p_action: 'ship',
+      p_courier: form.elements.courier.value.trim(),
+      p_tracking_number: form.elements.trackingNumber.value.trim(),
+      p_tracking_url: form.elements.trackingUrl.value.trim(),
+    });
+    if (error) {
+      submit.disabled = false;
+      setShipmentFeedback(error.message || 'Shipment details could not be saved.', true);
+      return;
+    }
+    setShipmentFeedback('Tracking saved. The order has been marked as shipped.');
+    try { await refreshSupplierPortal(); }
+    catch (refreshError) { setShipmentFeedback(refreshError.message || 'Shipment saved, but the order list could not refresh.', true); }
+  });
+  ordersTarget?.addEventListener('click', async (event) => {
+    const button = event.target.closest('[data-supplier-mark-delivered]');
+    if (!button || !window.confirm('Mark this supplier shipment as delivered?')) return;
+    button.disabled = true;
+    setShipmentFeedback('Updating delivery status…');
+    const { error } = await supabase.rpc('update_marketplace_supplier_shipment', {
+      p_order_id: button.dataset.supplierMarkDelivered,
+      p_action: 'delivered',
+      p_courier: '',
+      p_tracking_number: '',
+      p_tracking_url: '',
+    });
+    if (error) {
+      button.disabled = false;
+      setShipmentFeedback(error.message || 'Delivery status could not be updated.', true);
+      return;
+    }
+    setShipmentFeedback('The shipment has been marked as delivered.');
+    try { await refreshSupplierPortal(); }
+    catch (refreshError) { setShipmentFeedback(refreshError.message || 'Delivery status saved, but the order list could not refresh.', true); }
+  });
+  if (supplierForm || document.querySelector('[data-supplier-orders]')) {
+    void refreshSupplierPortal().catch((error) => {
+      console.error('Supplier portal data could not load:', error);
+      setSupplierFeedback('Supplier data could not load. Confirm the supplier portal migration has been applied.', true);
+      document.querySelectorAll('[data-supplier-products], [data-supplier-orders]').forEach((node) => { node.innerHTML = '<p>Supplier data is temporarily unavailable.</p>'; });
+    });
+    if (document.documentElement.dataset.marketplaceSupplierReturnRealtime !== 'true') {
+      document.documentElement.dataset.marketplaceSupplierReturnRealtime = 'true';
+      supabase.channel('marketplace-supplier-return-updates')
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'marketplace_item_returns' }, () => {
+          void refreshSupplierPortal().catch((error) => setShipmentFeedback(error.message || 'Return updates could not be refreshed.', true));
+        })
+        .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'portal_notifications' }, () => {
+          void refreshSupplierPortal().catch((error) => setSupplierFeedback(error.message || 'Product status could not refresh.', true));
+        })
+        .subscribe();
+    }
+  }
+
+  const supplierOverview = document.querySelector('[data-marketplace-supplier-access-list]');
+  const loadSupplierOverview = async () => {
+    if (!supplierOverview) return;
+    const { data, error } = await supabase.rpc('get_marketplace_supplier_accounts');
+    if (error) throw error;
+    const { data: supplierVoucherRows, error: voucherError } = await supabase.from('marketplace_supplier_vouchers').select('*').order('created_at', { ascending: false });
+    if (voucherError) throw voucherError;
+    if (!data?.length) { supplierOverview.innerHTML = '<p class="admin-market-empty">No supplier portal users are linked yet.</p>'; return; }
+    const products = loadMarketplaceProducts();
+    const orders = loadMarketplaceOrders();
+    const summaryForSupplier = (supplierName) => {
+      const supplierProducts = products.flatMap((product) => (product.variants || []).filter((variant) => String(variant.supplierId || variant.supplier || '').toLowerCase() === supplierName.toLowerCase()).map((variant) => ({ product, variant })));
+      const supplierItems = orders.filter((order) => String(order.paymentStatus || '').toLowerCase() === 'paid' && !/cancel|refund/i.test(String(order.status || ''))).flatMap((order) => (order.items || []).filter((item) => {
+        const product = products.find((entry) => entry.id === item.productId);
+        const variant = product?.variants.find((entry) => entry.id === item.variantId);
+        return String(item.supplierId || variant?.supplierId || variant?.supplier || '').toLowerCase() === supplierName.toLowerCase();
+      }).map((item) => ({ ...item, orderId: order.id || order.reference })));
+      const uniqueProducts = [...new Map(supplierProducts.map(({ product }) => [product.id, product])).values()];
+      return { supplierProducts, supplierItems, uniqueProducts };
+    };
+    supplierOverview.innerHTML = data.map((entry) => {
+      const account = entry;
+      const summary = summaryForSupplier(entry.supplier_name);
+      const sales = summary.supplierItems.reduce((total, item) => total + (Number(item.unitPrice ?? item.price ?? 0) * (Number(item.quantity) || 0)), 0);
+      const phone = String(account.supplier_contact_phone || account.phone_e164 || '').replace(/^\+60/, '0');
+      const avatarUrl = account.avatar_path ? supabase.storage.from('supplier-profile-photos').getPublicUrl(account.avatar_path).data.publicUrl : 'Image/Icon/Supplier%20Profile%20Picture.png';
+      const linkedDate = entry.created_at ? new Intl.DateTimeFormat('en-MY', { dateStyle: 'medium' }).format(new Date(entry.created_at)) : '—';
+      const productList = summary.uniqueProducts.map((product) => {
+        const variants = summary.supplierProducts.filter((item) => item.product.id === product.id);
+        const sold = variants.reduce((total, item) => total + (summary.supplierItems.filter((line) => line.productId === product.id && line.variantId === item.variant.id).reduce((subtotal, line) => subtotal + (Number(line.quantity) || 0), 0)), 0);
+        return `<li><span>${escapeHTML(product.name)} · ${escapeHTML(product.category || 'Other')}${product.productCode ? ` · ${escapeHTML(product.productCode)}` : ''}</span><small>${variants.map(({ variant }) => `${escapeHTML(variant.label || 'Variant')} · MYR ${Number(variant.price || 0).toFixed(2)}`).join(' / ')}</small><b>${sold} sold</b></li>`;
+      }).join('');
+      const vouchersForSupplier = (supplierVoucherRows || []).filter((voucher) => voucher.supplier_user_id === entry.supplier_user_id);
+      const voucherList = vouchersForSupplier.map((voucher) => `<li><span><strong>${escapeHTML(voucher.code)}</strong> · ${voucher.discount_type === 'free_shipping' ? 'Free shipping' : voucher.discount_type === 'percent' ? `${Number(voucher.discount_value)}% off` : `MYR ${Number(voucher.discount_value).toFixed(2)} off`}${Number(voucher.minimum_spend) ? ` · Minimum MYR ${Number(voucher.minimum_spend).toFixed(2)}` : ''}</span><small>${voucher.enabled ? 'Active' : 'Inactive'}${voucher.expires_at ? ` · Expires ${escapeHTML(voucher.expires_at)}` : ''}</small></li>`).join('');
+      return `<details class="admin-supplier-overview-card"><summary><img class="admin-supplier-avatar" src="${escapeHTML(avatarUrl)}" alt="${escapeHTML(entry.supplier_name)} profile photo" /><span class="admin-supplier-company">${escapeHTML(entry.supplier_name)}</span><span class="admin-supplier-email">${escapeHTML(account.email || 'Email unavailable')}</span></summary><div class="admin-supplier-overview-body"><div class="admin-supplier-user-details"><div><small>Name</small><strong>${escapeHTML(account.display_name || 'Name unavailable')}</strong></div><div><small>Email</small><strong>${escapeHTML(account.email || 'Email unavailable')}</strong></div><div><small>Phone</small><strong>${escapeHTML(phone || 'Phone unavailable')}</strong></div><div><small>Linked</small><strong>${escapeHTML(linkedDate)}</strong></div></div><div class="admin-supplier-sales-stats"><div><small>Paid sales</small><strong>MYR ${sales.toFixed(2)}</strong></div><div><small>Units sold</small><strong>${summary.supplierItems.reduce((total, item) => total + (Number(item.quantity) || 0), 0)}</strong></div><div><small>Paid orders</small><strong>${new Set(summary.supplierItems.map((item) => item.orderId)).size}</strong></div><div><small>Products</small><strong>${summary.uniqueProducts.length}</strong></div></div><div class="admin-supplier-products"><h4>Products and sales</h4><ul>${productList || '<li>No products linked to this supplier company yet.</li>'}</ul></div><div class="admin-supplier-products admin-supplier-vouchers"><h4>Supplier Vouchers &amp; Offers</h4><ul>${voucherList || '<li>No vouchers created yet.</li>'}</ul></div></div></details>`;
+    }).join('');
+  };
+  if (supplierOverview) void loadSupplierOverview().catch((error) => { supplierOverview.innerHTML = `<p class="admin-market-empty">Supplier details could not be loaded: ${escapeHTML(error.message || 'Supabase request failed')}</p>`; });
+
+  const reviewsTarget = document.querySelector('[data-marketplace-product-reviews]');
+  const loadProductReviews = async () => {
+    if (!reviewsTarget) return;
+    const { data, error } = await supabase.from('marketplace_product_submissions').select('*').eq('status', 'Pending Review').order('submitted_at', { ascending: true });
+    if (error) throw error;
+    const countBadge = document.querySelector('[data-marketplace-review-count]');
+    if (countBadge) countBadge.textContent = String(data?.length || 0);
+    if (!data?.length) { reviewsTarget.innerHTML = '<p>No product submissions are awaiting review.</p>'; return; }
+    reviewsTarget.innerHTML = data.map((submission) => {
+      const product = submission.product_data || {};
+      const images = (product.images || []).map((url) => `<img src="${escapeHTML(url)}" alt="${escapeHTML(product.name || 'Product')}" />`).join('');
+      const variants = (product.variants || []).map((variant) => `<li>${escapeHTML(variant.label || 'Variant')} · MYR ${Number(variant.price || 0).toFixed(2)} · Stock ${Number(variant.stock) || 0}</li>`).join('');
+      const action = submission.action || 'add';
+      const actionLabel = { add: 'New product', edit: 'Product edit', edit_variant: 'Price / variant change', hide: 'Hide request', delete: 'Delete request' }[action] || 'Product change';
+      const approveLabel = { add: 'Approve & Publish', edit: 'Approve Changes', edit_variant: 'Approve Price / Variant', hide: 'Approve Hide', delete: 'Approve Delete' }[action] || 'Approve Request';
+      return `<article class="marketplace-product-review-card" data-marketplace-review="${escapeHTML(submission.id)}"><div class="marketplace-review-images">${images}</div><div class="marketplace-review-copy"><span>${escapeHTML(submission.supplier_name)} · ${actionLabel}</span><h3>${escapeHTML(product.name || 'Product')}</h3><p>${escapeHTML(product.description || (action === 'hide' ? 'Supplier requests to hide this active listing.' : action === 'delete' ? 'Supplier requests to delete this active listing.' : ''))}</p><p><strong>${escapeHTML(product.category || 'Other')}</strong> · ${escapeHTML(product.ingredients || '')}</p><ul>${variants}</ul><label>Rejection reason<textarea rows="2" maxlength="1000" data-rejection-reason placeholder="Required when rejecting"></textarea></label><div class="admin-market-form-actions"><button type="button" class="button button-primary" data-review-product="approve">${approveLabel}</button><button type="button" class="button button-light" data-review-product="reject">Reject Request</button></div></div></article>`;
+    }).join('');
+  };
+  reviewsTarget?.addEventListener('click', async (event) => {
+    const button = event.target.closest('[data-review-product]');
+    const card = button?.closest('[data-marketplace-review]');
+    if (!button || !card) return;
+    const decision = button.dataset.reviewProduct;
+    const reason = card.querySelector('[data-rejection-reason]').value.trim();
+    if (decision === 'reject' && !reason) { card.querySelector('[data-rejection-reason]').setCustomValidity('Enter a reason so the supplier knows what to change.'); card.querySelector('[data-rejection-reason]').reportValidity(); card.querySelector('[data-rejection-reason]').setCustomValidity(''); return; }
+    button.disabled = true;
+    const { data, error } = await supabase.rpc('review_marketplace_product_submission', { p_submission_id: card.dataset.marketplaceReview, p_decision: decision, p_reason: reason });
+    if (error) { button.disabled = false; window.alert(error.message); return; }
+    if (decision === 'approve') {
+      const { data: catalog, error: catalogError } = await supabase.from('app_data').select('payload').eq('record_id', 'shared:furgo-demo-marketplace-products:shared').maybeSingle();
+      if (!catalogError && Array.isArray(catalog?.payload)) localStorage.setItem(marketplaceProductsKey, JSON.stringify(catalog.payload));
+    }
+    if (decision === 'approve') void recordAdminAction('marketplace_product_request_approved', 'marketplace_product_submission', card.dataset.marketplaceReview);
+    await loadProductReviews();
+  });
+  if (reviewsTarget) void loadProductReviews().catch((error) => { reviewsTarget.innerHTML = `<p>${escapeHTML(error.message || 'Submissions could not load.')}</p>`; });
 }
 
 // Provides short Admin Portal confirmations without external notification services.
@@ -2218,7 +3375,8 @@ function setupGroomingBooking() {
       addOnTotal: quote.customAddOnTotal,
       includeTaxi: form.elements.includeTaxi.checked, pickup, dropoff, taxiDistance: quote.taxiDistance, taxiTotal: quote.taxiTotal, taxiSchedule: form.elements.taxiSchedule.value,
       voucherCode: appliedVoucher, discount: voucherDiscount, total: quote.total,
-      paymentMethod, paymentStatus: paymentMethod === 'wallet' ? 'Paid with Furgo Credit' : paymentMethod === 'bank-transfer' ? 'Awaiting verification' : 'Pending online payment',
+      paymentMethod, paymentStatus: paymentMethod === 'wallet' ? 'Paid with Furgo Credit' : paymentMethod === 'bank-transfer' ? 'Awaiting verification' : 'Pending Payment',
+      paymentDeadlineAt: paymentMethod === 'gateway' ? new Date(Date.now() + 60 * 60 * 1000).toISOString() : '',
       status: paymentMethod === 'wallet' ? 'Pending / Confirmed' : 'Pending Payment', paymentProof: receipt, receipt: null,
       createdAt: new Date().toISOString(), statusHistory: [{ status: paymentMethod === 'wallet' ? 'Pending / Confirmed' : 'Pending Payment', changedAt: new Date().toISOString(), changedBy: 'Customer' }],
     };
@@ -2532,11 +3690,11 @@ function setupDedicatedSearchPage() {
 
     recentsSection.hidden = true;
     discoverSection.hidden = true;
-    const products = loadMarketplaceProducts().filter((product) => !product.hidden && product.variants?.some((variant) => Number(variant.stock) > 0));
+    const products = loadMarketplaceProducts().filter((product) => !product.hidden && !product.frozenByAdmin && product.variants?.some((variant) => !variant.frozen && Number(variant.stock) > 0));
     const productMatches = products.map((product) => {
       const searchable = normalize([
-        product.name, product.category, product.description, product.suitableBreeds,
-        product.issues, product.ingredients, product.nutrition, productAliases[product.id],
+        product.name, product.category, product.description, product.extraDescription,
+        product.petTypes, product.suitableBreeds, product.issues, product.ingredients, product.nutrition, productAliases[product.id],
       ].filter(Boolean).join(' '));
       if (!searchable.includes(normalizedQuery)) return null;
       const isCookieSearch = normalize(productAliases[product.id]).includes(normalizedQuery) && /cookie|biscuit/.test(normalizedQuery);
@@ -2709,6 +3867,7 @@ function wireForms() {
   setupAdminPromotionsForm();
   setupMarketplaceInteractions();
   setupAdminMarketplace();
+  setupMarketplaceSupplierPortal();
   setupGroomingBooking();
   setupAdminGrooming();
   setupHotelBooking();
@@ -2726,11 +3885,13 @@ function wireForms() {
   setupAdminEnquiries();
   setupAdminCustomers();
   setupAdminProductServiceInsights();
+  setupAdminLocalFinder(supabase);
   setupAdminPortal();
   void setupCustomerEnquiryHistory();
   setupAdminFooterScanner();
   setupDriverPortal();
   setupDedicatedSearchPage();
+  setupLocalFinder(supabase);
   void setupAdminSearchAnalytics();
   const toast = document.querySelector('.home-toast');
   if (toast) {
@@ -2959,9 +4120,10 @@ function wireForms() {
         : identity.role === 'director' ? 'Director sign-in successful. Opening the Admin Portal…'
           : identity.role === 'manager' ? 'Manager sign-in successful. Opening the Admin Portal…'
             : identity.role === 'executive' ? 'Executive sign-in successful. Opening the Admin Portal…'
+          : identity.role === 'supplier' ? 'Supplier sign-in successful. Opening the Marketplace Supplier Portal…'
           : identity.role === 'driver' ? 'Driver sign-in successful. Opening the Driver Portal…'
             : 'Sign-in successful. Opening your Furgo home…';
-      window.setTimeout(() => { window.location.hash = ['director', 'manager', 'executive'].includes(identity.role) ? '#admin' : identity.role === 'driver' ? '#driver' : '#home'; }, 500);
+      window.setTimeout(() => { window.location.hash = ['director', 'manager', 'executive'].includes(identity.role) ? '#admin' : identity.role === 'supplier' ? '#supplier' : identity.role === 'driver' ? '#driver' : '#home'; }, 500);
     } catch (error) {
       feedback.textContent = friendlyAuthError(error);
     } finally {
@@ -3005,9 +4167,10 @@ async function render() {
     } catch { /* Keep the current page usable if local demo profile data is malformed. */ }
   }
   const directorPages = ['admin-customers', 'admin-product-insights'];
-  const managerPages = ['admin-promotions', 'admin-pet-taxi', 'admin-marketplace-manage'];
+  const managerPages = ['admin-promotions', 'admin-pet-taxi', 'admin-marketplace-manage', 'admin-marketplace-products', 'admin-local-finder'];
   const serviceAdminPages = ['admin-marketplace', 'admin-grooming', 'admin-hotel', 'admin-daycare'];
   const portalPages = ['admin', 'admin-orders', 'admin-access', 'admin-enquiries', 'admin-audit', ...managerPages, ...serviceAdminPages, ...directorPages];
+  const supplierPages = ['supplier'];
   const driverPages = ['driver'];
   const savedRole = sessionStorage.getItem('furgo-demo-user-role');
   const currentRole = savedRole === 'staff' ? 'executive' : savedRole === 'admin' ? 'director' : savedRole;
@@ -3018,6 +4181,10 @@ async function render() {
       profile.role = currentRole;
       sessionStorage.setItem('furgo-demo-user-profile', JSON.stringify(profile));
     } catch { /* Keep the portal usable if old session data is malformed. */ }
+  }
+  if (page === 'admin-local-finder' && !['manager', 'director'].includes(currentRole)) {
+    window.location.hash = currentRole === 'executive' ? '#admin' : '#login';
+    return;
   }
   if (portalPages.includes(page) && (!hasDemoSession || !['executive', 'manager', 'director'].includes(currentRole))) {
     window.location.hash = '#login';
@@ -3035,11 +4202,19 @@ async function render() {
     window.location.hash = '#admin-access';
     return;
   }
+  if (supplierPages.includes(page) && (!hasDemoSession || currentRole !== 'supplier')) {
+    window.location.hash = '#login';
+    return;
+  }
+  if (hasDemoSession && currentRole === 'supplier' && page !== 'supplier' && page !== 'login') {
+    window.location.hash = '#supplier';
+    return;
+  }
   if (driverPages.includes(page) && (!hasDemoSession || sessionStorage.getItem('furgo-demo-user-role') !== 'driver')) {
     window.location.hash = '#login';
     return;
   }
-  const protectedPages = ['home', 'search', 'services', 'about', 'profile', 'edit-profile', 'help-center', 'feedback', 'pet-profile', 'address', 'payment-method', 'credit', 'marketplace', 'product', 'cart', 'checkout', 'orders', 'check-in', 'favourites', 'grooming', 'grooming-orders', 'hotel', 'daycare'];
+  const protectedPages = ['home', 'search', 'services', 'about', 'profile', 'edit-profile', 'help-center', 'feedback', 'pet-profile', 'address', 'payment-method', 'credit', 'marketplace', 'local-finder', 'local-finder-list', 'local-finder-place', 'product', 'seller', 'cart', 'checkout', 'orders', 'check-in', 'favourites', 'grooming', 'grooming-orders', 'hotel', 'daycare'];
   if (hasDemoSession && sessionStorage.getItem('furgo-demo-user-role') === 'driver' && page !== 'driver' && page !== 'login') {
     window.location.hash = '#driver';
     return;
@@ -3086,8 +4261,13 @@ async function render() {
     'payment-method': () => paymentMethodPage(routeParams.get('from') || 'profile'),
     credit: () => creditPage(routeParams.get('from') || 'profile'),
     marketplace: () => marketplacePage(routeParams.get('category') || 'All'),
+    'local-finder': localFinderPage,
+    'local-finder-list': () => localFinderListPage(routeParams),
+    'local-finder-place': () => localFinderPlacePage(routeParams),
+    'admin-local-finder': () => adminLocalFinderPage(routeParams),
     favourites: marketplaceFavoritesPage,
     product: () => marketplaceProductPage(routeParams.get('id') || ''),
+    seller: () => marketplaceSellerPage(routeParams.get('name') || ''),
     cart: marketplaceCartPage,
     checkout: marketplaceCheckoutPage,
     orders: () => myOrdersPage(routeParams),
@@ -3102,6 +4282,8 @@ async function render() {
     'admin-promotions': adminPromotionsPage,
     'admin-marketplace': adminMarketplacePage,
     'admin-marketplace-manage': adminMarketplaceManagePage,
+    'admin-marketplace-products': adminMarketplaceProductsPage,
+    supplier: marketplaceSupplierPage,
     'admin-grooming': () => adminGroomingPage({ settingsOnly: routeParams.get('manage') === '1', stage: routeParams.get('stage') || 'new' }),
     'admin-hotel': () => adminHotelPage({ settingsOnly: routeParams.get('manage') === '1', stage: routeParams.get('stage') || 'new' }),
     'admin-daycare': () => adminDaycarePage({ settingsOnly: routeParams.get('manage') === '1', stage: routeParams.get('stage') || 'new' }),
@@ -3127,8 +4309,13 @@ async function render() {
     'payment-method': 'Payment Method — Furgo',
     credit: 'My Furgo Credit — Furgo',
     marketplace: 'Marketplace — Furgo',
+    'local-finder': 'Local Finder — Furgo',
+    'local-finder-list': 'Nearby Places — Furgo',
+    'local-finder-place': 'Place Details — Furgo',
+    'admin-local-finder': 'Local Finder Management — Furgo Admin',
     favourites: 'My Favourites — Furgo',
     product: 'Product Details — Furgo',
+    seller: 'Seller Shop — Furgo',
     cart: 'Shopping Cart — Furgo',
     checkout: 'Checkout — Furgo',
     orders: 'My Orders — Furgo',
@@ -3142,6 +4329,8 @@ async function render() {
     'admin-promotions': 'Home Promotions — Furgo Admin',
     'admin-marketplace': 'Marketplace — Furgo Admin',
     'admin-marketplace-manage': 'Manage Marketplace — Furgo Admin',
+    'admin-marketplace-products': 'Product And Supplier Mapping — Furgo Admin',
+    supplier: 'Marketplace Supplier Portal — Furgo',
     'admin-grooming': 'Grooming — Furgo Admin',
     'admin-hotel': 'Pet Hotel — Furgo Admin',
     'admin-daycare': 'Pet Daycare — Furgo Admin',

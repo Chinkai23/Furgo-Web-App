@@ -68,7 +68,7 @@ export function homePage() {
   const userName = profile.name || 'Pet Parent';
   const creditBalance = Number(localStorage.getItem('furgo-demo-credit-balance') || 0) || 0;
   const serviceArtwork = [
-    ['Marketplace', 'MVP Icon-01.png'], ['Grooming', 'MVP Icon-02.png'],
+    ['Marketplace', 'MVP Icon-01.png'], ['Local Finder', 'MVP Icon-06.png'], ['Grooming', 'MVP Icon-02.png'],
     ['Pet Hotel', 'MVP Icon-04.png'], ['Pet Daycare', 'MVP Icon-03.png'],
   ];
   const icon = (file) => `Image/Icon/${encodeURIComponent(file)}`;
@@ -86,7 +86,7 @@ export function homePage() {
       <div class="home-topline"><div><span class="home-kicker">Better Care For Every Pet</span><h1>Hey, ${escapeHTML(userName)}</h1></div><button class="notification-button" type="button" aria-label="Notifications" data-toast="You’re all caught up."><img src="${icon('Icon-10.png')}" alt="" /></button></div>
       <a class="home-search" href="#search" aria-label="Search pet services and products"><span class="search-symbol" aria-hidden="true"></span><span class="home-search-placeholder">Search pet services</span><span class="search-hint">Try “cookies”</span></a>
       <div class="credit-row"><img class="home-pet-art" src="Image/Icon/FurgoMascot.png" alt="Furgo mascot" /><!-- Furgo Credit balance card opens My Furgo Credit and records Home as its return destination. --><a class="credit-card" href="#credit?from=home"><span class="credit-label">Total Furgo Credit</span><span class="credit-balance-row"><strong>MYR ${creditBalance.toFixed(2)}</strong><img class="wallet-mark" src="${icon('Icon-11.png')}" alt="" /></span></a></div>
-      <nav class="service-shortcuts" id="services" aria-label="Pet services">${serviceArtwork.map(([name, file]) => `<a class="shortcut" href="${name === 'Marketplace' ? '#marketplace' : name === 'Grooming' ? '#grooming' : name === 'Pet Hotel' ? '#hotel' : '#daycare'}" data-service="${name.toLowerCase()}"><img src="${icon(file)}" alt="" /><span>${name}</span></a>`).join('')}</nav>
+      <nav class="service-shortcuts" id="services" aria-label="Pet services">${serviceArtwork.map(([name, file]) => `<a class="shortcut" href="${name === 'Marketplace' ? '#marketplace' : name === 'Local Finder' ? '#local-finder' : name === 'Grooming' ? '#grooming' : name === 'Pet Hotel' ? '#hotel' : '#daycare'}" data-service="${name.toLowerCase().replaceAll(' ', '-')}"><img src="${icon(file)}" alt="" /><span>${name}</span></a>`).join('')}</nav>
     </section>
     <div class="home-content">
       <section class="pet-section" aria-labelledby="pet-title"><div class="section-title-row"><h2 id="pet-title">Pet Profile</h2></div><div class="pet-carousel" data-pet-carousel>${petCarouselMarkup(icon, pets)}</div></section>

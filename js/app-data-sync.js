@@ -142,9 +142,18 @@ async function writeDedicatedRecord(key, record, ownerId) {
       created_at: createdAt,
       updated_at: new Date().toISOString(),
     };
-    const { error } = updateOnlyOrderRoles.has(activeRole)
-      ? await supabase.from('marketplace_orders').update(payload).eq('id', id)
-      : await supabase.from('marketplace_orders').upsert(payload, { onConflict: 'id' });
+    let writeResult;
+    if (activeRole === 'customer') {
+      const { data: existing, error: lookupError } = await supabase.from('marketplace_orders').select('id').eq('id', id).maybeSingle();
+      if (lookupError) throw lookupError;
+      if (existing) return; // Marketplace orders become immutable to customers after checkout.
+      writeResult = await supabase.from('marketplace_orders').insert(payload);
+    } else if (updateOnlyOrderRoles.has(activeRole)) {
+      writeResult = await supabase.from('marketplace_orders').update(payload).eq('id', id);
+    } else {
+      writeResult = await supabase.from('marketplace_orders').upsert(payload, { onConflict: 'id' });
+    }
+    const { error } = writeResult;
     if (error) throw error;
     if (updateOnlyOrderRoles.has(activeRole)) return;
     const { error: removeItemsError } = await supabase.from('marketplace_order_items').delete().eq('order_id', id);
@@ -304,7 +313,30 @@ async function loadDedicatedOperations(userId, role) {
   const itemsByOrder = new Map();
   for (const row of itemRows) {
     if (!itemsByOrder.has(row.order_id)) itemsByOrder.set(row.order_id, []);
-    itemsByOrder.get(row.order_id).push(row.item);
+    itemsByOrder.get(row.order_id).push({ ...row.item, lineNumber: Number(row.line_number) });
+  }
+  let returnRows = [];
+  if (orderIds.length) {
+    const { data, error } = await supabase.from('marketplace_item_returns').select('*').in('order_id', orderIds);
+    // Keep existing portal data usable until the return-workflow migration is applied.
+    if (!error) returnRows = data || [];
+    else if (!['42P01', 'PGRST205'].includes(error.code)) throw error;
+  }
+  const returnsByLine = new Map(returnRows.map((itemReturn) => [`${itemReturn.order_id}:${itemReturn.line_number}`, {
+    id: itemReturn.id,
+    status: itemReturn.status,
+    reason: itemReturn.reason,
+    photoPath: itemReturn.photo_path,
+    paidAmount: Number(itemReturn.paid_amount) || 0,
+    shippingRefund: Number(itemReturn.shipping_refund) || 0,
+    refundAmount: Number(itemReturn.refund_amount) || 0,
+    supplierResponse: itemReturn.supplier_response || '',
+    decisionReason: itemReturn.decision_reason || '',
+    requestedAt: itemReturn.requested_at,
+    refundedAt: itemReturn.refunded_at,
+  }]));
+  for (const [orderId, items] of itemsByOrder) {
+    items.forEach((item) => { item.returnRequest = returnsByLine.get(`${orderId}:${item.lineNumber}`) || null; });
   }
   const values = new Map([
     ['furgo-demo-marketplace-orders', (marketResult.data || []).map((row) => dedicatedRecordFromRow('furgo-demo-marketplace-orders', row, itemsByOrder.get(row.id) || []))],
@@ -358,7 +390,15 @@ async function refreshDedicatedMarketplaceOrder(orderId, removed = false) {
   }
   const { data: items, error: itemsError } = await supabase.from('marketplace_order_items').select('line_number,item').eq('order_id', orderId).order('line_number');
   if (itemsError) throw itemsError;
-  applyDedicatedRow('furgo-demo-marketplace-orders', order, (items || []).map((row) => row.item), removed);
+  const { data: returns, error: returnsError } = await supabase.from('marketplace_item_returns').select('*').eq('order_id', orderId);
+  if (returnsError && !['42P01', 'PGRST205'].includes(returnsError.code)) throw returnsError;
+  const returnByLine = new Map((returns || []).map((itemReturn) => [Number(itemReturn.line_number), {
+    id: itemReturn.id, status: itemReturn.status, reason: itemReturn.reason, photoPath: itemReturn.photo_path,
+    paidAmount: Number(itemReturn.paid_amount) || 0, shippingRefund: Number(itemReturn.shipping_refund) || 0,
+    refundAmount: Number(itemReturn.refund_amount) || 0, supplierResponse: itemReturn.supplier_response || '',
+    decisionReason: itemReturn.decision_reason || '', requestedAt: itemReturn.requested_at, refundedAt: itemReturn.refunded_at,
+  }]));
+  applyDedicatedRow('furgo-demo-marketplace-orders', order, (items || []).map((row) => ({ ...row.item, lineNumber: Number(row.line_number), returnRequest: returnByLine.get(Number(row.line_number)) || null })), removed);
 }
 
 function groupOperationsByOwner(items) {
@@ -536,6 +576,13 @@ export async function loadCloudAppData(userId, role) {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'marketplace_order_items' }, (change) => {
         const row = change.new?.order_id ? change.new : change.old;
         if (row?.order_id) void refreshDedicatedMarketplaceOrder(row.order_id).catch((syncError) => console.warn('Could not refresh Marketplace order items:', syncError));
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'marketplace_item_returns' }, (change) => {
+        const row = change.new?.order_id ? change.new : change.old;
+        if (row?.order_id) void refreshDedicatedMarketplaceOrder(row.order_id).then(() => {
+          document.querySelector('[data-marketplace-return-cases]')?.dispatchEvent(new Event('marketplace-return-change'));
+          document.querySelector('[data-marketplace-return-notification]')?.dispatchEvent(new Event('marketplace-return-change'));
+        }).catch((syncError) => console.warn('Could not refresh Marketplace return status:', syncError));
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'pet_hotel_bookings' }, (change) => {
         const row = change.new?.id ? change.new : change.old;

@@ -3,6 +3,7 @@ import { supabase } from '../supabase.js';
 import { cacheSharedOutlets } from './outlet-directory.js';
 
 const levels = {
+  supplier: { name: 'Supplier', order: 0, summary: 'Access the Marketplace supplier portal.' },
   driver: { name: 'Driver', order: 0, summary: 'Access the Pet Taxi driver portal.' },
   executive: { name: 'Executive', order: 1, summary: 'Manage orders, check-ins, service settings, and the marketplace.' },
   manager: { name: 'Manager', order: 2, summary: 'Manage orders, promotions, Marketplace, Grooming, Pet Hotel, and Daycare.' },
@@ -24,7 +25,7 @@ export function adminAccessPage() {
     featureCard('Current Order & Check-In', 'Review current orders and check customers in.', '#admin-orders', true),
     featureCard('Promotions', 'Create, update, and remove home page promotions.', '#admin-promotions', true),
     featureCard('Marketplace', 'View and manage marketplace orders, payments, and fulfillment.', '#admin-marketplace', true),
-    featureCard('Manage Marketplace', 'Manage product listings, product details, and supplier mapping.', '#admin-marketplace-manage', true),
+    featureCard('Manage Marketplace', 'Manage suppliers and Marketplace settings, and view live product listings.', '#admin-marketplace-manage', true),
     featureCard('Grooming', isManager ? 'Manage appointment settings, bookings, and grooming operations.' : 'View bookings, safety notes, and grooming operations.', '#admin-grooming', true),
     featureCard('Pet Hotel', isManager ? 'Manage rooms, pricing, availability, and reservations.' : 'View room availability, care notes, and reservations.', '#admin-hotel', true),
     featureCard('Pet Daycare', isManager ? 'Manage rates, capacity, add-ons, and bookings.' : 'View the daily roster, care notes, and bookings.', '#admin-daycare', true),
@@ -34,16 +35,19 @@ export function adminAccessPage() {
   ].filter(Boolean).join('');
 
   const managerOptions = isDirector
-    ? '<option value="executive">Executive</option><option value="manager">Manager</option><option value="director">Director</option><option value="driver">Driver</option>'
+    ? '<option value="executive">Executive</option><option value="supplier">Supplier</option><option value="manager">Manager</option><option value="driver">Driver</option><option value="director">Director</option>'
     : '<option value="executive">Executive</option>';
+  const supplierField = isDirector
+    ? '<label data-team-supplier-field hidden>Supplier company name<input name="supplierName" type="text" autocomplete="organization" maxlength="100" placeholder="Enter supplier company name" /></label>'
+    : '';
   const outletSetup = isDirector ? `<section class="admin-market-panel admin-outlet-panel"><div class="admin-market-panel-heading"><div><span>Outlet setup</span><h2>Manage Outlets</h2></div><p>Add the exact outlet name used on service bookings, plus a shortform. The shortform appears beside an assigned admin’s name.</p></div><form class="admin-outlet-form" data-admin-outlet-form><input type="hidden" name="outletId" /><label>Outlet name<input name="name" maxlength="100" placeholder="Furgo Pet Care - Petaling Jaya" required /></label><label>Shortform<input name="shortform" maxlength="8" minlength="2" pattern="[A-Za-z0-9]{2,8}" placeholder="PJ" required /></label><div class="admin-market-form-actions"><button class="button button-primary" type="submit">Add Outlet</button><button class="button button-light" type="button" data-cancel-outlet-edit hidden>Cancel edit</button><span data-admin-outlet-feedback role="status" aria-live="polite"></span></div></form><div class="admin-outlet-list" data-admin-outlet-list role="status" aria-live="polite">Loading outlets…</div></section>` : '';
   const outletField = isDirector
     ? '<label data-team-outlet-field>Assigned outlet<select name="outletId" data-team-outlet required><option value="">Choose an outlet</option></select></label>'
     : `<label data-team-outlet-field>Assigned outlet<input value="${escapeHTML(profile.outletName ? `${profile.outletName} (${profile.outletShortform || ''})` : 'No outlet assigned') }" readonly /><input type="hidden" name="outletId" value="${escapeHTML(profile.outletId || '')}" /></label>`;
   const canViewTeam = level.order >= 1;
-  const teamManagement = canViewTeam ? `<section class="admin-market-panel admin-team-panel"><div class="admin-market-panel-heading"><div><span>Team access</span><h2>${isManager ? 'Manage Portal Users' : 'Outlet Admins'}</h2></div><p>${isDirector ? 'Assign Executive and Manager accounts to an outlet. Director access remains company-wide. Removing a Director requires approval from every other Director.' : isManager ? 'View admins assigned to your outlet and add, edit, or remove Executive accounts.' : `Admins assigned to ${profile.outletName || 'your outlet'}.`}</p></div>${isManager ? `<form class="admin-team-form" data-admin-team-form><label>Existing account email<input name="email" type="email" autocomplete="email" placeholder="person@example.com" required /></label><label>Account level<select name="level" required>${managerOptions}</select></label>${outletField}<input type="hidden" name="action" value="add" /><div class="admin-market-form-actions"><button class="button button-primary" type="submit">Add user</button><button class="button button-light" type="button" data-cancel-team-edit hidden>Cancel edit</button><span data-admin-team-feedback role="status" aria-live="polite"></span></div></form>` : ''}${isDirector ? `<div class="admin-team-filters"><label>Outlet<select data-team-outlet-filter><option value="all">All outlets</option></select></label><label>Admin level<select data-team-level-filter><option value="all">All levels</option><option value="director">Director</option><option value="manager">Manager</option><option value="executive">Executive</option><option value="driver">Driver</option></select></label></div>` : ''}<div class="admin-team-list" data-admin-team-list role="status" aria-live="polite">Loading team members…</div></section>` : '';
+  const teamManagement = canViewTeam ? `<section class="admin-market-panel admin-team-panel"><div class="admin-market-panel-heading"><div><span>Team access</span><h2>${isManager ? 'Manage Portal Users' : 'Outlet Admins'}</h2></div><p>${isDirector ? 'Assign Executive and Manager accounts to an outlet. Director, Supplier, and Driver accounts do not need an outlet. Removing a Director requires approval from every other Director.' : isManager ? 'View admins assigned to your outlet and add, edit, or remove Executive accounts.' : `Admins assigned to ${profile.outletName || 'your outlet'}.`}</p></div>${isManager ? `<form class="admin-team-form" data-admin-team-form><label>Existing account email<input name="email" type="email" autocomplete="email" placeholder="person@example.com" required /></label><label>Admin Position<select name="level" required>${managerOptions}</select></label>${supplierField}${outletField}<input type="hidden" name="action" value="add" /><div class="admin-market-form-actions"><button class="button button-primary" type="submit">Add user</button><button class="button button-light" type="button" data-cancel-team-edit hidden>Cancel edit</button><span data-admin-team-feedback role="status" aria-live="polite"></span></div></form>` : ''}${isDirector ? `<div class="admin-team-filters"><label>Outlet<select data-team-outlet-filter><option value="all">All outlets</option></select></label><label>Admin Position<select data-team-level-filter><option value="all">All positions</option><option value="executive">Executive</option><option value="supplier">Supplier</option><option value="manager">Manager</option><option value="driver">Driver</option><option value="director">Director</option></select></label></div>` : ''}<div class="admin-team-list" data-admin-team-list role="status" aria-live="polite">Loading team members…</div></section>` : '';
   const directorApprovals = isDirector ? `<section class="admin-market-panel admin-director-approval-panel" data-director-approval-panel hidden><div class="admin-market-panel-heading"><div><span>Director governance</span><h2>Removal Approvals</h2></div><p>Every Director except the requester and the Director named in a request must approve it. One rejection stops the request.</p></div><div data-director-removal-requests role="status" aria-live="polite">Loading approval requests…</div></section>` : '';
-  return `<main class="admin-portal-page admin-access-page"><header class="admin-portal-header"><a class="admin-portal-brand" href="#admin-access"><img src="Image/Icon/Logo.png" alt="Furgo" /><span>Admin Portal</span></a><div class="admin-portal-account"><span>${escapeHTML(profile.name || '')}${profile.outletShortform ? ` · ${escapeHTML(profile.outletShortform)}` : ''}</span><button type="button" data-logout>Log out</button></div></header><header class="admin-market-heading"><a href="${isDirector ? '#admin' : '#admin-orders'}" aria-label="Back to portal">‹</a><div><span>Access level</span><h1>${level.name}</h1></div></header><section class="admin-access-level-summary"><span>YOUR ADMIN LEVEL</span><h2>${level.name}</h2></section><section class="admin-market-panel"><div class="admin-market-panel-heading"><div><span>Portal permissions</span><h2>Your Available Functions</h2></div><p>Your access follows the permissions assigned to your account.</p></div><div class="admin-access-feature-grid">${availableFeatures}</div></section>${directorApprovals}${outletSetup}${teamManagement}</main>`;
+  return `<main class="admin-portal-page admin-access-page"><header class="admin-portal-header"><a class="admin-portal-brand" href="#admin-access"><img src="Image/Icon/Logo.png" alt="Furgo" /><span>Admin Portal</span></a><div class="admin-portal-account"><span>${escapeHTML(profile.name || '')}${profile.outletShortform ? ` · ${escapeHTML(profile.outletShortform)}` : ''}</span><button type="button" data-logout>Log out</button></div></header><header class="admin-market-heading"><a href="${isDirector ? '#admin' : '#admin-orders'}" aria-label="Back to portal">‹</a><div><span>Admin Position</span><h1>${level.name}</h1></div></header><section class="admin-access-level-summary"><span>YOUR ADMIN POSITION</span><h2>${level.name}</h2></section><section class="admin-market-panel"><div class="admin-market-panel-heading"><div><span>Portal permissions</span><h2>Your Available Functions</h2></div><p>Your access follows the permissions assigned to your account.</p></div><div class="admin-access-feature-grid">${availableFeatures}</div></section>${directorApprovals}${outletSetup}${teamManagement}</main>`;
 }
 
 export function setupAdminAccess() {
@@ -131,6 +135,19 @@ export function setupAdminAccess() {
       return;
     }
     teamMembers = Array.isArray(data) ? data : [];
+    if (callerLevel.order >= 3) {
+      const { data: supplierAccess } = await supabase.from('marketplace_supplier_access').select('supplier_user_id,supplier_name,created_at').order('supplier_name');
+      if (Array.isArray(supplierAccess) && supplierAccess.length) {
+        const profilesResult = await supabase.from('profiles').select('id,email,display_name').in('id', supplierAccess.map((entry) => entry.supplier_user_id));
+        if (!profilesResult.error) {
+          const profiles = new Map((profilesResult.data || []).map((entry) => [entry.id, entry]));
+          teamMembers.push(...supplierAccess.map((entry) => {
+            const account = profiles.get(entry.supplier_user_id) || {};
+            return { user_id: entry.supplier_user_id, level: 'supplier', supplier_name: entry.supplier_name, display_name: account.display_name || account.email || 'Furgo user', email: account.email || '', created_at: entry.created_at };
+          }));
+        }
+      }
+    }
     renderTeamRows();
   };
   const renderTeamRows = () => {
@@ -144,13 +161,14 @@ export function setupAdminAccess() {
       const canRemoveDriver = member.level === 'driver' && callerLevel.order >= 2;
       const canRemoveDirector = callerLevel.order === 3 && memberLevel.order === 3
         && member.email && member.email.toLowerCase() !== String(profile.email || '').toLowerCase();
-      const controls = `${canManage ? `<button class="button button-light" type="button" data-edit-team-member data-email="${escapeHTML(member.email || '')}" data-level="${escapeHTML(member.level || '')}" data-outlet-id="${escapeHTML(member.outlet_id || '')}">Edit</button>` : ''}${canManage || canRemoveDirector || canRemoveDriver ? `<button class="button button-light" type="button" data-remove-team-member data-email="${escapeHTML(member.email || '')}" data-level="${escapeHTML(member.level || '')}" data-outlet-id="${escapeHTML(member.outlet_id || '')}">Remove</button>` : '<span class="admin-team-readonly">Same level · Read only</span>'}`;
+      const controls = `${canManage ? `<button class="button button-light" type="button" data-edit-team-member data-email="${escapeHTML(member.email || '')}" data-level="${escapeHTML(member.level || '')}" data-outlet-id="${escapeHTML(member.outlet_id || '')}" data-supplier-name="${escapeHTML(member.supplier_name || '')}">Edit</button>` : ''}${canManage || canRemoveDirector || canRemoveDriver ? `<button class="button button-light" type="button" data-remove-team-member data-user-id="${escapeHTML(member.user_id || '')}" data-email="${escapeHTML(member.email || '')}" data-level="${escapeHTML(member.level || '')}" data-outlet-id="${escapeHTML(member.outlet_id || '')}">Remove</button>` : '<span class="admin-team-readonly">Same level · Read only</span>'}`;
       const outletSuffix = member.outlet_shortform ? ` · ${member.outlet_shortform}` : '';
-      return `<article class="admin-team-member"><div><strong>${escapeHTML(member.display_name || 'Furgo user')}${outletSuffix ? ` · ${escapeHTML(member.outlet_shortform)}` : ''}</strong><small>${escapeHTML(member.email || 'Email unavailable')} · ${escapeHTML(memberLevel.name)}${member.outlet_name ? ` · ${escapeHTML(member.outlet_name)}` : ''}</small></div>${controls}</article>`;
+      const supplierSuffix = member.supplier_name ? ` · ${member.supplier_name}` : '';
+      return `<article class="admin-team-member"><div><strong>${escapeHTML(member.display_name || 'Furgo user')}${outletSuffix ? ` · ${escapeHTML(member.outlet_shortform)}` : ''}</strong><small>${escapeHTML(member.email || 'Email unavailable')} · ${escapeHTML(memberLevel.name)}${member.outlet_name ? ` · ${escapeHTML(member.outlet_name)}` : ''}${escapeHTML(supplierSuffix)}</small></div>${controls}</article>`;
     }).join('') : `<p class="admin-market-empty">${teamMembers.length ? 'No admins match these filters.' : 'No portal users yet.'}</p>`;
   };
 
-  const submitTeamAction = async (email, level, action, outletId = '') => {
+  const submitTeamAction = async (email, level, action, outletId = '', supplierName = '', userId = '') => {
     const feedback = form?.querySelector('[data-admin-team-feedback]');
     if (!form || !feedback) return false;
     const requestsDirectorRemoval = action === 'remove' && level === 'director';
@@ -166,6 +184,26 @@ export function setupAdminAccess() {
       return true;
     }
     feedback.textContent = 'Saving…';
+    if (level === 'supplier') {
+      if (action === 'remove') {
+        const { error } = await supabase.from('marketplace_supplier_access').delete().eq('supplier_user_id', userId);
+        if (error) {
+          feedback.textContent = error.message || 'Supplier portal access could not be removed.';
+          return false;
+        }
+        feedback.textContent = 'Supplier portal access removed.';
+        await renderTeam();
+        return true;
+      }
+      const { error } = await supabase.rpc('assign_marketplace_supplier_account', { p_email: email, p_supplier_name: supplierName });
+      if (error) {
+        feedback.textContent = error.message || 'Supplier portal access could not be saved.';
+        return false;
+      }
+      feedback.textContent = 'Supplier portal access saved.';
+      await renderTeam();
+      return true;
+    }
     const { error } = await supabase.rpc('manage_admin_team_member', { p_email: email, p_level: level || null, p_action: action, p_outlet_id: outletId || null });
     if (error) {
       feedback.textContent = error.message || 'The team access change could not be saved.';
@@ -179,7 +217,7 @@ export function setupAdminAccess() {
   form?.addEventListener('submit', async (event) => {
     event.preventDefault();
     const values = new FormData(form);
-    const saved = await submitTeamAction(String(values.get('email') || '').trim(), String(values.get('level') || ''), String(values.get('action') || 'add'), String(values.get('outletId') || ''));
+    const saved = await submitTeamAction(String(values.get('email') || '').trim(), String(values.get('level') || ''), String(values.get('action') || 'add'), String(values.get('outletId') || ''), String(values.get('supplierName') || '').trim());
     if (saved) resetTeamForm();
   });
   team.addEventListener('click', async (event) => {
@@ -189,6 +227,9 @@ export function setupAdminAccess() {
       form.elements.email.value = edit.dataset.email || '';
       form.elements.level.value = edit.dataset.level || 'executive';
       if (form.elements.outletId) form.elements.outletId.value = edit.dataset.outletId || profile.outletId || '';
+      if (form.elements.supplierName) {
+        form.elements.supplierName.value = edit.dataset.supplierName || '';
+      }
       updateOutletRequirement();
       const driverOption = form.elements.level.querySelector('option[value="driver"]');
       if (driverOption) driverOption.disabled = true;
@@ -201,8 +242,10 @@ export function setupAdminAccess() {
     const remove = event.target.closest('[data-remove-team-member]');
     if (remove && window.confirm(remove.dataset.level === 'director'
       ? `Request removal of Director access for ${remove.dataset.email}? All other Directors must approve.`
-      : `Remove portal access for ${remove.dataset.email}?`)) {
-      await submitTeamAction(remove.dataset.email || '', remove.dataset.level || '', 'remove', remove.dataset.outletId || profile.outletId || '');
+      : remove.dataset.level === 'supplier'
+        ? `Remove Supplier Portal access for ${remove.dataset.email}? Their supplier product submissions will also be removed.`
+        : `Remove portal access for ${remove.dataset.email}?`)) {
+      await submitTeamAction(remove.dataset.email || '', remove.dataset.level || '', 'remove', remove.dataset.outletId || profile.outletId || '', '', remove.dataset.userId || '');
     }
   });
   approvals?.addEventListener('click', async (event) => {
@@ -228,10 +271,18 @@ export function setupAdminAccess() {
     if (!form) return;
     const needsOutlet = ['executive', 'manager'].includes(form.elements.level.value);
     form.elements.outletId?.closest('[data-team-outlet-field]')?.toggleAttribute('hidden', !needsOutlet);
-    if (form.elements.outletId) form.elements.outletId.required = needsOutlet && form.elements.outletId.tagName === 'SELECT';
+    if (form.elements.outletId) {
+      form.elements.outletId.required = needsOutlet && form.elements.outletId.tagName === 'SELECT';
+      if (!needsOutlet && form.elements.outletId.tagName === 'SELECT') form.elements.outletId.value = '';
+    }
+    const needsSupplier = form.elements.level.value === 'supplier';
+    form.elements.supplierName?.closest('[data-team-supplier-field]')?.toggleAttribute('hidden', !needsSupplier);
+    if (form.elements.supplierName) form.elements.supplierName.required = needsSupplier;
   };
   form?.elements.level?.addEventListener('change', updateOutletRequirement);
-  if (form) updateOutletRequirement();
+  if (form) {
+    updateOutletRequirement();
+  }
   outletForm?.addEventListener('submit', async (event) => {
     event.preventDefault();
     const feedback = outletForm.querySelector('[data-admin-outlet-feedback]');
@@ -306,6 +357,7 @@ export function setupAdminAccess() {
     form.reset();
     const driverOption = form.elements.level.querySelector('option[value="driver"]');
     if (driverOption) driverOption.disabled = false;
+    if (form.elements.supplierName) form.elements.supplierName.value = '';
     form.elements.action.value = 'add';
     form.querySelector('[type="submit"]').textContent = 'Add user';
     form.querySelector('[data-cancel-team-edit]').hidden = true;

@@ -374,13 +374,13 @@ h1, h2, h3, p { margin-top: 0; }
 /* Mobile-first Furgo customer home: orange welcome area, search, credits, and service shortcuts. */
 .mobile-home { min-height: 100vh; padding-bottom: calc(94px + env(safe-area-inset-bottom)); overflow: hidden; background: #fff7ef; }
 .home-orange { position: relative; padding: calc(22px + env(safe-area-inset-top)) 22px 40px; color: #fff; background: linear-gradient(180deg, #fe7801 0%, #fe7801 58%, #ff963f 77%, #ffe5ce 93%, #fff7ef 100%); }
-.home-topline { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.home-topline { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin: 0 -5px; }
 .home-kicker { display: block; margin-bottom: 3px; color: #fff6ed; font-size: 10px; font-weight: 700; letter-spacing: .09em; text-transform: uppercase; }
 .home-topline h1 { margin: 0; font: 700 clamp(34px, 9vw, 47px)/1.05 'Avenir Next', 'Avenir Next'; letter-spacing: -2px; }
 .notification-button { width: 49px; height: 49px; flex: 0 0 auto; display: grid; place-items: center; border: 2px solid #fff; border-radius: 50%; background: transparent; }
 .notification-button img { width: 25px; height: 25px; object-fit: contain; }
 .home-search { height: 55px; display: flex; align-items: center; gap: 12px; margin: 0; padding: 0 17px; border-radius: 32px; color: #777; background: #fff; box-shadow: 0 7px 18px #a4440c13; }
-.mobile-home > .home-orange > .home-search { margin: 23px 0 12px; }
+.mobile-home > .home-orange > .home-search { margin: 23px -5px 12px; }
 .home-search-placeholder { min-width: 0; flex: 1; overflow: hidden; color: #777; font-size: 15px; text-overflow: ellipsis; white-space: nowrap; }
 .search-symbol { width: 19px; height: 19px; flex: 0 0 auto; position: relative; border: 2px solid #777; border-radius: 50%; }
 .search-symbol::after { content: ''; position: absolute; width: 8px; height: 2px; right: -6px; bottom: -3px; transform: rotate(47deg); border-radius: 2px; background: #777; }
@@ -413,7 +413,192 @@ h1, h2, h3, p { margin-top: 0; }
 .search-result-item strong { color: #252326; font-size: 15px; }
 .search-result-item span { color: #817a77; font-size: 13px; }
 .search-no-results { padding: 18px 0; color: #746e69; font-size: 15px; }
-.credit-row { height: 170px; min-height: 170px; position: relative; display: block; padding: 0; }
+.local-finder-page { min-height: 100vh; min-height: 100svh; padding-bottom: calc(96px + env(safe-area-inset-bottom)); color: #171719; background: #fff7ed; }
+.local-finder-header { min-height: calc(106px + env(safe-area-inset-top)); display: grid; grid-template-columns: 42px minmax(0, 1fr) 42px; align-items: center; gap: 10px; padding: calc(28px + env(safe-area-inset-top)) 22px 12px; }
+.local-finder-header > a { width: 42px; height: 48px; display: grid; place-items: center; color: #171719; font-size: 42px; line-height: 1; }
+.local-finder-header h1 { margin: 0; font: 700 clamp(22px, 5.2vw, 32px)/1.15 'Avenir Next'; text-align: center; }
+.local-finder-content { width: min(100%, 980px); display: grid; gap: 22px; margin: 0 auto; padding: 14px 22px 32px; }
+.local-finder-share-card { min-height: 154px; position: relative; display: grid; grid-template-columns: minmax(125px, 34%) minmax(0, 1fr); align-items: center; column-gap: 16px; overflow: visible; padding: 14px 20px 14px 14px; border: 1px solid #f8c9ad; border-radius: 27px; background: #ffddc8; box-shadow: 3px 5px 6px #38241226; }
+.local-finder-share-art { width: 36%; max-width: 300px; height: calc(100% + 36px); position: absolute; z-index: 1; top: -18px; left: -14px; justify-self: center; transform: none; object-fit: contain; }
+.local-finder-share-card > div { min-width: 0; grid-column: 2; position: relative; z-index: 2; padding: 4px 0; }
+.local-finder-share-card h2 { margin: 0 0 5px; font: 700 clamp(21px, 5vw, 34px)/1.1 'Avenir Next'; }
+.local-finder-share-card p { max-width: 460px; margin: 0 0 16px; font-size: clamp(12px, 2.3vw, 17px); line-height: 1.35; }
+.local-finder-share-card .button { min-height: 42px; padding: 0 22px; border-radius: 24px; font-size: 15px; }
+.local-finder-nearby h2 { margin: 14px 0 12px 7px; font: 700 clamp(15px, 3.2vw, 21px)/1.25 'Avenir Next'; }
+.local-finder-categories { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.local-finder-category { min-width: 0; display: grid; justify-items: center; gap: 7px; padding: 0 2px; border: 0; color: #171719; background: transparent; cursor: pointer; }
+.local-finder-category img { width: clamp(52px, 15vw, 82px); aspect-ratio: 1; object-fit: contain; filter: drop-shadow(1px 3px 3px #38241238); transition: transform .18s ease; }
+.local-finder-category:hover img { transform: translateY(-2px); }
+.local-finder-category span { font-size: clamp(10px, 2.7vw, 14px); line-height: 1.15; text-align: center; }
+.local-finder-map-wrap { aspect-ratio: .94 / 1; position: relative; overflow: hidden; border-radius: 28px; background: #eee9e1; box-shadow: 2px 4px 6px #38241226; }
+.local-finder-map-wrap iframe { width: 100%; height: 100%; position: absolute; inset: 0; border: 0; }
+.local-finder-map-locate { width: 42px; height: 42px; position: absolute; top: 12px; right: 12px; display: grid; place-items: center; border: 1px solid #e9dfd6; border-radius: 50%; color: #d85f00; background: #fff; box-shadow: 0 2px 8px #0002; font-size: 28px; cursor: pointer; }
+.local-finder-feedback { max-width: calc(100% - 28px); position: absolute; bottom: 12px; left: 50%; transform: translateX(-50%); margin: 0; padding: 7px 11px; border-radius: 10px; color: #403b38; background: #fffef2e8; font-size: 10px; text-align: center; }
+.local-finder-share-dialog { width: min(500px, calc(100% - 28px)); max-height: min(90vh, 760px); padding: 0; border: 1px solid #f1ddcf; border-radius: 22px; color: #29272c; background: #fffaf6; box-shadow: 0 20px 65px #21170f55; }
+.local-finder-share-dialog::backdrop { background: #2a211dc2; backdrop-filter: blur(3px); }
+.local-finder-limit-dialog { width: min(420px, calc(100% - 32px)); padding: 0; border: 1px solid #f1ddcf; border-radius: 20px; color: #29272c; background: #fffaf6; box-shadow: 0 20px 65px #21170f55; }
+.local-finder-limit-dialog::backdrop { background: #2a211dc2; backdrop-filter: blur(3px); }
+.local-finder-limit-dialog > div { display: grid; justify-items: start; gap: 12px; padding: 22px; }
+.local-finder-limit-dialog h2 { margin: 0; font: 700 20px 'Avenir Next'; }
+.local-finder-limit-dialog p { margin: 0; color: #756e69; font-size: 13px; line-height: 1.5; }
+.local-finder-suggestion-form { display: grid; gap: 13px; padding: 20px; }
+.local-finder-suggestion-form header { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+.local-finder-suggestion-form header span { color: #d85f00; font-size: 10px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+.local-finder-suggestion-form h2 { margin: 3px 0 0; font: 700 23px 'Avenir Next'; }
+.local-finder-suggestion-form header button { width: 34px; height: 34px; border: 0; border-radius: 50%; color: #513d32; background: #f5e7dc; font-size: 22px; cursor: pointer; }
+.local-finder-suggestion-form label { display: grid; gap: 6px; color: #4c4540; font-size: 12px; }
+.local-finder-suggestion-form label span { display: inline; color: #827b77; font-weight: 400; }
+.local-finder-suggestion-form input, .local-finder-suggestion-form select, .local-finder-suggestion-form textarea { width: 100%; min-height: 44px; padding: 9px 11px; border: 1px solid #eadfd7; border-radius: 11px; color: #29272c; background: #fff; font: 400 14px 'Avenir Next'; }
+.local-finder-suggestion-form textarea { resize: vertical; }
+.local-finder-suggestion-form .button { min-height: 44px; }
+.local-finder-suggestion-feedback { min-height: 16px; margin: 0; color: #438253; font-size: 11px; }
+.local-finder-suggestion-feedback.is-error { color: #a54a28; }
+.local-finder-form-pair { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.local-finder-opening-hours-field { min-width: 0; display: grid; gap: 8px; margin: 0; padding: 0; border: 0; }
+.local-finder-opening-hours-field legend { margin-bottom: 2px; color: #4c4540; font-size: 12px; }
+.local-finder-opening-hours-form { display: grid; gap: 7px; }
+.local-finder-opening-hour-row { display: grid; grid-template-columns: 82px 100px minmax(0, 1fr); align-items: center; gap: 8px; }
+.local-finder-opening-hour-row > strong { color: #4c4540; font-size: 12px; font-weight: 500; }
+.local-finder-opening-hour-row select { min-width: 0; min-height: 40px; padding: 7px 8px; font-size: 12px; }
+.local-finder-opening-hour-times { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: center; gap: 5px; }
+.local-finder-opening-hour-times[hidden] { display: none; }
+.local-finder-opening-hour-times > span { color: #746e69; font-size: 11px; }
+.local-finder-cover-photo-preview[hidden] { display: none !important; }
+.local-finder-location-picker { display: grid; gap: 11px; padding: 13px; border: 1px solid #f1ddcf; border-radius: 15px; color: #fff; background: #fe7801; }
+.local-finder-location-picker-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.local-finder-location-picker-heading > div { display: grid; gap: 3px; }
+.local-finder-location-picker-heading strong { color: #fff; font-size: 13px; }
+.local-finder-location-picker-heading span { color: #fff7ed; font-size: 11px; line-height: 1.4; }
+.local-finder-location-picker .button { min-height: 36px; padding: 0 13px; border: 1px solid #fff; border-radius: 11px; color: #e76500; background: #fff; box-shadow: 0 3px 7px #8d3d0e38; font-size: 11px; white-space: nowrap; }
+.local-finder-location-picker .button:disabled { opacity: .6; cursor: wait; }
+.local-finder-location-picker > [data-place-use-location] { justify-self: start; }
+.local-finder-location-search { display: grid; gap: 5px; }
+.local-finder-location-search > div { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; }
+.local-finder-location-results { width: 100%; display: grid; gap: 6px; color: #fff; font-size: 11px; }
+.local-finder-location-results:empty { display: none; }
+.local-finder-location-results > p { margin: 0; }
+.local-finder-location-result { display: grid; gap: 2px; padding: 9px 10px; border: 1px solid #eadfd7; border-radius: 10px; color: #29272c; background: #fff; text-align: left; cursor: pointer; }
+.local-finder-location-result:hover, .local-finder-location-result:focus-visible { border-color: #ff7900; outline: none; }
+.local-finder-location-result strong { font-size: 12px; font-weight: 600; }
+.local-finder-location-result span { color: #756e69; font-size: 10px; }
+.local-finder-location-results .local-finder-location-selected { color: #438253; }
+.local-finder-selected-address { width: 100%; margin: 0; padding: 8px 10px; border-radius: 9px; color: #fffaf5; background: #e76c00; font-size: 10px; line-height: 1.4; overflow-wrap: anywhere; }
+.local-finder-map-attribution { margin: 0; color: #fff7ed; font-size: 8px; line-height: 1.4; }
+.local-finder-google-attribution { width: fit-content; margin: 0; padding: 2px 6px; color: #1f1f1f; background: #fff; font: 400 12px Arial, sans-serif; letter-spacing: normal; white-space: nowrap; }
+.local-finder-map-attribution a { color: inherit; text-decoration: underline; }
+.local-finder-cover-photo-field { display: grid; gap: 7px; }
+.local-finder-cover-photo-field > span { color: #4c4540; font-size: 12px; }
+.local-finder-cover-photo-preview { width: min(100%, 220px); aspect-ratio: 1.5; display: grid; place-items: center; overflow: hidden; border: 1px solid #eadfd7; border-radius: 12px; color: #827b77; background: #fff5ed; font-size: 11px; }
+.local-finder-cover-photo-preview img { width: 100%; height: 100%; object-fit: cover; }
+.local-finder-cover-photo-field > small { color: #827b77; font-size: 10px; }
+.local-finder-form-note, .local-finder-action-feedback { margin: 0; color: #756e69; font-size: 12px; line-height: 1.45; }
+.local-finder-review-block { display: grid; justify-items: end; gap: 10px; }
+.local-finder-review-block h3 { width: 100%; }
+.local-finder-review-block > p.local-finder-action-feedback { width: 100%; min-height: 18px; display: block; padding: 0; background: transparent; text-align: left; }
+.local-finder-review-block .button { min-height: 38px; padding: 0 20px; border-radius: 22px; }
+.local-finder-review-block [data-place-recommend] { justify-self: start; }
+.admin-local-finder-page { display: grid; gap: 20px; }
+.admin-local-finder-back { width: fit-content; color: #d85f00; font-size: 13px; text-decoration: none; }
+.admin-local-finder-bulk-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 9px; }
+.admin-local-finder-bulk-actions > span { margin: 0 auto 0 4px; color: #756e69; font-size: 12px; }
+.admin-local-finder-bulk-actions [disabled] { opacity: .55; cursor: not-allowed; }
+.admin-local-finder-bulk-actions + p { min-height: 18px; margin: 8px 0 0; color: #3b7b48; font-size: 12px; }
+.admin-local-finder-select { display: flex; align-items: center; gap: 8px; color: #514943; font-size: 12px; }
+.admin-local-finder-select input { width: 18px; height: 18px; accent-color: #fe7801; }
+.admin-local-finder-import { display: grid; gap: 12px; }
+.admin-local-finder-import-controls { display: flex; flex-wrap: wrap; align-items: end; gap: 12px; }
+.admin-local-finder-import-controls label { min-width: min(320px, 100%); display: grid; gap: 6px; color: #514943; font-size: 12px; }
+.admin-local-finder-import-controls input { min-height: 42px; padding: 8px 10px; border: 1px solid #eadfd7; border-radius: 10px; color: #29272c; background: #fff; font: 400 12px 'Avenir Next'; }
+.admin-local-finder-import-controls .button, .admin-local-finder-import > .button { min-height: 40px; padding: 0 15px; font-size: 11px; }
+.admin-local-finder-import-help, .admin-local-finder-import [data-local-finder-import-feedback] { margin: 0; color: #756e69; font-size: 11px; line-height: 1.5; }
+.admin-local-finder-import-errors { display: grid; gap: 4px; max-height: 180px; overflow: auto; margin: 0; padding: 10px 12px 10px 30px; border-radius: 10px; color: #a54a28; background: #fff1e9; font-size: 11px; line-height: 1.4; }
+.admin-local-finder-import-errors[hidden] { display: none; }
+.admin-local-finder-import > .button:disabled { opacity: .55; cursor: not-allowed; }
+.admin-local-finder-list { display: grid; gap: 13px; }
+.admin-local-finder-card { display: grid; gap: 13px; padding: 15px; border: 1px solid #f1dfd2; border-radius: 17px; background: #fffaf6; }
+.admin-local-finder-card-main { display: grid; grid-template-columns: 78px minmax(0, 1fr); align-items: center; gap: 13px; }
+.admin-local-finder-card-main > img, .admin-local-finder-photo-placeholder { width: 78px; height: 78px; display: grid; place-items: center; border-radius: 12px; object-fit: cover; background: #ffeadc; color: #817a76; font-size: 10px; text-align: center; }
+.admin-local-finder-card-main span, .admin-local-finder-card > span { color: #d85f00; font-size: 11px; }
+.admin-local-finder-status { margin-left: 4px; color: #8a6b4b; font-weight: 500; }
+.admin-local-finder-status.is-approved { color: #2e7d46; }
+.admin-local-finder-status.is-hidden { color: #7d7773; }
+.admin-local-finder-status.is-rejected { color: #aa4235; }
+.admin-local-finder-card h3 { margin: 4px 0; font-size: 17px; }
+.admin-local-finder-card-main p { margin: 0 0 4px; color: #77706c; font-size: 12px; }
+.admin-local-finder-card-main small { color: #34783b; font-size: 11px; }
+.admin-local-finder-review-links { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-top: 8px; }
+.admin-local-finder-review-links a, .admin-local-finder-card > a { color: #cf5b00; font-size: 12px; font-weight: 600; text-decoration: underline; text-underline-offset: 2px; }
+.admin-local-finder-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 9px; }
+.admin-local-finder-actions input { min-width: min(260px, 100%); min-height: 38px; flex: 1 1 220px; padding: 8px 10px; border: 1px solid #e7d9ce; border-radius: 10px; background: #fff; font: 400 12px 'Avenir Next'; }
+.admin-local-finder-actions .button { min-height: 38px; padding: 0 13px; font-size: 11px; }
+.admin-local-finder-rejection { margin: 0; color: #9b4335; font-size: 12px; }
+.admin-local-finder-change-list { display: grid; gap: 7px; margin: 0; }
+.admin-local-finder-change-list > div { display: grid; grid-template-columns: minmax(100px, 30%) minmax(0, 1fr); gap: 10px; }
+.admin-local-finder-change-list dt { color: #817a76; font-size: 11px; }
+.admin-local-finder-change-list dd { margin: 0; color: #37322f; font-size: 12px; overflow-wrap: anywhere; }
+.admin-local-finder-direct-form { max-width: 920px; padding: 0; }
+.admin-local-verified-input { display: flex !important; align-items: center; gap: 9px !important; }
+.admin-local-verified-input input { width: 18px; min-height: 18px; }
+.admin-local-finder-direct-form [data-admin-local-feedback] { min-height: 18px; margin: 0; color: #3b7b48; font-size: 12px; }
+.local-finder-subpage { padding-bottom: calc(100px + env(safe-area-inset-bottom)); }
+.local-finder-list-page .local-finder-header { width: min(100%, 980px); box-sizing: border-box; margin: 0 auto; padding-right: calc(22px + 5%); padding-left: calc(22px + 5%); }
+.local-finder-place-page .local-finder-header { width: min(100%, 980px); box-sizing: border-box; margin: 0 auto; padding-right: 0; padding-left: 0; }
+.local-finder-list-content { gap: 14px; padding-top: 4px; }
+.local-finder-list-content { padding-right: calc(22px + 5%); padding-left: calc(22px + 5%); }
+.local-finder-results-location { margin: 0 4px; color: #726a66; font-size: 13px; }
+.local-finder-place-list { display: grid; gap: 20px; }
+.local-finder-place-card { display: block; overflow: hidden; border: 1px solid #eee6df; border-radius: 20px; color: inherit; background: #fff; box-shadow: 2px 4px 6px #38241226; }
+.local-finder-place-card-copy { min-height: 74px; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; gap: 2px 8px; padding: 9px 12px 6px; }
+.local-finder-place-card-copy > span { color: #252326; font-size: 13px; }
+.local-finder-place-card-copy h2 { grid-column: 1 / -1; overflow: hidden; margin: 0; color: #e56b0a; font: 700 clamp(18px, 3.5vw, 24px)/1.08 'Avenir Next'; text-overflow: ellipsis; white-space: nowrap; }
+.local-finder-place-card-copy p { grid-column: 1 / -1; margin: 0; color: #34783b; font-size: 11px; }
+.local-finder-verified { display: inline-flex; align-items: center; gap: 4px; margin-left: 4px; padding: 3px 7px; border-radius: 14px; color: #b45706; background: #ffe3cc; font-size: 10px; line-height: 1; vertical-align: middle; white-space: nowrap; }
+.local-finder-verified img { width: 13px; height: 13px; object-fit: contain; }
+.local-finder-place-card-photo { height: clamp(105px, 31vw, 196px); display: grid; place-items: center; overflow: hidden; background: #ffddc8; }
+.local-finder-place-card-photo img { width: 100%; height: 100%; object-fit: cover; }
+.local-finder-place-no-photo, .local-finder-detail-no-photo { color: #94847b; font-size: clamp(18px, 4vw, 25px); }
+.local-finder-attribution { margin: 0 3px 12px; color: #817a76; font-size: 10px; line-height: 1.45; }
+.local-finder-empty, .local-finder-loading { margin: 0; padding: 22px 18px; border-radius: 17px; color: #756e69; background: #fff; font-size: 14px; line-height: 1.5; }
+.local-finder-back-button { width: fit-content; }
+.local-finder-place-detail { width: min(100%, 980px); margin: 0 auto; padding-bottom: 10px; }
+.local-finder-detail-image { height: min(64vw, 440px); min-height: 220px; display: grid; place-items: center; overflow: hidden; background: #ffddc8; }
+.local-finder-detail-photo { width: 100%; height: 100%; object-fit: cover; }
+.local-finder-detail-no-photo { font-size: 22px; }
+.local-finder-detail-summary { padding: 18px calc(22px + 5%) 16px; background: #fff0e5; }
+.local-finder-detail-meta { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 12px; color: #36793f; font-size: 12px; }
+.local-finder-detail-meta > span { flex: 0 0 auto; color: #252326; font-size: 15px; }
+.local-finder-detail-meta .local-finder-detail-recommend { min-width: 0; flex-wrap: wrap; }
+.local-finder-detail-summary h2 { margin: 5px 0 2px; color: #e56b0a; font: 700 clamp(25px, 6vw, 38px)/1.1 'Avenir Next'; }
+.local-finder-detail-summary > p { margin: 0 0 10px; font-size: 13px; }
+.local-finder-rule-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.local-finder-rule-chips span { padding: 6px 11px; border-radius: 20px; color: #bd5b0d; background: #ffe0ca; font-size: 11px; }
+.local-finder-detail-contact { display: grid; grid-template-columns: minmax(0, 1fr) minmax(100px, auto); gap: 15px; padding: 15px calc(22px + 5%); background: #fff; }
+.local-finder-detail-contact > div:first-child { display: flex; gap: 7px; font-size: 13px; line-height: 1.45; }
+.local-finder-detail-contact > div:first-child strong { flex: 0 0 auto; }
+.local-finder-direction { display: grid; justify-items: center; align-content: start; gap: 6px; font-size: 12px; }
+.local-finder-direction .button { min-height: 38px; padding: 0 20px; border-radius: 22px; }
+.local-finder-directions-menu { position: relative; }
+.local-finder-directions-menu > summary { list-style: none; cursor: pointer; }
+.local-finder-directions-menu > summary::-webkit-details-marker { display: none; }
+.local-finder-directions-menu[open] > div { min-width: 150px; position: absolute; z-index: 5; top: calc(100% + 7px); right: 0; display: grid; overflow: hidden; border: 1px solid #f0dfd2; border-radius: 12px; background: #fff; box-shadow: 0 5px 16px #38241224; }
+.local-finder-directions-menu [role="menuitem"] { padding: 11px 14px; color: #29272c; font-size: 13px; text-align: left; text-decoration: none; }
+.local-finder-directions-menu [role="menuitem"] + [role="menuitem"] { border-top: 1px solid #f0e7e0; }
+.local-finder-directions-menu [role="menuitem"]:hover { background: #fff3e9; }
+.local-finder-detail-facts { display: grid; gap: 0; padding: 12px calc(22px + 5%) 18px; }
+.local-finder-detail-facts > p { display: grid; grid-template-columns: minmax(100px, 34%) minmax(0, 1fr); gap: 12px; margin: 0; padding: 9px 0; font-size: 15px; line-height: 1.35; }
+.local-finder-detail-facts h3 { margin: 12px 0 7px; font: 600 17px 'Avenir Next'; }
+.local-finder-detail-facts .local-finder-opening-hours { display: grid; gap: 7px; padding-top: 0; color: #171719; }
+.local-finder-opening-hours-row { display: grid; grid-template-columns: minmax(90px, 28%) minmax(0, 1fr); gap: 10px; font-size: 14px; line-height: 1.35; }
+.local-finder-detail-facts a { color: #bd5b0d; overflow-wrap: anywhere; }
+.local-finder-detail-actions { display: grid; justify-items: end; gap: 12px; padding: 12px calc(22px + 5%) 18px; }
+.local-finder-detail-recommend { display: flex; align-items: center; gap: 8px; color: #36793f; font-size: 12px; }
+.local-finder-recommend-button { min-height: 27px; flex: 0 0 auto; padding: 0 10px; border: 0; border-radius: 15px; color: #fff; background: #43844b; font: 600 11px 'Avenir Next'; cursor: pointer; }
+.local-finder-recommend-button:disabled { opacity: .6; cursor: wait; }
+.local-finder-detail-actions .local-finder-action-feedback { width: 100%; }
+.local-finder-detail-actions [data-place-action-feedback]:empty { display: none; }
+.local-finder-detail-actions .button { min-height: 38px; padding: 0 20px; border-radius: 22px; }
+.local-finder-suggest-edit { display: block; color: #d85f00; font-size: 13px; text-align: right; }
+.credit-row { height: 170px; min-height: 170px; position: relative; display: block; margin: 0 -5px; padding: 0; }
 /* Home header pet artwork scales to sit beside the Total Credit card. */
 .home-pet-art { width: 50%; max-width: 220px; height: auto; position: absolute; z-index: 1; top: -3px; left: 23%; transform: translateX(-50%); object-fit: contain; filter: drop-shadow(0 7px 5px #71310f2b); }
 /* Credit balance card uses a double-thickness white outline, a raised shadow, and the top-up icon. */
@@ -422,10 +607,10 @@ h1, h2, h3, p { margin-top: 0; }
 .credit-balance-row { min-width: 0; display: flex; align-items: center; gap: 7px; }
 .credit-card strong { min-width: 0; flex: 1 1 auto; overflow-wrap: anywhere; font: 700 clamp(15px, 5.4vw, 25px)/1.08 'Avenir Next'; letter-spacing: -.7px; }
 .wallet-mark { width: 32px; height: 32px; flex: 0 0 32px; display: block; object-fit: contain; }
-.service-shortcuts { position: relative; z-index: 2; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 3px; margin: 0 -5px; padding: 13px 4px 12px; border-radius: 23px; color: #171719; background: white; box-shadow: 0px 5px 8px rgba(206, 88, 0, 0.25); }
+.service-shortcuts { position: relative; z-index: 2; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 3px; margin: 0 -5px; padding: 13px 4px 12px; border-radius: 23px; color: #171719; background: white; box-shadow: 0px 5px 8px rgba(206, 88, 0, 0.25); }
 .shortcut { min-width: 0; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; gap: 3px; padding: 0 1px; text-align: center; }
-.shortcut img { width: min(100%, 76px); height: 66px; object-fit: contain; }
-.shortcut span { font-size: clamp(10px, 3.1vw, 13px); font-weight: 700; white-space: nowrap; }
+.shortcut img { width: min(100%, 62px); height: 54px; object-fit: contain; }
+.shortcut span { font-size: clamp(9px, 2.7vw, 12px); font-weight: 700; line-height: 1.15; }
 /* Home content below the orange header: pet profile, promotions, and sign-up prompt. */
 .home-content { width: 100%; position: relative; isolation: isolate; padding: 0 20px 18px; background: transparent; }
 .home-content::before { content: ''; position: absolute; z-index: -1; top: 0; bottom: 0; left: 50%; width: 100vw; transform: translateX(-50%); background: linear-gradient(180deg, #fff7ef 0%, #fff 150px); pointer-events: none; }
@@ -497,8 +682,8 @@ h1, h2, h3, p { margin-top: 0; }
 .admin-portal-brand img { width: 40px; height: 40px; object-fit: contain; }
 .admin-portal-account { display: flex; align-items: center; gap: 15px; color: var(--muted); font-size: 13px; }
 .admin-portal-account button { padding: 8px 14px; border: 1px solid #e9d9ca; border-radius: 18px; color: var(--ink); background: #fff; font-size: 12px; font-weight: 700; }
-.admin-portal-welcome { margin: 42px 0 25px; }
-.admin-portal-welcome > span { color: var(--orange-dark); font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+.admin-portal-welcome { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin: 42px 0 25px; }
+.admin-portal-welcome > .portal-welcome-copy > span { color: var(--orange-dark); font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
 .admin-portal-welcome h1 { margin: 5px 0; font: 700 clamp(30px, 6vw, 42px)/1.15 'Avenir Next'; letter-spacing: -1.5px; }
 .admin-portal-welcome p { margin: 0; color: var(--muted); font-size: 14px; }
 .admin-portal-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 14px; }
@@ -588,14 +773,29 @@ h1, h2, h3, p { margin-top: 0; }
 .market-empty { grid-column: 1 / -1; padding: 25px 10px; color: var(--muted); text-align: center; font-size: 13px; }
 .market-pdp { width: min(100%, 960px); display: grid; gap: 24px; margin: 0 auto; }
 .market-pdp-gallery { min-width: 0; }
-.market-pdp-visual { width: 100%; aspect-ratio: 1.05; display: grid; place-items: center; overflow: hidden; border-radius: 24px; background: linear-gradient(145deg, #fff2e5, #ffdfbf); font-size: 100px; }
+.market-pdp-visual { width: 100%; aspect-ratio: 1.05; position: relative; display: grid; place-items: center; overflow: hidden; border-radius: 24px; background: linear-gradient(145deg, #fff2e5, #ffdfbf); font-size: 100px; }
 .market-pdp-visual img { width: 100%; height: 100%; object-fit: cover; }
+.market-gallery-arrow { width: 36px; height: 36px; position: absolute; top: 50%; display: grid; place-items: center; transform: translateY(-50%); padding: 0 0 3px; border: 1px solid #ffffffaa; border-radius: 50%; color: #25242a; background: #ffffffdf; font: 400 28px/1 'Avenir Next'; cursor: pointer; }
+.market-gallery-arrow.is-previous { left: 12px; }
+.market-gallery-arrow.is-next { right: 12px; }
 .market-gallery-dots { display: flex; justify-content: center; gap: 8px; margin-top: 12px; }
 .market-gallery-dots button { width: 8px; height: 8px; padding: 0; border: 0; border-radius: 50%; background: #e7d9ce; }
 .market-gallery-dots button.selected { width: 21px; border-radius: 8px; background: var(--orange); }
 .market-pdp-copy { min-width: 0; }
 .market-pdp-copy .market-product-category { display: inline-block; margin-top: 0; }
 .market-pdp-copy h2 { margin: 6px 0 10px; font: 700 25px/1.2 'Avenir Next'; letter-spacing: -.7px; }
+.market-supplier-profile { width: 100%; min-width: 0; display: flex; align-items: center; gap: 11px; margin: 14px 0; padding: 11px 13px; border: 1px solid #f1dfd0; border-radius: 15px; color: var(--ink); background: #fffdfa; text-decoration: none; }
+.market-supplier-profile > img { width: 48px; height: 48px; flex: 0 0 auto; object-fit: cover; border: 1px solid #f1dfd0; border-radius: 50%; background: #fff7ef; }
+.market-supplier-profile > div { min-width: 0; display: grid; justify-items: start; gap: 5px; }
+.market-supplier-profile > div > strong { overflow-wrap: anywhere; font-size: 14px; }
+.market-supplier-verified { display: inline-flex; align-items: center; gap: 4px; padding: 4px 8px; border-radius: 999px; color: #a84e12; background: #fff0d8; font-size: 10px; font-weight: 700; line-height: 1.2; }
+.market-supplier-verified img { width: 13px; height: 13px; flex: 0 0 auto; object-fit: contain; }
+.market-supplier-profile:hover { border-color: #f4ba82; background: #fff8ef; }
+.market-seller-profile { width: min(980px, calc(100% - 32px)); display: flex; align-items: center; gap: 16px; margin: 18px auto 26px; padding: 18px; border: 1px solid #f1dfd0; border-radius: 20px; background: #fffdfa; }
+.market-seller-profile > img { width: 72px; height: 72px; flex: 0 0 auto; object-fit: cover; border: 1px solid #f1dfd0; border-radius: 50%; background: #fff7ef; }
+.market-seller-profile > div { min-width: 0; display: grid; justify-items: start; gap: 7px; }
+.market-seller-profile h2 { margin: 0; overflow-wrap: anywhere; font-size: 20px; }
+.market-seller-products { padding-top: 0; }
 .market-pdp-description { color: var(--muted); font-size: 13px; line-height: 1.65; }
 .market-product-match { margin: 13px 0; padding: 12px 14px; border-radius: 13px; background: #fff1e5; }
 .market-product-match h3 { margin: 0 0 5px; color: var(--orange-dark); font-size: 12px; font-weight: 700; }
@@ -691,7 +891,7 @@ h1, h2, h3, p { margin-top: 0; }
 
 /* Admin Marketplace keeps supplier, cost, transfer review, and fulfillment data internal. */
 .admin-market-heading { display: flex; align-items: center; gap: 15px; margin: 34px 0 22px; }
-.admin-market-heading > a[aria-label] { color: var(--ink); font: 400 45px/1 'Avenir Next'; }
+.admin-market-heading > a[aria-label], .admin-market-heading > button[aria-label] { color: var(--ink); font: 400 45px/1 'Avenir Next'; }
 .admin-market-heading span, .admin-market-panel-heading > div > span { color: var(--orange-dark); font-size: 10px; font-weight: 700; letter-spacing: .09em; text-transform: uppercase; }
 .admin-market-heading h1 { margin: 3px 0 0; font: 700 32px 'Avenir Next'; }
 .admin-market-stats { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 12px; }
@@ -703,12 +903,85 @@ h1, h2, h3, p { margin-top: 0; }
 .admin-market-panel-heading { display: flex; justify-content: space-between; gap: 20px; margin-bottom: 14px; }
 .admin-market-panel-heading h2 { margin: 4px 0 0; font: 700 19px 'Avenir Next'; }
 .admin-market-panel-heading p { max-width: 360px; margin: 0; color: var(--muted); font-size: 11px; line-height: 1.5; }
+.admin-market-management-page .admin-market-form-grid label,
+.admin-market-management-page .admin-live-product-filters label,
+.admin-market-management-page .admin-market-offer-enabled { font-weight: 400; }
+.admin-market-management-page .admin-market-form-grid input,
+.admin-market-management-page .admin-market-form-grid select,
+.admin-market-management-page .admin-market-form-grid textarea,
+.admin-market-management-page .admin-live-product-filters select { font-weight: 400; }
 .admin-market-table-wrap { overflow-x: auto; }
 .admin-market-table { width: 100%; border-collapse: collapse; text-align: left; font-size: 11px; }
 .admin-market-table th, .admin-market-table td { padding: 10px 8px; border-bottom: 1px solid #f0e9e3; white-space: nowrap; }
 .admin-market-table th { color: var(--muted); font-size: 9px; text-transform: uppercase; }
 .admin-market-table td small { display: block; margin-top: 4px; color: var(--muted); }
 .admin-market-table td.admin-market-product-cell { display: flex; align-items: center; gap: 10px; white-space: normal; }
+.admin-live-products-link > .button { min-height: 42px; padding-inline: 20px; }
+.admin-live-product-filters { display: flex; align-items: center; flex-wrap: nowrap; gap: 9px; overflow: visible; margin: 0 0 15px; padding: 12px; border-radius: 13px; background: #fff8f2; }
+.admin-live-filter-menu { position: relative; flex: 1 1 0; min-width: 0; }
+.admin-live-filter-current { width: 100%; min-width: 0; min-height: 42px; display: grid; grid-template-columns: minmax(0, 1fr) 11px; align-items: center; gap: 5px; padding: 5px 9px; border: 1px solid #ead9ca; border-radius: 11px; color: var(--ink); background: #fff; text-align: left; cursor: pointer; }
+.admin-live-filter-current > span { min-width: 0; display: grid; gap: 1px; }
+.admin-live-filter-current small { overflow: hidden; color: var(--muted); font: 400 8px/1.2 'Avenir Next'; text-overflow: ellipsis; white-space: nowrap; }
+.admin-live-filter-current strong { overflow: hidden; font: 500 10px/1.25 'Avenir Next'; text-overflow: ellipsis; white-space: nowrap; }
+.admin-live-filter-current svg { width: 10px; height: 7px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.admin-live-filter-options { width: max(100%, 170px); max-height: min(280px, 60vh); position: absolute; z-index: 25; top: calc(100% + 6px); left: 0; display: grid; gap: 3px; overflow-y: auto; padding: 6px; border: 1px solid #f0dfd2; border-radius: 12px; background: #fff; box-shadow: 0 10px 26px #38261b24; }
+.admin-live-filter-options[hidden] { display: none; }
+.admin-live-filter-options button { width: 100%; min-height: 34px; padding: 7px 9px; border: 0; border-radius: 8px; color: var(--ink); background: #fff; font: 400 10px 'Avenir Next'; text-align: left; cursor: pointer; }
+.admin-live-filter-options button:hover, .admin-live-filter-options button[aria-checked="true"] { color: #b74f08; background: #fff3e6; }
+.admin-live-filter-menu[data-live-filter-menu="status"] .admin-live-filter-options { right: 0; left: auto; }
+.admin-live-product-filters .admin-live-sort { position: relative; flex: 0 0 auto; display: flex; align-items: center; margin-left: auto; }
+.admin-live-product-filters select { min-height: 40px; padding: 0 12px; border: 1px solid #ead9ca; border-radius: 10px; background: #fff; color: var(--ink); font: 400 11px 'Avenir Next'; }
+.admin-live-sort-trigger { width: 40px; min-height: 40px; display: inline-flex; align-items: center; justify-content: center; padding: 0; border: 1px solid #ead9ca; border-radius: 12px; color: var(--ink); background: #fff; cursor: pointer; }
+.admin-live-sort-trigger svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.admin-live-sort-options { width: min(260px, calc(100vw - 40px)); position: absolute; z-index: 20; top: calc(100% + 6px); right: 0; display: grid; gap: 3px; padding: 6px; border: 1px solid #f0dfd2; border-radius: 13px; background: #fff; box-shadow: 0 10px 26px #38261b24; }
+.admin-live-sort-options[hidden] { display: none; }
+.admin-live-sort-options button { width: 100%; min-height: 36px; padding: 7px 10px; border: 0; border-radius: 8px; color: var(--ink); background: #fff; font: 400 11px 'Avenir Next'; text-align: left; cursor: pointer; }
+.admin-live-sort-options button:hover, .admin-live-sort-options button.is-active { color: #b74f08; background: #fff3e6; }
+.admin-live-products-table td.admin-market-product-cell { min-width: 220px; }
+.admin-live-product-expand { display: grid; gap: 4px; padding: 0; border: 0; color: var(--ink); background: transparent; font: 700 11px 'Avenir Next'; text-align: left; cursor: pointer; }
+.admin-live-product-expand small { color: var(--muted); font-size: 9px; font-weight: 500; }
+.admin-live-product-name { display: grid; gap: 4px; font-size: 11px; font-weight: 700; }
+.admin-live-product-detail-row td { white-space: normal; background: #fffaf6; }
+.admin-live-product-detail-content { display: grid; gap: 5px; max-width: 900px; white-space: normal; line-height: 1.45; }
+.admin-live-product-detail-content > strong { color: var(--ink); }
+.admin-live-product-detail-content > span { color: var(--muted); white-space: normal; }
+.admin-live-product-extra-details { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-top: 8px; }
+.admin-live-product-extra-details label { display: grid; gap: 5px; color: var(--ink); font-size: 10px; font-weight: 400; }
+.admin-live-product-extra-details textarea, .admin-live-product-extra-details input { width: 100%; min-height: 38px; padding: 8px 9px; border: 1px solid #e9e1da; border-radius: 9px; color: var(--ink); background: #fff; font: 400 11px/1.45 'Avenir Next'; }
+.admin-live-product-extra-details textarea { min-height: 62px; resize: vertical; }
+.admin-live-product-extra-details .button { justify-self: start; min-height: 36px; padding: 7px 12px; font-size: 10px; }
+.admin-live-product-save-feedback { align-self: center; color: var(--muted); font-size: 10px; }
+.admin-market-product-code { color: var(--muted); font-size: 9px; font-weight: 400; }
+.admin-live-products-table td { vertical-align: middle; }
+.admin-live-products-table td.admin-live-product-actions { display: table-cell; text-align: center; vertical-align: middle; white-space: nowrap; }
+.admin-live-product-actions > * { vertical-align: middle; }
+.admin-live-products-table .admin-live-product-actions [data-toggle-live-product] { margin-right: 12px; }
+.admin-live-listing-state { display: inline-flex; align-items: center; margin: 0 2px; color: #277044; font-size: 11px; font-weight: 700; line-height: 1.2; }
+.admin-live-listing-state.is-frozen { color: #aa3e32; }
+.admin-live-products-table .admin-market-actions button { margin: 2px; padding: 5px 8px; font-size: 9px; font-weight: 400; }
+.admin-live-products-table .admin-market-actions .admin-live-edit-details { border-color: #f5bd89; color: #b74f08; background: #fff8f2; font-weight: 400; }
+.admin-live-product-empty { margin: 12px 0; color: var(--muted); font-size: 12px; }
+.admin-live-products-back { margin-top: 16px; }
+.admin-live-products-table tr[hidden] { display: none !important; }
+.admin-supplier-overview-list { display: grid; gap: 13px; }
+.admin-supplier-overview-card { display: block; overflow: hidden; border: 1px solid #f0e4db; border-radius: 14px; background: #fffdfa; }
+.admin-supplier-overview-card > summary { display: grid; grid-template-columns: 42px minmax(0, 1fr) minmax(0, 1fr); align-items: center; gap: 12px; padding: 15px; cursor: pointer; list-style: none; }
+.admin-supplier-overview-card > summary::-webkit-details-marker { display: none; }
+.admin-supplier-avatar { width: 42px; height: 42px; grid-row: span 2; object-fit: cover; border: 1px solid #f1dfd0; border-radius: 50%; background: #fff7ef; }
+.admin-supplier-company { font-size: 15px; font-weight: 700; }
+.admin-supplier-email { color: var(--muted); font-size: 11px; overflow-wrap: anywhere; }
+.admin-supplier-overview-body { display: grid; gap: 13px; padding: 0 15px 15px; }
+.admin-supplier-user-details, .admin-supplier-sales-stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 9px; }
+.admin-supplier-user-details > div, .admin-supplier-sales-stats > div { display: grid; gap: 4px; min-width: 0; padding: 9px; border-radius: 10px; background: #fff6ef; }
+.admin-supplier-user-details small, .admin-supplier-sales-stats small { color: var(--muted); font-size: 9px; }
+.admin-supplier-user-details strong { overflow-wrap: anywhere; font-size: 10px; }
+.admin-supplier-sales-stats strong { font-size: 13px; }
+.admin-supplier-products { border-top: 1px solid #f0e4db; padding-top: 10px; }
+.admin-supplier-products h4 { margin: 0; color: var(--orange-dark); font-size: 10px; }
+.admin-supplier-products ul { display: grid; gap: 7px; margin: 10px 0 0; padding: 0; list-style: none; }
+.admin-supplier-products li { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 10px; font-size: 10px; }
+.admin-supplier-products li small { grid-column: 1; color: var(--muted); font-size: 9px; }
+.admin-supplier-products li b { grid-column: 2; grid-row: 1 / span 2; align-self: center; color: var(--orange-dark); white-space: nowrap; }
 .admin-market-product-cell > span:last-child { display: grid; gap: 2px; }
 .admin-market-product-thumb, .admin-market-order-thumb { width: 44px; height: 44px; flex: 0 0 44px; object-fit: contain; border: 1px solid #f1e8df; border-radius: 10px; background: #fff8f1; }
 .admin-market-product-thumb.is-placeholder, .admin-market-order-thumb.is-placeholder { display: grid; place-items: center; font-size: 25px; }
@@ -729,6 +1002,16 @@ h1, h2, h3, p { margin-top: 0; }
 .admin-market-offer-form { display: grid; gap: 9px; }
 .admin-market-offer-enabled { display: flex; align-items: center; gap: 8px; color: var(--ink); font-size: 11px; font-weight: 700; }
 .admin-market-offer-enabled input { width: 16px; height: 16px; accent-color: var(--orange); }
+.admin-voucher-status-pill { display: inline-flex; align-items: center; padding: 4px 10px; border-radius: 999px; font-size: 10px; font-weight: 600; }
+.admin-voucher-status-pill.is-active { color: #267143; background: #e5f4e9; }
+.admin-voucher-status-pill.is-inactive { color: #686868; background: #ededed; }
+.admin-furgo-voucher-list { display: grid; gap: 9px; margin-top: 14px; }
+.admin-furgo-voucher-card { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 12px; padding: 12px; border: 1px solid #f0e4db; border-radius: 12px; background: #fffdfa; }
+.admin-furgo-voucher-details { display: grid; gap: 4px; min-width: 0; }
+.admin-furgo-voucher-details strong { color: var(--ink); font-size: 12px; }
+.admin-furgo-voucher-details span { color: var(--muted); font-size: 10px; }
+.admin-furgo-voucher-actions { display: flex; gap: 7px; }
+.admin-furgo-voucher-actions .button { min-height: 34px; padding: 7px 11px; font-size: 10px; }
 .admin-market-offer-feedback { align-self: center; color: var(--muted); font-size: 11px; }
 .admin-market-offer-feedback.success { color: #438253; }
 .admin-market-offer-feedback.error { color: #a54a28; }
@@ -750,6 +1033,23 @@ h1, h2, h3, p { margin-top: 0; }
 .admin-market-order > ul { display: grid; gap: 9px; margin: 0; padding: 12px 0; border-top: 1px solid #f2ebe5; border-bottom: 1px solid #f2ebe5; list-style: none; }
 .admin-market-order > ul li { display: grid; grid-template-columns: 44px minmax(0, 1fr); align-items: center; gap: 10px; font-size: 11px; }
 .admin-market-order-item > div { display: grid; gap: 4px; min-width: 0; }
+.admin-market-item-return, .supplier-item-return { display: grid; gap: 6px; margin-top: 8px; padding: 10px; border: 1px solid #f0dfd2; border-radius: 11px; background: #fff8f2; font-size: 10px; line-height: 1.45; overflow-wrap: anywhere; }
+.admin-market-item-return > strong, .supplier-item-return > strong { color: var(--orange-dark); font-size: 11px; }
+.admin-market-item-return > b { color: var(--ink); }
+.admin-market-item-return > a, .supplier-item-return > a { color: var(--orange-dark); font-weight: 700; }
+.admin-market-return-actions, .supplier-return-actions { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 3px; }
+.admin-market-return-actions .button, .supplier-return-actions .button, .supplier-item-return > .button { min-height: 32px; padding: 6px 10px; font-size: 10px; }
+.admin-market-item-return > small { color: var(--muted); }
+.admin-market-return-case-list { display: grid; gap: 10px; }
+.admin-market-return-case { display: grid; gap: 7px; padding: 13px; border: 1px solid #f0dfd2; border-radius: 12px; background: #fffdfa; font-size: 10px; line-height: 1.45; overflow-wrap: anywhere; }
+.admin-market-return-case > header { display: flex; justify-content: space-between; gap: 10px; }
+.admin-market-return-case > header strong { color: var(--ink); font-size: 12px; }
+.admin-market-return-case > header span { color: var(--orange-dark); font-weight: 700; }
+.admin-market-return-case > p { margin: 0; color: var(--muted); }
+.admin-market-return-case > b { color: var(--ink); }
+.admin-market-return-case > a { color: var(--orange-dark); font-weight: 700; }
+.admin-market-return-case .admin-market-return-actions { align-items: center; }
+.admin-market-return-case .admin-market-return-actions > small { color: var(--muted); }
 .admin-market-order-summary { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; }
 .admin-market-order-summary-item { display: inline-flex; align-items: center; gap: 6px; }
 .admin-market-summary-thumb { width: 30px; height: 30px; flex: 0 0 30px; object-fit: contain; border: 1px solid #f1e8df; border-radius: 8px; background: #fff8f1; }
@@ -761,6 +1061,7 @@ h1, h2, h3, p { margin-top: 0; }
 .admin-market-order-suppliers > h3 { margin: 0; font: 700 13px 'Avenir Next'; }
 .admin-market-order-supplier { display: grid; gap: 6px; padding: 12px; border: 1px solid #f1e2d7; border-radius: 12px; background: #fff8f2; font-size: 11px; overflow-wrap: anywhere; }
 .admin-market-order-supplier h3 { margin: 0; font: 700 12px 'Avenir Next'; }
+.admin-market-order-supplier ul { display: grid; gap: 4px; margin: 0; padding-left: 16px; color: var(--muted); font-size: 10px; }
 .admin-market-order-supplier a { color: var(--orange-dark); }
 .admin-market-order-supplier .button { justify-self: start; margin-top: 3px; }
 .admin-market-order > .button { min-height: 38px; font-size: 10px; }
@@ -777,6 +1078,229 @@ h1, h2, h3, p { margin-top: 0; }
 .admin-market-empty { color: var(--muted); font-size: 12px; }
 .admin-market-toast { position: fixed; right: 20px; bottom: 20px; z-index: 30; padding: 12px 16px; border-radius: 12px; color: #fff; background: var(--ink); opacity: 0; pointer-events: none; transition: opacity .2s; font-size: 12px; }
 .admin-market-toast.visible { opacity: 1; }
+/* Shared persistent notification list for Admin and Marketplace Supplier portals. */
+.portal-notifications { width: auto; margin: 0; position: relative; z-index: 8; flex: 0 0 auto; font-family: 'Avenir Next'; }
+.portal-notification-details { position: relative; }
+.portal-notification-details > summary { list-style: none; }
+.portal-notification-details > summary::-webkit-details-marker { display: none; }
+.portal-notification-details > summary.notification-button { position: relative; border-color: #fff; background: var(--orange); cursor: pointer; }
+.portal-notification-details > summary.notification-button img { width: 25px; height: 25px; object-fit: contain; }
+.portal-notification-details > summary b { min-width: 18px; height: 18px; position: absolute; top: -3px; right: -3px; display: grid; place-items: center; padding: 0 4px; border: 2px solid #fff; border-radius: 999px; color: #fff; background: #d52d24; font-size: 9px; line-height: 1; }
+.portal-notification-details > summary b[hidden] { display: none; }
+.portal-notification-panel { width: min(440px, calc(100vw - 36px)); max-height: min(70vh, 560px); overflow-y: auto; position: absolute; top: calc(100% + 8px); right: 0; padding: 15px; border: 1px solid #f0dfd2; border-radius: 17px; background: #fff; box-shadow: 0 16px 40px rgba(58, 37, 22, .16); }
+.portal-notification-panel h2 { margin: 0 0 9px; font-size: 16px; }
+.portal-notification-item { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 12px 0; border-top: 1px solid #f3e9e2; }
+.portal-notification-item.is-unread { background: linear-gradient(90deg, #fff8f0, #fff 75%); }
+.portal-notification-item strong { font-size: 12px; }
+.portal-notification-item p { margin: 4px 0; color: var(--muted); font-size: 11px; line-height: 1.45; }
+.portal-notification-item time { color: #9b918b; font-size: 10px; }
+.portal-notification-actions { display: flex; flex: 0 0 auto; flex-direction: column; align-items: flex-end; gap: 7px; }
+.portal-notification-actions a, .portal-notification-actions button { padding: 0; border: 0; color: var(--orange-dark); background: transparent; font: 700 10px 'Avenir Next'; text-decoration: none; cursor: pointer; white-space: nowrap; }
+.portal-notification-empty { margin: 8px 0 4px; color: var(--muted); font-size: 12px; }
+/* Marketplace Supplier Portal: product review submissions and supplier-scoped order lines. */
+.supplier-portal-page { min-height: 100vh; min-height: 100svh; padding: 20px 18px 100px; color: var(--ink); background: #fff7ef; font-family: 'Avenir Next'; }
+.supplier-portal-view[hidden], .supplier-product-editor[hidden] { display: none !important; }
+.supplier-portal-header, .supplier-portal-welcome, .supplier-portal-panel { width: min(100%, 980px); margin-right: auto; margin-left: auto; }
+.supplier-portal-header { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding-bottom: 14px; border-bottom: 1px solid #f0dfd2; }
+.supplier-portal-header > a, .supplier-portal-header > div { display: flex; align-items: center; gap: 10px; color: var(--ink); text-decoration: none; }
+.supplier-portal-header img { width: 40px; height: 40px; object-fit: contain; }
+.supplier-portal-header > a span { font-size: 17px; font-weight: 700; }
+.supplier-portal-header > div { color: #766c66; font-size: 12px; }
+.supplier-portal-header button { min-height: 36px; padding: 0 13px; border: 1px solid #eddfd4; border-radius: 18px; color: var(--ink); background: #fff; font: 700 11px 'Avenir Next'; cursor: pointer; }
+.supplier-portal-welcome { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; padding: 28px 0 5px; }
+.supplier-portal-welcome > span, .supplier-portal-welcome > .portal-welcome-copy > span, .supplier-panel-heading > div > span { color: var(--orange-dark); font-size: 10px; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; }
+.supplier-portal-welcome h1 { margin: 4px 0; font-size: 30px; }
+.supplier-portal-welcome p, .supplier-panel-heading > p { color: var(--muted); font-size: 12px; line-height: 1.5; }
+.supplier-dashboard-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); width: min(100%, 980px); margin: 16px auto 0; }
+.supplier-portal-panel { margin-top: 16px; padding: 18px; border: 1px solid #f1dfd0; border-radius: 19px; background: #fff; }
+.supplier-voucher-form { padding: 14px; border: 1px solid #f1e3d8; border-radius: 14px; background: #fffaf6; }
+.supplier-voucher-fields { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 11px; align-items: end; }
+.supplier-voucher-fields label { display: grid; gap: 5px; color: #574f49; font-size: 11px; font-weight: 500; }
+.supplier-voucher-fields [hidden], .admin-market-form-grid [hidden] { display: none !important; }
+.supplier-voucher-fields input:not([type="checkbox"]), .supplier-voucher-fields select { width: 100%; min-width: 0; min-height: 39px; padding: 8px 10px; border: 1px solid #e9e1da; border-radius: 9px; color: var(--ink); background: #fff; font: 12px 'Avenir Next'; }
+.supplier-voucher-fields .supplier-voucher-enabled { display: flex; align-items: center; gap: 8px; min-height: 39px; }
+.supplier-voucher-form .admin-market-form-actions { margin-top: 12px; }
+.supplier-voucher-list { display: grid; gap: 9px; margin-top: 13px; }
+.supplier-voucher-card, .market-shop-voucher-card { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 14px; border: 1px solid #f0e4db; border-radius: 13px; background: #fffdfa; }
+.supplier-voucher-card h3 { margin: 3px 0; font-size: 14px; }
+.supplier-voucher-card p { margin: 0; color: var(--muted); font-size: 11px; }
+.supplier-voucher-state, .supplier-voucher-status-pill { display: inline-flex; align-items: center; width: fit-content; padding: 4px 9px; border-radius: 999px; font-size: 10px; font-weight: 600; }
+.supplier-voucher-state.is-active, .supplier-voucher-status-pill.is-active { color: #267143; background: #e5f4e9; }
+.supplier-voucher-state:not(.is-active), .supplier-voucher-status-pill.is-inactive { color: #686868; background: #ededed; }
+.supplier-voucher-actions { display: flex; gap: 7px; }
+.supplier-voucher-actions button { padding: 6px 10px; border: 1px solid #eadfd5; border-radius: 9px; color: var(--ink); background: #fff; font: 11px 'Avenir Next'; cursor: pointer; }
+.supplier-voucher-actions button:last-child { color: #a53f31; }
+.market-shop-vouchers { display: grid; gap: 8px; }
+.market-shop-voucher-card > div { display: grid; gap: 3px; min-width: 0; }
+.market-shop-voucher-card > div > span { color: var(--orange-dark); font-size: 10px; font-weight: 700; }
+.market-shop-voucher-card strong { font-size: 13px; }
+.market-shop-voucher-card small { color: var(--muted); font-size: 10px; }
+.market-shop-voucher-card button { flex: 0 0 auto; min-height: 34px; padding: 6px 12px; border: 1px solid #ff7900; border-radius: 18px; color: #d75d00; background: #fff; font: 600 11px 'Avenir Next'; cursor: pointer; }
+.market-shop-voucher-card button:hover { color: white; background: #ff7900; }
+.admin-supplier-vouchers { margin-top: 14px; }
+.supplier-order-status-tabs { width: 100%; margin: 0 0 10px; }
+.supplier-order-status-tabs button { font-family: 'Avenir Next'; cursor: pointer; }
+.supplier-listing-note { margin: -3px 0 12px; color: var(--muted); font-size: 11px; line-height: 1.5; }
+.supplier-panel-heading > .button { flex: 0 0 auto; align-self: center; }
+.bottom-nav.supplier-bottom-nav { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.bottom-nav.supplier-bottom-nav button.bottom-item { padding: 0; border: 0; background: transparent; font: 600 9px/1.05 'Avenir Next'; cursor: pointer; }
+.bottom-nav.supplier-bottom-nav .bottom-item { gap: 1px; text-decoration: none; }
+.bottom-nav.supplier-bottom-nav .bottom-item.active { color: var(--orange); font-weight: 700; }
+.bottom-nav.supplier-bottom-nav .bottom-item span { max-width: 100%; font-size: 9px; line-height: 1.05; text-align: center; }
+.bottom-nav.supplier-bottom-nav .bottom-item img { width: 24px; height: 24px; }
+.supplier-admin-style-page > .admin-market-heading { width: min(100%, 980px); margin: 34px auto 22px; }
+.supplier-admin-style-page > .admin-market-heading > button[aria-label] { width: 42px; height: 54px; position: absolute; top: 50%; left: 0; transform: translateY(-50%); display: grid; place-items: center; padding: 0; border: 0; color: var(--ink); background: transparent; font-size: 0; cursor: pointer; }
+.supplier-admin-style-page > .admin-market-heading > button[aria-label]::before { content: ''; width: 14px; height: 14px; margin-left: 6px; border-bottom: 2.5px solid currentColor; border-left: 2.5px solid currentColor; transform: rotate(45deg); }
+.supplier-admin-style-page > .admin-market-panel { width: min(100%, 980px); margin-right: auto; margin-left: auto; }
+.supplier-admin-help-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.supplier-admin-help-grid article { min-height: 130px; padding: 16px; border: 1px solid #f1dfd0; border-radius: 15px; background: #fffaf6; }
+.supplier-admin-help-grid strong { color: var(--ink); font-size: 13px; }
+.supplier-admin-help-grid p { margin: 7px 0 0; color: var(--muted); font-size: 11px; line-height: 1.55; }
+.supplier-profile-details { display: grid; gap: 0; margin: 0; }
+.supplier-profile-details > div { display: grid; grid-template-columns: minmax(120px, .35fr) minmax(0, 1fr); gap: 14px; padding: 13px 0; border-bottom: 1px solid #f0e9e3; font-size: 12px; }
+.supplier-profile-details > div:last-child { border-bottom: 0; }
+.supplier-profile-details dt { color: var(--muted); }
+.supplier-profile-details dd { margin: 0; font-weight: 600; overflow-wrap: anywhere; }
+.supplier-profile-panel { width: min(100%, 980px); padding: 24px 0; border-color: transparent; background: transparent; box-shadow: none; }
+.supplier-portal-view[data-supplier-section="profile"] > .admin-access-level-summary { width: min(100%, 980px); margin-right: auto; margin-left: auto; }
+.supplier-profile-form { width: 100%; margin: 0 auto; }
+.supplier-profile-photo { width: min(164px, 44vw); height: auto; margin: 0 auto 30px; }
+.supplier-profile-photo img { object-fit: cover; }
+.supplier-profile-photo input { cursor: pointer; }
+.supplier-profile-fields { row-gap: 20px; }
+.supplier-profile-fields > .pet-name-field { grid-column: 1 / -1; }
+.supplier-profile-fields .supplier-profile-readonly output { width: 100%; min-height: 68px; display: flex; align-items: center; min-width: 0; padding: 0 16px; overflow-wrap: anywhere; border-radius: 19px; color: var(--ink); background: #fff; font: 16px 'Avenir Next'; }
+.supplier-profile-fields .supplier-profile-readonly > span { color: var(--ink); }
+.supplier-profile-form .admin-market-form-actions { display: grid; grid-template-columns: 1fr; gap: 10px; margin-top: 20px; }
+.supplier-profile-form .admin-market-form-actions > button { width: 100%; min-height: 56px; }
+.supplier-panel-heading { display: flex; justify-content: space-between; gap: 18px; margin-bottom: 13px; }
+.supplier-panel-heading h2 { margin: 4px 0 0; font-size: 19px; }
+.supplier-panel-heading > p { max-width: 360px; margin: 0; }
+.supplier-form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 12px; }
+.supplier-photo-list { display: flex; flex-wrap: wrap; gap: 10px; padding: 11px; border: 1px solid #f0e4db; border-radius: 12px; background: #fffaf6; }
+.supplier-photo-item { width: 92px; position: relative; display: grid; justify-items: center; gap: 5px; padding: 7px; border: 1px solid #f0e4db; border-radius: 11px; background: #fff; }
+.supplier-photo-item > img { width: 66px; height: 66px; object-fit: cover; border: 1px solid #eee4dc; border-radius: 9px; background: #fff8f2; }
+.supplier-photo-item > span { max-width: 100%; color: var(--muted); font-size: 9px; text-align: center; }
+.supplier-photo-item > .supplier-photo-change { min-height: 23px; display: grid; place-items: center; padding: 3px 7px; border: 1px solid #eddfd4; border-radius: 12px; color: var(--ink); background: #fff; font-size: 9px; font-weight: 400; cursor: pointer; }
+.supplier-photo-change input { width: 1px; height: 1px; position: absolute; overflow: hidden; clip-path: inset(50%); }
+.supplier-photo-item > button { min-height: 23px; padding: 2px 7px; border: 0; border-radius: 12px; color: #a53f31; background: #fff0eb; font: 400 9px 'Avenir Next'; cursor: pointer; }
+.supplier-form-grid label { min-width: 0; display: grid; gap: 6px; margin-bottom: 12px; font-size: 11px; font-weight: 700; }
+.supplier-form-grid input, .supplier-form-grid select, .supplier-form-grid textarea { width: 100%; min-width: 0; min-height: 42px; padding: 9px 11px; border: 1px solid #e9e1da; border-radius: 10px; color: var(--ink); background: #fff; font: 13px 'Avenir Next'; }
+.supplier-form-grid textarea { resize: vertical; }
+.supplier-form-wide { grid-column: 1 / -1; }
+.supplier-form-note, .supplier-portal-feedback { color: var(--muted); font-size: 11px; line-height: 1.5; }
+.supplier-portal-feedback { margin: 10px 0 0; }
+.supplier-portal-feedback.is-error { color: #a53f31; }
+.supplier-submission-list, .supplier-order-list { display: grid; gap: 10px; }
+.supplier-submission-card, .supplier-order-card { padding: 14px; border: 1px solid #f0e4db; border-radius: 13px; background: #fffdfa; }
+.supplier-submission-card > div, .supplier-order-card > header { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.supplier-submission-card > div strong, .supplier-order-card > header strong { font-size: 13px; }
+.supplier-submission-card > div span, .supplier-order-card > header > span { padding: 5px 9px; border-radius: 15px; color: #a74914; background: #fff0de; font-size: 10px; font-weight: 700; }
+.supplier-submission-card > p, .supplier-submission-card small, .supplier-submission-card time, .supplier-order-card time { display: block; margin: 7px 0 0; color: var(--muted); font-size: 11px; line-height: 1.45; }
+.supplier-submission-card time, .supplier-order-card time { font-size: 10px; }
+.supplier-rejection-reason { padding: 9px; border-radius: 9px; color: #982f25 !important; background: #fff0eb; }
+.supplier-order-card dl { display: grid; gap: 7px; margin: 12px 0; }
+.supplier-order-card dl div { display: grid; grid-template-columns: 85px minmax(0, 1fr); gap: 9px; font-size: 11px; }
+.supplier-order-card dt { color: var(--muted); }
+.supplier-order-card dd { margin: 0; overflow-wrap: anywhere; }
+.supplier-order-card ul, .marketplace-product-review-card ul { margin: 0; padding-left: 18px; color: #5f5752; font-size: 11px; line-height: 1.6; }
+.supplier-empty { color: var(--muted); font-size: 12px; }
+.supplier-table-wrap { overflow-x: auto; border: 1px solid #f0e4db; border-radius: 12px; }
+.supplier-product-table { width: 100%; min-width: 660px; border-collapse: collapse; color: var(--ink); font-size: 11px; }
+.supplier-product-table th, .supplier-product-table td { padding: 11px 10px; border-bottom: 1px solid #f0e4db; text-align: left; vertical-align: middle; }
+.supplier-product-table th { color: var(--muted); background: #fffaf5; font-size: 10px; font-weight: 700; white-space: nowrap; }
+.supplier-product-table tr:last-child td { border-bottom: 0; }
+.supplier-product-cell { display: flex; align-items: center; gap: 9px; min-width: 200px; }
+.supplier-product-cell > span:last-child { display: grid; gap: 3px; }
+.supplier-product-cell strong { font-size: 11px; }
+.supplier-product-cell small { color: var(--muted); font-size: 10px; }
+.supplier-product-thumb { flex: 0 0 42px; width: 42px; height: 42px; object-fit: contain; border: 1px solid #f0e4db; border-radius: 8px; background: #fff; }
+.supplier-product-thumb.is-placeholder { display: grid; place-items: center; color: #ef8b26; font-size: 20px; }
+.supplier-product-status { display: inline-flex; padding: 5px 9px; border-radius: 14px; font-size: 10px; font-weight: 400; white-space: nowrap; }
+.supplier-product-status.is-pending { color: #9a5a07; background: #fff2d9; }
+.supplier-product-status.is-approved { color: #227346; background: #e8f6ec; }
+.supplier-product-status.is-rejected { color: #a53f31; background: #fff0eb; }
+.supplier-product-actions { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 7px; }
+.supplier-product-actions button { padding: 5px 9px; border: 1px solid #f0ded1; border-radius: 8px; color: #664f42; background: #fff; font: inherit; font-size: 10px; font-weight: 700; cursor: pointer; }
+.supplier-product-actions button.is-danger { color: #a53f31; }
+.supplier-product-actions button:disabled { opacity: .55; cursor: wait; }
+.supplier-pending-note, .supplier-rejection-reason { margin: 6px 0 0; font-size: 10px; }
+.supplier-pending-note { color: #92600a; }
+.supplier-rejection-reason { color: #a53f31; }
+.marketplace-review-count { display: inline-grid; min-width: 23px; height: 23px; margin-left: 6px; padding: 0 6px; place-items: center; border-radius: 99px; color: #fff; background: #e64a36; font-size: 12px; vertical-align: 2px; }
+.marketplace-director-notification { display: inline-grid; min-width: 20px; height: 20px; margin-left: 8px; padding: 0 5px; place-items: center; border-radius: 99px; color: #fff; background: #c93226; font-size: 11px; line-height: 1; vertical-align: 2px; }
+.supplier-rejection-reason { grid-column: 1 / -1; margin: 5px 0 0 !important; padding: 8px; border-radius: 8px; color: #982f25 !important; background: #fff0eb; font-size: 10px !important; }
+.supplier-order-card > header > span { color: #a74914; background: #fff0de; white-space: nowrap; }
+.supplier-order-card dl { display: grid; gap: 7px; margin: 12px 0; }
+.supplier-order-card dl div { display: grid; grid-template-columns: 85px minmax(0, 1fr); gap: 9px; font-size: 11px; }
+.supplier-order-card dt { color: var(--muted); }
+.supplier-order-card dd { margin: 0; overflow-wrap: anywhere; }
+.supplier-order-card ul { display: grid; gap: 6px; margin: 0; padding: 10px 0; list-style: none; border-top: 1px solid #f0e4db; border-bottom: 1px solid #f0e4db; }
+.supplier-order-card li { display: grid; grid-template-columns: 42px minmax(0, 1fr) auto; gap: 3px 9px; align-items: center; }
+.supplier-order-card li strong { color: var(--ink); font-size: 11px; }
+.supplier-order-card li .supplier-product-thumb { grid-row: 1 / span 3; }
+.supplier-order-card li span { grid-column: 2 / -1; }
+.supplier-order-card li small { grid-column: 2 / -1; color: var(--muted); }
+.supplier-market-order-list { gap: 13px; }
+.supplier-market-order-summary .supplier-product-thumb { width: 30px; height: 30px; flex-basis: 30px; border-radius: 8px; }
+.supplier-market-order .admin-market-customer { font-size: 11px; }
+.supplier-market-order .admin-market-order-total { font-size: 12px; }
+.supplier-recipient-details { display: grid; gap: 7px; margin: 12px 0; padding: 13px; border: 1px solid #f1e2d7; border-radius: 12px; background: #fff8f2; font-size: 11px; overflow-wrap: anywhere; }
+.supplier-recipient-details h3 { margin: 0 0 2px; font: 700 13px 'Avenir Next'; }
+.supplier-recipient-details p { margin: 0; color: var(--muted); line-height: 1.45; }
+.supplier-recipient-details p strong { color: var(--ink); }
+.supplier-recipient-details .button { justify-self: start; min-height: 36px; margin-top: 3px; font-size: 10px; }
+.supplier-recipient-details [data-copy-recipient-feedback] { min-height: 14px; color: #357348; font-size: 10px; }
+.supplier-order-payment, .supplier-shipping-note { margin: 10px 0; color: var(--muted); font-size: 11px; }
+.supplier-shipping-form { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 9px; align-items: end; margin-top: 12px; }
+.supplier-shipping-form label { display: grid; gap: 5px; color: #514943; font-size: 10px; font-weight: 700; }
+.supplier-shipping-form input { width: 100%; min-width: 0; min-height: 38px; padding: 8px 10px; border: 1px solid #e9e1da; border-radius: 9px; color: var(--ink); background: #fff; font: 12px 'Avenir Next'; }
+.supplier-shipping-form button { min-height: 38px; grid-column: 1 / 3; }
+.supplier-shipping-form [data-supplier-order-feedback] { color: var(--muted); font-size: 10px; }
+.supplier-shipment-summary { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-top: 12px; font-size: 11px; }
+.supplier-shipment-summary > strong { color: #227346; }
+.supplier-shipment-summary > span { color: var(--muted); }
+.supplier-shipment-summary > a { color: var(--orange-dark); font-weight: 700; }
+.supplier-shipment-summary .supplier-delivered-button { min-height: 34px; margin-left: auto; padding: 6px 12px; font-size: 10px; }
+.supplier-market-order .admin-market-order-item { align-items: start; }
+.supplier-portal-panel > .supplier-portal-feedback { margin: -3px 0 10px; }
+.supplier-portal-panel > .supplier-portal-feedback.is-error { color: #a53f31; }
+.marketplace-product-review-list { display: grid; gap: 12px; }
+.marketplace-product-review-card { display: grid; grid-template-columns: minmax(140px, .45fr) minmax(0, 1fr); gap: 14px; padding: 14px; border: 1px solid #f0e4db; border-radius: 14px; background: #fffdfa; }
+.marketplace-review-images { display: flex; flex-wrap: wrap; align-content: start; gap: 7px; }
+.marketplace-review-images img { width: 75px; height: 75px; object-fit: contain; border: 1px solid #f0e4db; border-radius: 9px; background: white; }
+.marketplace-review-copy > span { color: var(--orange-dark); font-size: 10px; font-weight: 700; }
+.marketplace-review-copy h3 { margin: 3px 0 6px; font-size: 16px; }
+.marketplace-review-copy > p { margin: 4px 0; color: var(--muted); font-size: 11px; line-height: 1.45; }
+.marketplace-review-copy label { display: grid; gap: 5px; margin: 11px 0; font-size: 10px; font-weight: 700; }
+.marketplace-review-copy textarea { width: 100%; min-height: 58px; padding: 8px; border: 1px solid #e9e1da; border-radius: 9px; font: 12px 'Avenir Next'; }
+.supplier-portal-panel > .supplier-panel-heading + form .admin-market-form-actions [role="status"] { align-self: center; color: var(--muted); font-size: 11px; }
+.supplier-portal-panel > .supplier-panel-heading + form .admin-market-form-actions [role="status"].is-error { color: #a53f31; }
+.supplier-portal-panel .admin-market-table { font-size: 12px; }
+@media (max-width: 620px) {
+  .supplier-portal-page { padding: 14px 12px 100px; }
+  .supplier-portal-header > a span { font-size: 14px; }
+  .supplier-portal-header > div { gap: 6px; font-size: 10px; }
+  .supplier-portal-header button { padding: 0 9px; }
+  .supplier-panel-heading { display: block; }
+  .supplier-voucher-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .supplier-voucher-card { align-items: flex-start; }
+  .supplier-voucher-actions { flex-direction: column; }
+  .supplier-panel-heading > .button { margin-top: 10px; }
+  .supplier-panel-heading > p { margin: 7px 0 0; }
+  .supplier-form-grid { grid-template-columns: minmax(0, 1fr); }
+  .supplier-form-wide { grid-column: auto; }
+  .supplier-shipping-form { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .supplier-admin-help-grid { grid-template-columns: minmax(0, 1fr); }
+  .supplier-admin-help-grid article { min-height: 0; }
+  .supplier-profile-details > div { grid-template-columns: minmax(90px, .4fr) minmax(0, 1fr); gap: 9px; }
+  .supplier-profile-fields { grid-template-columns: minmax(0, 1fr); }
+  .supplier-profile-fields .supplier-profile-readonly output { min-height: 60px; }
+  .supplier-profile-form .admin-market-form-actions > button { flex: 1 1 140px; }
+  .supplier-shipping-form button { grid-column: 1 / -1; }
+  .supplier-shipping-form [data-supplier-order-feedback] { grid-column: 1 / -1; }
+  .marketplace-product-review-card { grid-template-columns: minmax(0, 1fr); }
+}
 .admin-promotions-page { min-height: 100vh; padding: 30px 20px 60px; background: #fff7ed; }
 .admin-promotions-heading { width: min(100%, 900px); display: flex; align-items: center; gap: 18px; margin: 0 auto 24px; }
 .admin-promotions-heading > a { font-size: 44px; line-height: 1; }
@@ -1021,13 +1545,14 @@ h1, h2, h3, p { margin-top: 0; }
   .mobile-home { padding-bottom: 104px; background: #fff7ef; }
   .home-orange { padding: 30px max(34px, calc((100vw - 1100px)/2)) 40px; border-radius: 0 0 36px 36px; }
   .home-topline h1 { font-size: 52px; }
-  .mobile-home > .home-orange > .home-search { max-width: 720px; height: 60px; margin: 26px 0 15px; }
-  .credit-row { max-width: 850px; height: 220px; min-height: 220px; }
+  .home-topline { max-width: 1000px; margin: 0 auto; }
+  .mobile-home > .home-orange > .home-search { width: min(100%, 1000px); max-width: 1000px; height: 60px; margin: 26px auto 15px; }
+  .credit-row { max-width: 1000px; height: 220px; min-height: 220px; margin: 0 auto; }
   .home-pet-art { width: 38%; max-width: 320px; top: -5px; left: 22.5%; }
   .credit-card { width: 55%; min-height: 110px; max-width: 470px; top: 54px; padding-left: 22px; }
   .credit-label { font-size: 17px; }.credit-card strong { font-size: 36px; }
   .service-shortcuts { max-width: 1000px; margin: 0 auto; padding: 16px 20px 14px; border-radius: 25px; }
-  .shortcut { flex-direction: row; justify-content: center; gap: 12px; padding: 5px 10px; }
+  .shortcut { flex-direction: row; justify-content: center; gap: 7px; padding: 5px 10px; }
   .shortcut img { width: 65px; height: 60px; }.shortcut span { font-size: 15px; }
   .home-content { max-width: 1100px; margin: 0 auto; padding: 0 34px 24px; }
   .section-title-row h2 { font-size: 28px; }
@@ -1036,6 +1561,20 @@ h1, h2, h3, p { margin-top: 0; }
   .promo-track { margin-right: 0; padding-right: 0; }.promo-banner { width: min(82%, 610px); min-width: min(82%, 610px); flex-basis: min(82%, 610px); }
   .bottom-nav { width: min(660px, calc(100% - 50px)); height: 76px; right: 50%; bottom: 15px; left: auto; transform: translateX(50%); padding: 5px 18px; border: 1px solid #f0ece8; border-radius: 26px; box-shadow: 0 7px 26px #38241218; }
   .bottom-store { margin-top: -28px; }.bottom-item { font-size: 11px; }
+}
+@media (max-width: 420px) {
+  .local-finder-content { gap: 19px; padding-right: 18px; padding-left: 18px; }
+  .local-finder-form-pair { grid-template-columns: minmax(0, 1fr); }
+  .local-finder-opening-hour-row { grid-template-columns: 68px 88px minmax(0, 1fr); gap: 6px; }
+  .local-finder-opening-hour-row select { padding-right: 4px; padding-left: 6px; font-size: 11px; }
+  .local-finder-detail-contact { grid-template-columns: minmax(0, 1fr); }
+  .local-finder-direction { justify-items: start; }
+  .local-finder-share-card { min-height: 128px; grid-template-columns: minmax(100px, 34%) minmax(0, 1fr); column-gap: 12px; padding: 11px 13px 11px 12px; border-radius: 22px; }
+  .local-finder-share-art { width: 38%; height: calc(100% + 28px); top: -14px; left: -9px; transform: none; }
+  .local-finder-share-card p { margin-bottom: 12px; }
+  .local-finder-share-card .button { min-height: 36px; padding: 0 17px; font-size: 13px; }
+  .local-finder-map-wrap { border-radius: 21px; }
+  .local-finder-suggestion-form { padding: 16px; }
 }
 
 /* Full-screen startup loading page shown before the home dashboard. */
@@ -1075,6 +1614,17 @@ h1, h2, h3, p { margin-top: 0; }
   .admin-market-stats { grid-template-columns: 1fr; }
   .admin-market-panel { padding: 15px; }
   .admin-market-panel-heading { display: grid; gap: 8px; }
+  .admin-furgo-voucher-card { grid-template-columns: minmax(0, 1fr) auto; }
+  .admin-furgo-voucher-card > .admin-voucher-status-pill { grid-column: 2; grid-row: 1; }
+  .admin-furgo-voucher-actions { grid-column: 1 / -1; }
+  .admin-live-product-filters { gap: 5px; padding: 8px; }
+  .admin-live-filter-current { padding-inline: 7px; }
+  .admin-live-filter-options { width: min(190px, calc(100vw - 32px)); }
+  .admin-live-product-extra-details { grid-template-columns: 1fr; }
+  .admin-supplier-user-details, .admin-supplier-sales-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .admin-supplier-overview-card > summary { grid-template-columns: 42px minmax(0, 1fr); gap: 4px 10px; }
+  .admin-supplier-avatar { grid-row: span 2; }
+  .admin-supplier-overview-card .admin-supplier-email { grid-column: 2; }
   .admin-market-form-grid { grid-template-columns: 1fr; }
   .admin-market-wide { grid-column: auto; }
   .admin-market-tracking-form { grid-template-columns: 1fr; }
@@ -1329,6 +1879,62 @@ h1, h2, h3, p { margin-top: 0; }
 .my-order-expanded { display: grid; gap: 8px; padding: 12px 15px 15px; border-top: 1px solid #f1e9e2; }
 .my-order-detail-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin: 0 0 4px; }
 .my-order-detail-list > div { min-width: 0; padding: 10px; border-radius: 11px; background: #fff8f2; }
+.my-order-marketplace-lines { display: grid; gap: 9px; }
+.my-order-marketplace-lines > h3 { margin: 0; font-size: 13px; }
+.my-order-supplier-group { display: grid; gap: 7px; padding: 10px; border: 1px solid #f0e2d7; border-radius: 12px; background: #fffdfa; }
+.my-order-supplier-group > header { display: flex; justify-content: space-between; gap: 10px; color: #756e69; font-size: 10px; }
+.my-order-supplier-group > header strong { color: var(--ink); font-size: 11px; }
+.my-order-supplier-group > header span { text-align: right; }
+.my-order-supplier-group a { color: var(--orange-dark); font-weight: 700; }
+.my-order-marketplace-line { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 7px; padding-top: 8px; border-top: 1px solid #f1e9e2; font-size: 11px; }
+.my-order-marketplace-line > div { display: grid; gap: 3px; }
+.my-order-marketplace-line > div > span, .my-order-return-status > span, .my-order-return-expired { color: var(--muted); font-size: 10px; }
+.my-order-marketplace-line > b { white-space: nowrap; }
+.my-order-return-open { grid-column: 1 / -1; justify-self: start; min-height: 32px; padding: 5px 10px; font-size: 10px; }
+.my-order-return-form { grid-column: 1 / -1; display: grid; gap: 8px; padding: 10px; border-radius: 10px; background: #fff8f2; }
+.my-order-return-form[hidden] { display: none; }
+.my-order-return-form label { display: grid; gap: 5px; font-size: 10px; font-weight: 700; }
+.my-order-return-form textarea, .my-order-return-form input { width: 100%; min-height: 38px; padding: 8px; border: 1px solid #e8ddd4; border-radius: 8px; background: #fff; font: 12px 'Avenir Next'; }
+.my-order-return-form textarea { min-height: 72px; resize: vertical; }
+.my-order-return-form > small { color: var(--muted); font-size: 9px; }
+.my-order-return-form .button { justify-self: start; min-height: 34px; padding: 6px 12px; font-size: 10px; }
+.my-order-return-form [role="status"] { color: #357348; font-size: 10px; }
+.my-order-return-status { grid-column: 1 / -1; display: grid; gap: 4px; padding: 8px; border-radius: 9px; background: #fff8f2; }
+.my-order-return-status > strong { color: var(--orange-dark); font-size: 10px; }
+.marketplace-payment-pending, .marketplace-cancellation-refund { margin: 0; padding: 9px 11px; border-radius: 10px; background: #fff8f2; color: #756e69; font-size: 10px; line-height: 1.45; }
+.marketplace-cancellation-refund strong { color: var(--orange-dark); }
+.marketplace-online-payment { display: grid; justify-items: start; gap: 6px; padding: 10px; border: 1px solid #f0dfd2; border-radius: 11px; background: #fff8f2; }
+.marketplace-online-payment > strong { color: var(--ink); font-size: 11px; }
+.marketplace-online-payment .button { min-height: 34px; padding: 6px 12px; font-size: 10px; }
+.marketplace-online-payment > small { color: var(--muted); font-size: 9px; }
+.marketplace-order-actions-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.marketplace-receipt-control { display: grid; justify-items: start; gap: 5px; min-width: 0; }
+.marketplace-cancel-order { justify-self: end; padding: 5px 0; border: 0; color: #fe7801; background: transparent; font: 700 11px/1.4 'Avenir Next'; text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
+.marketplace-cancel-dialog { width: min(460px, calc(100vw - 30px)); max-height: min(88vh, 760px); padding: 0; overflow: auto; border: 1px solid #f0dfd2; border-radius: 20px; color: var(--ink); background: #fffdfa; box-shadow: 0 22px 70px #21160f30; }
+.marketplace-cancel-dialog::backdrop { background: #21160f88; backdrop-filter: blur(3px); }
+.marketplace-cancel-dialog form { display: grid; gap: 15px; padding: 22px; }
+.marketplace-cancel-dialog header > span { color: #fe7801; font-size: 10px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+.marketplace-cancel-dialog h2 { margin: 6px 0 0; font: 700 20px/1.3 'Avenir Next'; }
+.marketplace-cancel-dialog fieldset { display: grid; gap: 8px; margin: 0; padding: 0; border: 0; }
+.marketplace-cancel-dialog legend { margin-bottom: 8px; font-size: 12px; font-weight: 700; }
+.marketplace-cancel-reason { display: flex; align-items: center; gap: 9px; min-height: 39px; padding: 8px 10px; border: 1px solid #f0e2d7; border-radius: 10px; background: #fff; font-size: 11px; font-weight: 400; cursor: pointer; }
+.marketplace-cancel-reason input { width: 15px; height: 15px; margin: 0; accent-color: #fe7801; }
+.marketplace-cancel-other { display: grid; gap: 6px; padding: 3px 2px 0; font-size: 11px; font-weight: 600; }
+.marketplace-cancel-other[hidden] { display: none; }
+.marketplace-cancel-other textarea { width: 100%; min-height: 72px; padding: 9px; border: 1px solid #e8ddd4; border-radius: 9px; background: #fff; font: 12px 'Avenir Next'; resize: vertical; }
+.marketplace-cancel-dialog-note { margin: 0; color: var(--muted); font-size: 10px; line-height: 1.5; }
+.marketplace-cancel-error { margin: 0; color: #c43d32; font-size: 11px; font-weight: 600; }
+.marketplace-cancel-dialog-actions { display: flex; justify-content: flex-end; gap: 9px; }
+.marketplace-cancel-dialog-actions .button { min-height: 38px; padding: 8px 13px; font-size: 11px; }
+.marketplace-payment-retry, .admin-market-cancellation-refund { display: grid; gap: 7px; padding: 10px; border: 1px solid #f0dfd2; border-radius: 11px; background: #fff8f2; color: var(--muted); font-size: 10px; }
+.marketplace-payment-retry > strong, .admin-market-cancellation-refund > strong { color: var(--ink); font-size: 11px; }
+.marketplace-payment-retry > p { margin: 0; }
+.marketplace-payment-retry > label { display: grid; gap: 5px; color: var(--ink); font-weight: 700; }
+.marketplace-payment-retry input { min-height: 36px; padding: 6px; border: 1px solid #e8ddd4; border-radius: 8px; background: #fff; font: 11px 'Avenir Next'; }
+.marketplace-payment-retry .button, .admin-market-cancellation-refund .button { justify-self: start; min-height: 32px; padding: 6px 10px; font-size: 10px; }
+.marketplace-payment-retry [role="status"] { color: #357348; font-size: 10px; }
+.admin-market-cancellation-refund > span { overflow-wrap: anywhere; }
+.admin-market-cancellation-refund > small { color: var(--muted); }
 .my-order-pet-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
 .my-order-pet-card { min-width: 0; padding: 11px; border: 1px solid #f0e2d7; border-radius: 12px; background: #fff8f2; }
 .my-order-pet-card h3 { margin: 0 0 8px; color: #28242a; font-size: 14px; font-weight: 700; }
