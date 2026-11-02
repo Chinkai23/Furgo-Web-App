@@ -18,6 +18,7 @@ const customerKeys = new Set([
   'furgo-demo-payment-methods',
   'furgo-demo-marketplace-cart',
   'furgo-demo-marketplace-favorites',
+  'furgo-demo-local-finder-favorites',
   'furgo-demo-credit-balance',
   'furgo-demo-credit-transactions',
   'furgo-demo-daycare-passes',

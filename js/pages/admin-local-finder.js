@@ -1,6 +1,6 @@
 import { escapeHTML } from '../shared.js';
 import { supabase } from '../supabase.js';
-import { bindLocalFinderLocationPicker, bindLocalFinderOpeningHours, bindLocalFinderPlacePhotoPreview, localFinderAdminFormFields, saveLocalFinderPlaceData } from './local-finder.js';
+import { bindLocalFinderLocationPicker, bindLocalFinderOpeningHours, bindLocalFinderPlacePhotoPreview, findLocalFinderDuplicate, localFinderAdminFormFields, normalizeLocalFinderPetAllowed, requestLocalFinderQuota, saveLocalFinderPlaceData, showLocalFinderDuplicateNotice } from './local-finder.js';
 
 const categoryNames = { cafe: 'Cafe & Dining', park: 'Park or Mall', clinic: 'Pet Clinic', event: 'Pet Event' };
 const categoryKeys = new Map([
@@ -8,25 +8,83 @@ const categoryKeys = new Map([
   ['clinic', 'clinic'], ['pet_clinic', 'clinic'], ['event', 'event'], ['pet_event', 'event'],
 ]);
 
-// Keep bulk CSV/backfill geocoding on Photon/OSM. Google's Geocoding results
-// are not suitable for bulk geocoding or permanent storage in Furgo's directory.
-async function lookupBulkCoordinates(place) {
-  const query = [place.name, place.address, place.city, place.state, 'Malaysia'].filter(Boolean).join(', ');
-  const url = new URL('https://photon.komoot.io/api/');
-  url.searchParams.set('q', query);
-  url.searchParams.set('limit', '5');
-  url.searchParams.set('lang', 'en');
-  const response = await fetch(url, { headers: { Accept: 'application/json' } });
-  if (!response.ok) throw new Error('Address lookup is temporarily unavailable.');
-  const data = await response.json();
-  const results = (data.features || []).filter((feature) => {
-    const [longitude, latitude] = feature.geometry?.coordinates || [];
-    const country = String(feature.properties?.country || '').toLowerCase();
-    return country.includes('malaysia') && Number.isFinite(latitude) && Number.isFinite(longitude);
-  });
-  if (!results.length) return null;
-  const [longitude, latitude] = results[0].geometry.coordinates;
-  return { latitude, longitude };
+const coordinateCacheKey = 'furgo-local-finder-osm-coordinate-cache-v1';
+const coordinateCacheTtl = 90 * 24 * 60 * 60 * 1000;
+const osmLastRequestKey = 'furgo-local-finder-osm-last-request-at';
+const osmMinimumRequestInterval = 1100;
+const osmRequestTimeoutMs = 12000;
+let lastOsmRequestAt = 0;
+function coordinateLookupKey(place = {}) {
+  return [place.name, place.address, place.city, place.state, 'Malaysia']
+    .map((part) => String(part || '').normalize('NFKC').trim().toLocaleLowerCase().replace(/\s+/g, ' ')).join('|');
+}
+function readCoordinateCache(place) {
+  try {
+    const cache = JSON.parse(localStorage.getItem(coordinateCacheKey) || '{}');
+    const key = coordinateLookupKey(place);
+    const entry = cache[key];
+    if (!entry) return null;
+    if (!Number.isFinite(entry.expiresAt) || entry.expiresAt <= Date.now()) {
+      delete cache[key];
+      localStorage.setItem(coordinateCacheKey, JSON.stringify(cache));
+      return null;
+    }
+    return entry;
+  } catch { return null; }
+}
+function writeCoordinateCache(place, entry) {
+  try {
+    const cache = JSON.parse(localStorage.getItem(coordinateCacheKey) || '{}');
+    const now = Date.now();
+    for (const [key, cached] of Object.entries(cache)) if (!Number.isFinite(cached.expiresAt) || cached.expiresAt <= now) delete cache[key];
+    cache[coordinateLookupKey(place)] = { ...entry, expiresAt: Math.min(entry.expiresAt || now + coordinateCacheTtl, now + coordinateCacheTtl) };
+    localStorage.setItem(coordinateCacheKey, JSON.stringify(cache));
+  } catch { /* The import still works if browser storage is unavailable. */ }
+}
+function applyCachedCoordinates(place) {
+  const cached = readCoordinateCache(place);
+  if (!cached?.coordinates) return cached;
+  place.latitude = cached.coordinates.latitude;
+  place.longitude = cached.coordinates.longitude;
+  place.coordinates_source = 'openstreetmap_nominatim';
+  place.coordinates_expires_at = null;
+  return cached;
+}
+async function lookupOpenStreetMapCoordinates(place) {
+  const address = String(place.address || '').trim();
+  const addressKey = address.toLocaleLowerCase();
+  const queryParts = [address];
+  for (const part of [place.city, place.state, 'Malaysia']) {
+    const value = String(part || '').trim();
+    if (value && !addressKey.includes(value.toLocaleLowerCase())) queryParts.push(value);
+  }
+  const query = queryParts.join(', ');
+  let storedLastRequestAt = 0;
+  try { storedLastRequestAt = Number(localStorage.getItem(osmLastRequestKey)) || 0; } catch { /* In-memory pacing still applies. */ }
+  const lastRequestAt = Math.max(lastOsmRequestAt, storedLastRequestAt);
+  const waitMs = Math.max(0, osmMinimumRequestInterval - (Date.now() - lastRequestAt));
+  if (waitMs) await new Promise((resolve) => setTimeout(resolve, waitMs));
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), osmRequestTimeoutMs);
+  try {
+    lastOsmRequestAt = Date.now();
+    try { localStorage.setItem(osmLastRequestKey, String(lastOsmRequestAt)); } catch { /* In-memory pacing still applies. */ }
+    const url = new URL('https://nominatim.openstreetmap.org/search');
+    url.search = new URLSearchParams({ q: query, format: 'jsonv2', addressdetails: '1', limit: '1', countrycodes: 'my' }).toString();
+    const response = await fetch(url, { signal: controller.signal, headers: { Accept: 'application/json' }, referrerPolicy: 'strict-origin-when-cross-origin' });
+    if (response.status === 429) throw new Error('OpenStreetMap is rate-limiting lookups. Wait a little and retry.');
+    if (!response.ok) throw new Error(`OpenStreetMap lookup returned HTTP ${response.status}. Retry later.`);
+    const results = await response.json();
+    const result = results.find((item) => item.address?.country_code?.toLowerCase() === 'my' && Number.isFinite(Number(item.lat)) && Number.isFinite(Number(item.lon)));
+    if (!result) return null;
+    return { latitude: Number(result.lat), longitude: Number(result.lon) };
+  } catch (error) {
+    if (error.name === 'AbortError') throw new Error('OpenStreetMap did not respond within 12 seconds. Check the connection and retry.');
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 function parseCsvRows(text) {
@@ -63,12 +121,6 @@ function csvBoolean(value) {
   if (['true', 'yes', '1', 'active'].includes(normalized)) return true;
   throw new Error('is_verified must be true/false, yes/no, or 1/0.');
 }
-function isPositivePetPolicy(value) {
-  const normalized = String(value || '').trim().toLowerCase();
-  if (!normalized || /\b(no pets?|not allowed|not permitted|prohibited|unknown|not pet friendly)\b/.test(normalized)) return false;
-  return /^(yes|true|pets? welcome|pets? allowed|pets? accepted|dogs? welcome|dogs? allowed|dogs? only|cats? welcome|cats? allowed|veterinary (care|clinic))\b/.test(normalized)
-    || /\b(dogs?|cats?|pets?)\b.*\b(allowed|welcome|accepted|permitted|only|on leash|on lead|veterinary care)\b/.test(normalized);
-}
 function normalizedPlaceKey(name, address) { return `${name.trim().toLowerCase().replace(/\s+/g, ' ')}|${address.trim().toLowerCase().replace(/\s+/g, ' ')}`; }
 
 function safeReviewUrl(value) {
@@ -103,7 +155,7 @@ function validatePlaceCsv(text) {
   if (sourceRows.length > 501) throw new Error('Import up to 500 places at a time. Split the CSV into smaller files.');
   const headers = sourceRows[0].map(normalizeCsvHeader);
   const indexByHeader = new Map(headers.map((header, index) => [header, index]));
-  for (const required of ['name', 'category', 'address', 'pet_allowed']) {
+  for (const required of ['name', 'category', 'address']) {
     if (!indexByHeader.has(required)) throw new Error(`The CSV is missing the required "${required}" column.`);
   }
   const parsed = [];
@@ -120,8 +172,9 @@ function validatePlaceCsv(text) {
       if (name.length < 2 || name.length > 140) throw new Error('name must be 2–140 characters.');
       if (!category) throw new Error('category must be Cafe & Dining, Park or Mall, Pet Clinic, or Pet Event.');
       if (address.length < 3 || address.length > 500) throw new Error('address must be 3–500 characters.');
-      const petAllowed = get('pet_allowed');
-      if (!isPositivePetPolicy(petAllowed)) throw new Error('pet_allowed must state which pets are explicitly welcome or accepted. Do not import unknown or non-pet-friendly places.');
+      const petAllowedInput = get('pet_allowed');
+      if (petAllowedInput && !['dog', 'cat', 'all'].includes(petAllowedInput.toLowerCase())) throw new Error('pet_allowed must be Dog, Cat, All, or blank.');
+      const petAllowed = normalizeLocalFinderPetAllowed(petAllowedInput);
       const latitudeInput = get('latitude');
       const longitudeInput = get('longitude');
       if (Boolean(latitudeInput) !== Boolean(longitudeInput)) throw new Error('latitude and longitude must both be filled in or both be blank.');
@@ -145,6 +198,7 @@ function validatePlaceCsv(text) {
         key: normalizedPlaceKey(name, address),
         data: {
           name, category, address, city: get('city'), state: get('state'), latitude, longitude,
+          coordinates_source: latitude === null ? null : 'imported', coordinates_expires_at: null,
           allowed_area: get('allowed_area'), pet_allowed: petAllowed, pet_size: get('pet_size'),
           conditions: get('conditions'), opening_hours: { raw: get('opening_hours') }, phone: get('phone'), website,
           photo_url: photoUrl, is_verified: csvBoolean(get('is_verified')),
@@ -156,7 +210,7 @@ function validatePlaceCsv(text) {
   return { parsed, errors };
 }
 
-const localFinderCsvTemplate = 'name,category,address,city,state,latitude,longitude,allowed_area,pet_allowed,pet_size,conditions,opening_hours,phone,website,photo_url,is_verified,source_provider,source_url,source_license\n"Example Pet Cafe",cafe,"Example Street 1",Petaling Jaya,Selangor,3.107,101.606,Outdoor only,Dogs only,All sizes,Leash required,"Monday-Friday: 9:00am-6:00pm",+60312345678,https://example.com,,false,Furgo,https://example.com/pet-policy,\n';
+const localFinderCsvTemplate = 'name,category,address,city,state,latitude,longitude,allowed_area,pet_allowed,pet_size,conditions,opening_hours,phone,website,photo_url,is_verified,source_provider,source_url,source_license\n"Example Pet Cafe",cafe,"Example Street 1",Petaling Jaya,Selangor,3.107,101.606,Outdoor only,Dog,All sizes,Leash required,"Monday-Friday: 9:00am-6:00pm",+60312345678,https://example.com,,false,Furgo,https://example.com/pet-policy,\n';
 
 function adminPlaceCard(place, counts = {}, view = 'review') {
   const status = place.is_hidden ? 'Hidden' : place.status === 'approved' ? 'Published' : 'Pending Review';
@@ -164,7 +218,7 @@ function adminPlaceCard(place, counts = {}, view = 'review') {
   const selection = view === 'review' ? `<label class="admin-local-finder-select"><input type="checkbox" data-local-place-select value="${escapeHTML(place.id)}" /><span>Select place</span></label>` : '';
   const actions = view === 'published' ? `<div class="admin-local-finder-actions"><button class="button button-light" type="button" data-local-edit-place> Edit Place </button><button class="button button-light" type="button" data-local-toggle-hidden>${place.is_hidden ? 'Unhide Place' : 'Hide Place'}</button><button class="button button-light" type="button" data-local-verify>${place.is_verified ? 'Remove Furgo Verified' : 'Mark Furgo Verified'}</button><button class="button button-light" type="button" data-local-delete-place>Delete Place</button></div>` : '';
   const editDialog = view === 'published' ? `<dialog class="local-finder-share-dialog" data-local-place-edit-dialog aria-labelledby="local-place-edit-title"><form class="local-finder-suggestion-form" data-local-place-edit-form data-place-id="${escapeHTML(place.id)}" data-existing-photo="${escapeHTML(place.photo_url || '')}"><header><div><span>Published listing</span><h2 id="local-place-edit-title">Edit Place</h2></div><button type="button" data-close-local-place-edit aria-label="Close">×</button></header>${localFinderAdminFormFields({ values: place })}<label class="admin-local-verified-input"><input type="checkbox" name="is_verified" ${place.is_verified ? 'checked' : ''} /> Furgo Verified</label><p class="local-finder-suggestion-feedback" data-local-place-edit-feedback role="status" aria-live="polite"></p><button class="button button-primary" type="submit">Save Changes</button></form></dialog>` : '';
-  return `<article class="admin-local-finder-card" data-local-place-card="${escapeHTML(place.id)}"><div class="admin-local-finder-card-main">${place.photo_url ? `<img src="${escapeHTML(place.photo_url)}" alt="" />` : '<div class="admin-local-finder-photo-placeholder">No Photo</div>'}<div><span>${escapeHTML(categoryNames[place.category] || place.category)} · <b class="admin-local-finder-status ${place.is_hidden ? 'is-hidden' : 'is-approved'}">${status}</b></span><h3>${escapeHTML(place.name)}</h3><p>${escapeHTML(place.address)}</p><p>Pets: ${escapeHTML(place.pet_allowed || 'Policy not provided')}</p><small>${counts[place.id] || 0} Furgomate Recommended${place.is_verified ? ' · Furgo Verified' : ''}</small>${place.source_provider ? `<p class="admin-local-finder-source">Source: ${escapeHTML(place.source_provider)}${place.source_license ? ` · ${escapeHTML(place.source_license)}` : ''}</p>` : ''}${links}</div></div>
+  return `<article class="admin-local-finder-card" data-local-place-card="${escapeHTML(place.id)}" data-place-category="${escapeHTML(place.category || '')}"><div class="admin-local-finder-card-main">${place.photo_url ? `<img src="${escapeHTML(place.photo_url)}" alt="" />` : '<div class="admin-local-finder-photo-placeholder">No Photo</div>'}<div><span>${escapeHTML(categoryNames[place.category] || place.category)} · <b class="admin-local-finder-status ${place.is_hidden ? 'is-hidden' : 'is-approved'}">${status}</b></span><h3>${escapeHTML(place.name)}</h3><p>${escapeHTML(place.address)}</p><p>Pets: ${escapeHTML(normalizeLocalFinderPetAllowed(place.pet_allowed) || 'Not specified')}</p><small>${counts[place.id] || 0} Furgomate Recommended${place.is_verified ? ' · Furgo Verified' : ''}</small>${place.source_provider ? `<p class="admin-local-finder-source">Source: ${escapeHTML(place.source_provider)}${place.source_license ? ` · ${escapeHTML(place.source_license)}` : ''}</p>` : ''}${links}</div></div>
     ${selection}${actions}${editDialog}</article>`;
 }
 
@@ -174,31 +228,72 @@ function adminEditCard(edit, place) {
   const links = reviewLinks(suggestedPlace, { website: changes.website || place?.website, sourceUrl: place?.source_url });
   const fields = [
     ['Place name', changes.name], ['Address', changes.address], ['Allowed Area', changes.allowed_area],
-    ['Pets Allowed', changes.pet_allowed], ['Pet Size', changes.pet_size], ['Conditions', changes.conditions],
+    ['Pets Allowed', normalizeLocalFinderPetAllowed(changes.pet_allowed)], ['Pet Size', changes.pet_size], ['Conditions', changes.conditions],
     ['Opening Hours', changes.opening_hours?.raw], ['Phone', changes.phone], ['Website', changes.website],
   ].filter(([, value]) => value);
-  return `<article class="admin-local-finder-card" data-local-edit-card="${escapeHTML(edit.id)}"><span>Edit suggestion · ${escapeHTML(categoryNames[place?.category] || '')}</span><h3>${escapeHTML(place?.name || 'Place')}</h3><dl class="admin-local-finder-change-list">${fields.map(([label, value]) => `<div><dt>${escapeHTML(label)}</dt><dd>${escapeHTML(value)}</dd></div>`).join('')}</dl>${links}${safeReviewUrl(changes.photo_url) ? `<a href="${escapeHTML(safeReviewUrl(changes.photo_url))}" target="_blank" rel="noopener noreferrer">View suggested photo</a>` : ''}<div class="admin-local-finder-actions"><button class="button button-primary" type="button" data-local-review-edit="approve">Approve Edit</button><button class="button button-light" type="button" data-local-review-edit="reject">Reject</button></div></article>`;
+  return `<article class="admin-local-finder-card" data-local-edit-card="${escapeHTML(edit.id)}" data-place-category="${escapeHTML(place?.category || '')}"><span>Edit suggestion · ${escapeHTML(categoryNames[place?.category] || '')}</span><h3>${escapeHTML(place?.name || 'Place')}</h3><dl class="admin-local-finder-change-list">${fields.map(([label, value]) => `<div><dt>${escapeHTML(label)}</dt><dd>${escapeHTML(value)}</dd></div>`).join('')}</dl>${links}${safeReviewUrl(changes.photo_url) ? `<a href="${escapeHTML(safeReviewUrl(changes.photo_url))}" target="_blank" rel="noopener noreferrer">View suggested photo</a>` : ''}<div class="admin-local-finder-actions"><button class="button button-primary" type="button" data-local-review-edit="approve">Approve Edit</button><button class="button button-light" type="button" data-local-review-edit="reject">Reject</button></div></article>`;
 }
 
 export function adminLocalFinderPage(params = new URLSearchParams()) {
   const profile = JSON.parse(sessionStorage.getItem('furgo-demo-user-profile') || '{}');
   if (!['manager', 'director', 'admin'].includes(profile.role)) return `<main class="admin-portal-page"><section class="admin-market-panel"><h1>Local Finder</h1><p>Manager or Director access is required.</p><a class="button button-primary" href="#admin">Back to Admin Home</a></section></main>`;
   const view = params.get('view') || 'home';
-  const pageHeading = view === 'review' ? 'Review Places' : view === 'published' ? 'Published Places' : 'Places & Suggestions';
-  const workspace = view === 'review' ? `<a class="admin-local-finder-back" href="#admin-local-finder">‹ Back to Places &amp; Suggestions</a><section class="admin-market-panel"><div class="admin-market-panel-heading"><div><span>Community suggestions</span><h2>Places Awaiting Review</h2></div><p>Select one or more places, then approve or reject them together.</p></div><div class="admin-local-finder-bulk-actions"><button class="button button-light" type="button" data-local-select-all>Select All</button><button class="button button-light" type="button" data-local-deselect-all>Deselect All</button><span data-local-selected-count>0 selected</span><button class="button button-primary" type="button" data-local-bulk-review="approve" disabled>Approve Selected</button><button class="button button-light" type="button" data-local-bulk-review="reject" disabled>Reject Selected</button></div><p data-local-review-feedback role="status" aria-live="polite"></p><div data-admin-local-pending class="admin-local-finder-list">Loading place submissions…</div></section>` : view === 'published' ? `<a class="admin-local-finder-back" href="#admin-local-finder">‹ Back to Places &amp; Suggestions</a><section class="admin-market-panel"><div class="admin-market-panel-heading"><div><span>Furgo directory</span><h2>Published Places</h2></div><p>Edit details, hide a listing from customers, or delete it.</p></div><div class="admin-local-finder-geocode-controls"><button class="button button-light" type="button" data-local-geocode-missing>Find Missing Coordinates</button><span data-local-geocode-feedback role="status" aria-live="polite"></span></div><div data-admin-local-published class="admin-local-finder-list">Loading published places…</div></section>` : `<section class="admin-market-panel"><div class="admin-market-panel-heading"><div><span>Community suggestions</span><h2>Places Awaiting Review</h2></div><p><strong data-local-pending-count>Loading…</strong> place(s) are waiting for a decision.</p></div><a class="button button-primary" href="#admin-local-finder?view=review">Review</a></section>
-    <section class="admin-market-panel"><div class="admin-market-panel-heading"><div><span>Furgo directory</span><h2>Published Places</h2></div><p><strong data-local-published-count>Loading…</strong> published place(s) are in the directory.</p></div><a class="button button-light" href="#admin-local-finder?view=published">See More</a></section>
-    <section class="admin-market-panel"><div class="admin-market-panel-heading"><div><span>Customer corrections</span><h2>Edit Suggestions</h2></div><p>Review suggested changes to published listings.</p></div><div data-admin-local-edits class="admin-local-finder-list">Loading edit suggestions…</div></section>
-    <section class="admin-market-panel"><div class="admin-market-panel-heading"><div><span>Bulk entry</span><h2>Import Places from CSV</h2></div><p>Imported places stay pending until a Manager or Director approves them. Include an explicit pet policy; uncertain venues are rejected during import.</p></div><div class="admin-local-finder-import"><div class="admin-local-finder-import-controls"><label>CSV file<input type="file" data-local-finder-csv-file accept=".csv,text/csv" /></label><a class="button button-light" href="data:text/csv;charset=utf-8,${encodeURIComponent(localFinderCsvTemplate)}" download="furgo-local-finder-template.csv">Download CSV Template</a></div><p class="admin-local-finder-import-help">Required columns: <b>name, category, address, pet_allowed</b>. Categories: <b>cafe</b>, <b>park</b>, <b>clinic</b>, or <b>event</b>. Optional columns: city, state, latitude, longitude, allowed_area, pet_size, conditions, opening_hours, phone, website, photo_url, is_verified, source_provider, source_url, source_license. Imports are unverified and pending review.</p><p data-local-finder-import-feedback role="status" aria-live="polite">Choose a CSV to check its rows before importing.</p><ul data-local-finder-import-errors class="admin-local-finder-import-errors" hidden></ul><button class="button button-primary" type="button" data-local-finder-import disabled>Import for Review</button></div></section>
-    ${view === 'home' ? `<section class="admin-market-panel"><div class="admin-market-panel-heading"><div><span>Admin entry</span><h2>Add a Place</h2></div><p>Manager and Director entries publish immediately. Furgo Verified is optional.</p></div><form class="local-finder-suggestion-form admin-local-finder-direct-form" data-admin-local-place-form>${localFinderAdminFormFields()}<label class="admin-local-verified-input"><input type="checkbox" name="is_verified" /> Mark Furgo Verified</label><p data-admin-local-feedback role="status" aria-live="polite"></p><button class="button button-primary" type="submit">Publish Place</button></form></section>` : ''}`;
-  return `<main class="admin-portal-page admin-local-finder-page" data-local-finder-view="${escapeHTML(view)}"><header class="admin-portal-header"><a class="admin-portal-brand" href="#admin"><img src="Image/Icon/Logo.png" alt="Furgo" /><span>Admin Portal</span></a><div class="admin-portal-account"><a href="#admin">Dashboard</a><button type="button" data-logout>Log out</button></div></header><header class="admin-market-heading"><a href="#admin" aria-label="Admin Home">‹</a><div><span>Local Finder management</span><h1>${escapeHTML(pageHeading)}</h1></div></header>${workspace}</main>`;
+  const pageHeading = view === 'review' ? 'Review Places' : view === 'edits' ? 'Review Edit Suggestions' : view === 'published' ? 'Published Places' : view === 'add' ? 'Add a Place' : view === 'import' ? 'Import Places from CSV' : 'Places & Suggestions';
+  const addPlaceSection = `<section class="admin-market-panel"><div class="admin-market-panel-heading"><div><span>Admin entry</span><h2>Add a Place</h2></div><p>Manager and Director entries publish immediately. Furgo Verified is optional.</p></div><form class="local-finder-suggestion-form admin-local-finder-direct-form" data-admin-local-place-form>${localFinderAdminFormFields()}<label class="admin-local-verified-input"><input type="checkbox" name="is_verified" /> Mark Furgo Verified</label><p data-admin-local-feedback role="status" aria-live="polite"></p><button class="button button-primary" type="submit">Publish Place</button></form></section>`;
+  const importPlacesSection = `<section class="admin-market-panel"><div class="admin-market-panel-heading"><div><span>Bulk entry</span><h2>Import Places from CSV</h2></div><p>Imported places stay pending until a Manager or Director approves them. Set pet_allowed to Dog, Cat, or All when specified; leave it blank when the source does not say.</p></div><div class="admin-local-finder-import"><div class="admin-local-finder-import-controls"><label>CSV file<input type="file" data-local-finder-csv-file accept=".csv,text/csv" /></label><a class="button button-light" href="data:text/csv;charset=utf-8,${encodeURIComponent(localFinderCsvTemplate)}" download="furgo-local-finder-template.csv">Download CSV Template</a></div><p class="admin-local-finder-import-help">Required columns: <b>name, category, address</b>. Optional columns: pet_allowed (Dog, Cat, All, or blank), city, state, latitude, longitude, allowed_area, pet_size, conditions, opening_hours, phone, website, photo_url, is_verified, source_provider, source_url, source_license. Categories: <b>cafe</b>, <b>park</b>, <b>clinic</b>, or <b>event</b>. Imports are unverified and pending review. Rows without coordinates are looked up with OpenStreetMap Nominatim, one request at a time; unresolved rows are not imported. OpenStreetMap data © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer">OpenStreetMap contributors</a>.</p><p data-local-finder-import-feedback role="status" aria-live="polite">Choose a CSV to check its rows before importing.</p><ul data-local-finder-import-errors class="admin-local-finder-import-errors" hidden></ul><button class="button button-primary" type="button" data-local-finder-import disabled>Import for Review</button></div></section>`;
+  const adminEntryWorkspace = view === 'home' ? `
+    <section class="local-finder-share-card admin-local-finder-entry-banner" aria-labelledby="admin-local-finder-entry-title">
+      <img class="local-finder-share-art" src="Image/Icon/MVP%20Icon-06.png" alt="Furgo dog pointing out places on a map" />
+      <div><h2 id="admin-local-finder-entry-title">Add or Import Places</h2><p>Add a place directly or import multiple listings from a CSV file.</p><div class="admin-local-finder-entry-actions"><button class="button button-primary" type="button" data-admin-local-entry-target="add" data-admin-local-entry-route="#admin-local-finder?view=add">Add a Place</button><button class="button button-light" type="button" data-admin-local-entry-target="import" data-admin-local-entry-route="#admin-local-finder?view=import">Import CSV</button></div></div>
+    </section>
+    ` : '';
+  const backToOverview = '<a class="admin-local-finder-back" href="#admin-local-finder">‹ Back to Places &amp; Suggestions</a>';
+  const workspace = view === 'review' ? `<a class="admin-local-finder-back" href="#admin-local-finder">‹ Back to Places &amp; Suggestions</a><section class="admin-market-panel"><div class="admin-market-panel-heading"><div><span>Community suggestions</span><h2>Places Awaiting Review</h2></div><p>Select one or more places, then approve or reject them together.</p></div><div class="admin-local-finder-bulk-actions"><label class="admin-local-finder-type-filter">Place type<select data-local-review-type-filter aria-label="Filter places by type"><option value="all">All types</option><option value="cafe">Cafe &amp; Dining</option><option value="park">Park or Mall</option><option value="clinic">Pet Clinic</option><option value="event">Pet Event</option></select></label><button class="button button-light" type="button" data-local-select-all>Select All</button><button class="button button-light" type="button" data-local-deselect-all>Deselect All</button><span data-local-selected-count>0 selected</span><button class="button button-primary" type="button" data-local-bulk-review="approve" disabled>Approve Selected</button><button class="button button-light" type="button" data-local-bulk-review="reject" disabled>Reject Selected</button></div><p data-local-review-feedback role="status" aria-live="polite"></p><div data-admin-local-pending class="admin-local-finder-list">Loading place submissions…</div><p class="admin-market-empty" data-local-review-filter-empty hidden>No pending places match this type.</p></section>`
+    : view === 'edits' ? `${backToOverview}<section class="admin-market-panel"><div class="admin-market-panel-heading"><div><span>Customer corrections</span><h2>Edit Suggestions Awaiting Review</h2></div><p>Review each proposed change, then approve or reject it.</p></div><div class="admin-local-finder-filter-row"><label class="admin-local-finder-type-filter">Place type<select data-local-edit-type-filter aria-label="Filter edit suggestions by place type"><option value="all">All types</option><option value="cafe">Cafe &amp; Dining</option><option value="park">Park or Mall</option><option value="clinic">Pet Clinic</option><option value="event">Pet Event</option></select></label></div><div data-admin-local-edits class="admin-local-finder-list">Loading edit suggestions…</div><p class="admin-market-empty" data-local-edit-filter-empty hidden>No edit suggestions match this type.</p></section>`
+    : view === 'published' ? `<a class="admin-local-finder-back" href="#admin-local-finder">‹ Back to Places &amp; Suggestions</a><section class="admin-market-panel"><div class="admin-market-panel-heading"><div><span>Furgo directory</span><h2>Published Places</h2></div><p>Edit details, hide a listing from customers, or delete it.</p></div><div class="admin-local-finder-filter-row"><label class="admin-local-finder-type-filter">Place type<select data-local-published-type-filter aria-label="Filter published places by type"><option value="all">All types</option><option value="cafe">Cafe &amp; Dining</option><option value="park">Park or Mall</option><option value="clinic">Pet Clinic</option><option value="event">Pet Event</option></select></label></div><div class="admin-local-finder-geocode-controls"><button class="button button-light" type="button" data-local-geocode-missing>Find Missing Coordinates</button><span data-local-geocode-feedback role="status" aria-live="polite"></span></div><p class="admin-local-finder-import-help">Coordinate lookups use OpenStreetMap and do not count toward Google Maps requests.</p><div data-admin-local-published class="admin-local-finder-list">Loading published places…</div><p class="admin-market-empty" data-local-published-filter-empty hidden>No published places match this type.</p></section>`
+      : view === 'add' ? `${backToOverview}${addPlaceSection}`
+        : view === 'import' ? `${backToOverview}${importPlacesSection}`
+          : `${adminEntryWorkspace}
+    <div class="admin-local-finder-overview-grid">
+      <section class="admin-market-panel"><div class="admin-market-panel-heading"><div><span>Community suggestions</span><h2>Places Awaiting Review</h2></div><p><strong data-local-pending-count>Loading…</strong> place(s) are waiting for a decision.</p></div><a class="button button-primary admin-local-finder-overview-action" href="#admin-local-finder?view=review">Review</a></section>
+      <section class="admin-market-panel"><div class="admin-market-panel-heading"><div><span>Customer corrections</span><h2>Edit Suggestions</h2></div><p><strong data-local-edit-count>Loading…</strong> suggestion(s) are waiting for a decision.</p></div><a class="button button-primary admin-local-finder-overview-action" href="#admin-local-finder?view=edits">Review</a></section>
+    </div>
+    <section class="admin-market-panel admin-local-finder-published-overview"><div class="admin-market-panel-heading"><div><span>Furgo directory</span><h2>Published Places</h2></div><p><strong data-local-published-count>Loading…</strong> published place(s) are in the directory.</p></div><a class="button button-primary" href="#admin-local-finder?view=published">See More</a></section>`;
+  return `<main class="admin-portal-page admin-local-finder-page" data-local-finder-view="${escapeHTML(view)}"><header class="admin-portal-header"><a class="admin-portal-brand" href="#admin"><img src="Image/Icon/Logo.png" alt="Furgo" /><span>Admin Portal</span></a><div class="admin-portal-account"><a href="#admin">Dashboard</a><button type="button" data-logout>Log out</button></div></header><header class="admin-market-heading"><a href="#admin" aria-label="Admin Home">‹</a><div><span>Local Finder management</span><h1>${escapeHTML(pageHeading)}</h1></div></header><section class="admin-market-panel admin-local-finder-quota" aria-labelledby="local-finder-quota-title"><div><span>Monthly usage</span><h2 id="local-finder-quota-title">Google Maps requests</h2><p>Customer place search uses Google. CSV imports and missing-coordinate lookups use OpenStreetMap and do not add to this meter.</p></div><div class="admin-local-finder-quota-meter"><strong><span data-local-finder-quota-used>Loading…</span> / <span data-local-finder-quota-limit>2,000</span></strong><div class="admin-local-finder-quota-track" role="progressbar" aria-label="Google Maps requests used this month" aria-valuemin="0" aria-valuemax="2000" aria-valuenow="0"><span data-local-finder-quota-fill></span></div><small data-local-finder-quota-reset>Checking monthly usage…</small></div></section>${workspace}${view === 'home' ? `<dialog class="local-finder-limit-dialog" data-admin-local-finder-limit-dialog aria-labelledby="admin-local-finder-limit-title"><div><h2 id="admin-local-finder-limit-title">Monthly place-sharing limit reached</h2><p data-admin-local-finder-limit-message>Sorry, this month’s 2,000 place-sharing search limit has been reached. Please try again next month.</p><button class="button button-primary" type="button" data-close-admin-local-finder-limit>Got it</button></div></dialog>` : ''}</main>`;
 }
 
 export function setupAdminLocalFinder(supabase) {
   const page = document.querySelector('.admin-local-finder-page');
   if (!page) return;
   const view = page.dataset.localFinderView || 'home';
+  const entryLimitDialog = page.querySelector('[data-admin-local-finder-limit-dialog]');
+  const entryLimitTitle = entryLimitDialog?.querySelector('#admin-local-finder-limit-title');
+  const entryLimitMessage = entryLimitDialog?.querySelector('[data-admin-local-finder-limit-message]');
+  const showEntryLimit = (message, title = 'Monthly place-sharing limit reached') => {
+    if (entryLimitTitle) entryLimitTitle.textContent = title;
+    if (entryLimitMessage) entryLimitMessage.textContent = message;
+    if (entryLimitDialog && !entryLimitDialog.open) entryLimitDialog.showModal();
+  };
+  entryLimitDialog?.querySelector('[data-close-admin-local-finder-limit]')?.addEventListener('click', () => entryLimitDialog.close());
+  entryLimitDialog?.addEventListener('click', (event) => { if (event.target === entryLimitDialog) entryLimitDialog.close(); });
+  page.querySelectorAll('[data-admin-local-entry-target]').forEach((button) => {
+    button.addEventListener('click', async () => {
+      button.disabled = true;
+      try {
+        const quota = await requestLocalFinderQuota(supabase, 'get_local_finder_share_search_quota');
+        if (!quota.allowed) {
+          showEntryLimit('Sorry, this month’s 2,000 place-sharing search limit has been reached. Please try again next month.');
+          return;
+        }
+        window.location.hash = button.dataset.adminLocalEntryRoute;
+      } catch (error) {
+        showEntryLimit(error.message || 'Sorry, place sharing is temporarily unavailable. Please try again later.', 'Could not check place-sharing limit');
+      } finally { button.disabled = false; }
+    });
+  });
   const pending = document.querySelector('[data-admin-local-pending]');
   const edits = document.querySelector('[data-admin-local-edits]');
+  const editCount = page.querySelector('[data-local-edit-count]');
   const published = document.querySelector('[data-admin-local-published]');
   const form = document.querySelector('[data-admin-local-place-form]');
   bindLocalFinderLocationPicker(form, supabase);
@@ -208,7 +303,62 @@ export function setupAdminLocalFinder(supabase) {
   const csvImportButton = document.querySelector('[data-local-finder-import]');
   const csvFeedback = document.querySelector('[data-local-finder-import-feedback]');
   const csvErrors = document.querySelector('[data-local-finder-import-errors]');
+  const quotaUsed = page.querySelector('[data-local-finder-quota-used]');
+  const quotaLimit = page.querySelector('[data-local-finder-quota-limit]');
+  const quotaFill = page.querySelector('[data-local-finder-quota-fill]');
+  const quotaTrack = page.querySelector('[role="progressbar"][aria-label="Google Maps requests used this month"]');
+  const quotaReset = page.querySelector('[data-local-finder-quota-reset]');
+  const reviewTypeFilter = page.querySelector('[data-local-review-type-filter]');
+  const reviewFilterEmpty = page.querySelector('[data-local-review-filter-empty]');
+  const editTypeFilter = page.querySelector('[data-local-edit-type-filter]');
+  const editFilterEmpty = page.querySelector('[data-local-edit-filter-empty]');
+  const publishedTypeFilter = page.querySelector('[data-local-published-type-filter]');
+  const publishedFilterEmpty = page.querySelector('[data-local-published-filter-empty]');
+  let latestQuotaUsed = -1;
+  const renderQuota = (quota) => {
+    const used = Number(quota?.requests_used);
+    const limit = Number(quota?.monthly_limit) || 2000;
+    if (!Number.isFinite(used) || used < latestQuotaUsed) return;
+    latestQuotaUsed = used;
+    if (quotaUsed) quotaUsed.textContent = used.toLocaleString();
+    if (quotaLimit) quotaLimit.textContent = limit.toLocaleString();
+    if (quotaFill) quotaFill.style.width = `${Math.min(100, Math.max(0, used / limit * 100))}%`;
+    quotaTrack?.setAttribute('aria-valuemax', String(limit));
+    quotaTrack?.setAttribute('aria-valuenow', String(Math.min(limit, used)));
+    if (quotaReset) quotaReset.textContent = quota?.resets_at
+      ? `Resets ${new Date(quota.resets_at).toLocaleDateString('en-MY', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'Asia/Kuala_Lumpur' })}`
+      : 'Usage follows the Malaysia calendar month.';
+  };
+  window.addEventListener('local-finder-quota-updated', (event) => {
+    const currentPage = document.querySelector('.admin-local-finder-page');
+    if (currentPage === page) renderQuota(event.detail);
+  });
   let csvImportRows = [];
+
+  const applyCategoryFilter = (list, cardSelector, filter, emptyState) => {
+    if (!list || !filter) return;
+    const category = filter.value;
+    const cards = [...list.querySelectorAll(cardSelector)];
+    let visibleCount = 0;
+    for (const card of cards) {
+      const visible = category === 'all' || card.dataset.placeCategory === category;
+      card.hidden = !visible;
+      if (visible) visibleCount += 1;
+    }
+    if (emptyState) emptyState.hidden = cards.length === 0 || visibleCount > 0;
+  };
+  const applyReviewPlaceTypeFilter = () => {
+    if (!pending || !reviewTypeFilter) return;
+    applyCategoryFilter(pending, '[data-local-place-card]', reviewTypeFilter, reviewFilterEmpty);
+    for (const card of pending.querySelectorAll('[data-local-place-card][hidden]')) {
+      const checkbox = card.querySelector('[data-local-place-select]');
+      if (checkbox) checkbox.checked = false;
+    }
+    syncReviewSelection();
+  };
+  reviewTypeFilter?.addEventListener('change', applyReviewPlaceTypeFilter);
+  editTypeFilter?.addEventListener('change', () => applyCategoryFilter(edits, '[data-local-edit-card]', editTypeFilter, editFilterEmpty));
+  publishedTypeFilter?.addEventListener('change', () => applyCategoryFilter(published, '[data-local-place-card]', publishedTypeFilter, publishedFilterEmpty));
 
   csvFile?.addEventListener('change', async () => {
     csvImportRows = [];
@@ -221,6 +371,7 @@ export function setupAdminLocalFinder(supabase) {
     try {
       const result = validatePlaceCsv(await file.text());
       csvImportRows = result.parsed;
+      csvImportRows.forEach((row) => applyCachedCoordinates(row.data));
       csvFeedback.textContent = `${result.parsed.length} valid place row(s)${result.errors.length ? `; ${result.errors.length} invalid row(s) need correction before import` : ' ready to import'}.`;
       if (result.errors.length) {
         csvErrors.hidden = false;
@@ -255,47 +406,64 @@ export function setupAdminLocalFinder(supabase) {
         return;
       }
       const needsGeocoding = uniqueRows.filter((place) => place.latitude == null && place.longitude == null);
-      let geocodedCount = 0;
-      let unmatchedCount = 0;
       let lookupErrorCount = 0;
+      let firstLookupError = '';
       const unmappedPlaces = [];
       for (let index = 0; index < needsGeocoding.length; index += 1) {
         const place = needsGeocoding[index];
-        csvFeedback.textContent = `Looking up address coordinates: ${index + 1} of ${needsGeocoding.length}…`;
+        csvFeedback.textContent = `Looking up address coordinates with OpenStreetMap: ${index + 1} of ${needsGeocoding.length}…`;
         try {
-          const coordinates = await lookupBulkCoordinates(place);
+          const cached = readCoordinateCache(place);
+          if (cached?.notFound) { unmappedPlaces.push(place); continue; }
+          let coordinates = cached?.coordinates;
+          if (!coordinates) {
+            coordinates = await lookupOpenStreetMapCoordinates(place);
+            if (coordinates) {
+              writeCoordinateCache(place, { coordinates, expiresAt: Date.now() + coordinateCacheTtl });
+            } else {
+              writeCoordinateCache(place, { notFound: true, expiresAt: Date.now() + 12 * 60 * 60 * 1000 });
+            }
+          }
           if (coordinates) {
             place.latitude = coordinates.latitude;
             place.longitude = coordinates.longitude;
-            geocodedCount += 1;
-          } else { unmatchedCount += 1; unmappedPlaces.push(place); }
-        } catch {
-          unmatchedCount += 1;
+            place.coordinates_source = 'openstreetmap_nominatim';
+            place.coordinates_expires_at = null;
+          } else { unmappedPlaces.push(place); }
+        } catch (error) {
           lookupErrorCount += 1;
-          unmappedPlaces.push(place);
+          firstLookupError ||= error.message || 'OpenStreetMap geocoding failed.';
+          // Stop on a service/rate-limit error rather than sending the rest
+          // of the batch while the public geocoder is unavailable.
+          unmappedPlaces.push(...needsGeocoding.slice(index));
+          break;
         }
-        // Keep sequential requests to be considerate of the public Photon service.
-        if (index < needsGeocoding.length - 1) await new Promise((resolve) => setTimeout(resolve, 1000));
       }
-      if (unmappedPlaces.length) {
-        csvFeedback.textContent = `Import paused: ${unmappedPlaces.length} place(s) could not be matched to an address. Correct the address or add latitude and longitude, then import again${lookupErrorCount ? ` (${lookupErrorCount} lookup error(s))` : ''}.`;
-        csvErrors.hidden = false;
-        csvErrors.innerHTML = unmappedPlaces.slice(0, 20).map((place) => `<li>${escapeHTML(place.name)} — ${escapeHTML(place.address)}</li>`).join('') + (unmappedPlaces.length > 20 ? `<li>And ${unmappedPlaces.length - 20} more unmapped place(s).</li>` : '');
-        return;
-      }
-      const insertRows = uniqueRows.map((place) => ({
+      const insertRows = uniqueRows.filter((place) => Number.isFinite(place.latitude) && Number.isFinite(place.longitude)).map((place) => ({
         ...place, created_by: authData.user.id, status: 'pending', reviewed_by: null, reviewed_at: null, is_verified: false,
       }));
+      if (!insertRows.length) {
+        csvFeedback.textContent = lookupErrorCount
+          ? `No places imported: OpenStreetMap lookup failed. ${firstLookupError} Resolve the issue above, then retry.`
+          : `No places imported: OpenStreetMap could not find coordinates for any row. Correct the addresses or add coordinates to the CSV, then retry.`;
+        csvErrors.hidden = false;
+        csvErrors.innerHTML = unmappedPlaces.slice(0, 20).map((place) => `<li>${escapeHTML(place.name)} — ${escapeHTML(place.address)} (coordinates required)</li>`).join('') + (unmappedPlaces.length > 20 ? `<li>And ${unmappedPlaces.length - 20} more place(s) need coordinates.</li>` : '');
+        return;
+      }
       let importedCount = 0;
       for (let offset = 0; offset < insertRows.length; offset += 50) {
         const { error } = await supabase.from('local_finder_places').insert(insertRows.slice(offset, offset + 50));
         if (error) throw new Error(`${error.message} ${importedCount} place(s) were imported before this batch failed.`);
         importedCount += Math.min(50, insertRows.length - offset);
       }
-      const coordinateSummary = needsGeocoding.length
-        ? `; coordinates found for ${geocodedCount}, unavailable for ${unmatchedCount}${lookupErrorCount ? ` (${lookupErrorCount} lookup error(s))` : ''}`
-        : '';
-      csvFeedback.textContent = `Added ${importedCount} place(s) to Pending Review${duplicateCount ? `; skipped ${duplicateCount} duplicate(s)` : ''}${coordinateSummary}. Nothing is public until approved.`;
+      csvFeedback.textContent = `Added ${importedCount} place(s) with coordinates to Pending Review${duplicateCount ? `; skipped ${duplicateCount} duplicate(s)` : ''}${unmappedPlaces.length ? `; skipped ${unmappedPlaces.length} place(s) without coordinates` : ''}${lookupErrorCount ? `; OpenStreetMap lookup error: ${firstLookupError}` : ''}. Nothing is public until approved.`;
+      if (unmappedPlaces.length) {
+        csvErrors.hidden = false;
+        csvErrors.innerHTML = unmappedPlaces.slice(0, 20).map((place) => `<li>${escapeHTML(place.name)} — ${escapeHTML(place.address)} (not imported: coordinates required)</li>`).join('') + (unmappedPlaces.length > 20 ? `<li>And ${unmappedPlaces.length - 20} more place(s) were skipped.</li>` : '');
+      } else {
+        csvErrors.hidden = true;
+        csvErrors.innerHTML = '';
+      }
       csvFile.value = '';
       csvImportRows = [];
       await load();
@@ -308,14 +476,23 @@ export function setupAdminLocalFinder(supabase) {
   });
 
   const load = async () => {
-    const [placesResult, editsResult, recommendationsResult] = await Promise.all([
+    try { await supabase.rpc('expire_local_finder_google_coordinates'); } catch { /* Expiry can also be handled by the database's optional daily job. */ }
+    const [placesResult, editsResult, recommendationsResult, quotaResult] = await Promise.all([
       supabase.from('local_finder_places').select('*').order('created_at', { ascending: false }),
-      edits ? supabase.from('local_finder_place_edits').select('*').eq('status', 'pending').order('created_at', { ascending: false }) : Promise.resolve({ data: [], error: null }),
+      edits || editCount
+        ? supabase.from('local_finder_place_edits').select('*').eq('status', 'pending').order('created_at', { ascending: false })
+        : Promise.resolve({ data: [], error: null }),
       supabase.rpc('get_local_finder_recommendation_counts'),
+      supabase.rpc('get_local_finder_share_search_quota'),
     ]);
+    const quota = Array.isArray(quotaResult.data) ? quotaResult.data[0] : quotaResult.data;
+    if (quota && !quotaResult.error) renderQuota(quota);
+    else if (quotaUsed) quotaUsed.textContent = 'Unavailable';
     if (placesResult.error || editsResult.error || recommendationsResult.error) {
       const reason = placesResult.error?.message || editsResult.error?.message || recommendationsResult.error?.message || 'Could not load Local Finder records.';
       if (pending) pending.innerHTML = `<p class="admin-market-empty">${escapeHTML(reason)} Apply migration 0051 or 0053 in Supabase if these tables are missing.</p>`;
+      if (edits) edits.innerHTML = `<p class="admin-market-empty">${escapeHTML(reason)}</p>`;
+      if (editCount) editCount.textContent = 'Unavailable';
       if (published) published.innerHTML = `<p class="admin-market-empty">${escapeHTML(reason)}</p>`;
       return;
     }
@@ -327,13 +504,17 @@ export function setupAdminLocalFinder(supabase) {
     const pendingCount = document.querySelector('[data-local-pending-count]');
     if (pendingCount) pendingCount.textContent = String(pendingPlaces.length);
     if (pending) pending.innerHTML = pendingPlaces.length ? pendingPlaces.map((place) => adminPlaceCard(place, counts, 'review')).join('') : '<p class="admin-market-empty">No new place submissions need review.</p>';
+    applyReviewPlaceTypeFilter();
     syncReviewSelection();
     const pendingEdits = editsResult.data || [];
+    if (editCount) editCount.textContent = String(pendingEdits.length);
     if (edits) edits.innerHTML = pendingEdits.length ? pendingEdits.map((edit) => adminEditCard(edit, byId.get(edit.place_id))).join('') : '<p class="admin-market-empty">No edit suggestions need review.</p>';
+    applyCategoryFilter(edits, '[data-local-edit-card]', editTypeFilter, editFilterEmpty);
     const approved = places.filter((place) => place.status === 'approved');
     const publishedCount = document.querySelector('[data-local-published-count]');
     if (publishedCount) publishedCount.textContent = String(approved.length);
     if (published) published.innerHTML = approved.length ? approved.map((place) => adminPlaceCard(place, counts, 'published')).join('') : '<p class="admin-market-empty">No places have been published yet.</p>';
+    applyCategoryFilter(published, '[data-local-place-card]', publishedTypeFilter, publishedFilterEmpty);
     published?.querySelectorAll('[data-local-place-edit-form]').forEach((editForm) => {
       bindLocalFinderLocationPicker(editForm, supabase);
       bindLocalFinderOpeningHours(editForm);
@@ -362,6 +543,8 @@ export function setupAdminLocalFinder(supabase) {
       const { data: authData, error: authError } = await supabase.auth.getUser();
       if (authError || !authData.user) throw new Error('Sign in again before adding a place.');
       const placeData = await saveLocalFinderPlaceData(form, supabase, authData.user.id);
+      const duplicate = await findLocalFinderDuplicate(supabase, placeData);
+      if (duplicate) { showLocalFinderDuplicateNotice(duplicate); feedback.textContent = ''; return; }
       const { error } = await supabase.from('local_finder_places').insert({
         ...placeData, created_by: authData.user.id, status: 'approved', is_verified: form.elements.is_verified.checked,
         reviewed_by: authData.user.id, reviewed_at: new Date().toISOString(),
@@ -388,6 +571,7 @@ export function setupAdminLocalFinder(supabase) {
       let locatedCount = 0;
       let unmatchedCount = 0;
       let lookupErrorCount = 0;
+      let firstLookupError = '';
       const unmatchedPlaces = [];
       try {
         const { data: unmapped, error: loadError } = await supabase.from('local_finder_places')
@@ -398,23 +582,40 @@ export function setupAdminLocalFinder(supabase) {
         const placesToLocate = unmapped || [];
         for (let index = 0; index < placesToLocate.length; index += 1) {
           const place = placesToLocate[index];
-          if (feedback) feedback.textContent = `Looking up coordinates: ${index + 1} of ${placesToLocate.length}…`;
+          if (feedback) feedback.textContent = `Looking up coordinates with OpenStreetMap: ${index + 1} of ${placesToLocate.length}…`;
           try {
-            const coordinates = await lookupBulkCoordinates(place);
+            const cached = readCoordinateCache(place);
+            if (cached?.notFound) { unmatchedCount += 1; unmatchedPlaces.push(place); continue; }
+            let coordinates = cached?.coordinates;
+            if (!coordinates) {
+              coordinates = await lookupOpenStreetMapCoordinates(place);
+              if (coordinates) {
+                writeCoordinateCache(place, { coordinates, expiresAt: Date.now() + coordinateCacheTtl });
+              } else {
+                writeCoordinateCache(place, { notFound: true, expiresAt: Date.now() + 12 * 60 * 60 * 1000 });
+              }
+            }
             if (!coordinates) { unmatchedCount += 1; unmatchedPlaces.push(place); continue; }
-            const { error } = await supabase.from('local_finder_places').update({ ...coordinates, updated_at: new Date().toISOString() }).eq('id', place.id);
+            const { error } = await supabase.from('local_finder_places').update({
+              latitude: coordinates.latitude,
+              longitude: coordinates.longitude,
+              coordinates_source: 'openstreetmap_nominatim',
+              coordinates_expires_at: null,
+              updated_at: new Date().toISOString(),
+            }).eq('id', place.id);
             if (error) throw error;
             locatedCount += 1;
           } catch (error) {
             if (error?.code) throw error;
-            unmatchedCount += 1;
+            unmatchedCount += placesToLocate.length - index;
             lookupErrorCount += 1;
-            unmatchedPlaces.push(place);
+            firstLookupError ||= error.message || 'OpenStreetMap lookup failed.';
+            unmatchedPlaces.push(...placesToLocate.slice(index));
+            break;
           }
-          if (index < placesToLocate.length - 1) await new Promise((resolve) => setTimeout(resolve, 1000));
         }
         if (feedback) feedback.textContent = placesToLocate.length
-          ? `Coordinates added to ${locatedCount} place(s); ${unmatchedCount} address(es) remain unmapped${unmatchedPlaces.length ? `: ${unmatchedPlaces.map((place) => place.name).join(', ')}` : ''}${lookupErrorCount ? ` (${lookupErrorCount} lookup error(s))` : ''}.`
+            ? `Coordinates added to ${locatedCount} place(s); ${unmatchedCount} address(es) remain unmapped${unmatchedPlaces.length ? `: ${unmatchedPlaces.map((place) => place.name).join(', ')}` : ''}${lookupErrorCount ? `; OpenStreetMap lookup error: ${firstLookupError}` : ''}.`
           : 'All pending and published places already have coordinates.';
         await load();
       } catch (error) {
@@ -425,7 +626,7 @@ export function setupAdminLocalFinder(supabase) {
 
     if (actionButton.matches('[data-local-select-all], [data-local-deselect-all]')) {
       const checked = actionButton.matches('[data-local-select-all]');
-      pending?.querySelectorAll('[data-local-place-select]').forEach((checkbox) => { checkbox.checked = checked; });
+      pending?.querySelectorAll('[data-local-place-card]:not([hidden]) [data-local-place-select]').forEach((checkbox) => { checkbox.checked = checked; });
       syncReviewSelection();
       return;
     }

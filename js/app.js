@@ -18,7 +18,7 @@ import { adminOrderStage } from './admin-order-ui.js';
 import { setupPortalNotifications } from './portal-notifications.js';
 import { loadMarketplaceCart, loadMarketplaceFavorites, loadMarketplaceOfferSettings, loadMarketplaceOrders, loadMarketplaceProducts, marketplaceCartKey, marketplaceFavoritesKey, marketplaceLine, marketplaceOfferSettingsKey, marketplaceOrdersKey, marketplaceProductsKey, safeMarketplaceImage } from './pages/marketplace-data.js';
 import { petProfilePage } from './pages/pet-profile.js';
-import { adminPromotionsPage, loadPromotions, maximumPromotions, normalizePromotionDestination, promotionStorageKey } from './pages/admin-promotions.js';
+import { adminPromotionsPage, loadAnnouncements, loadPromotions, maximumPromotions, normalizePromotionDestination, promotionStorageKey } from './pages/admin-promotions.js';
 import { adminPortalPage, setupAdminPortal } from './pages/admin.js';
 import { groomingBookingPage, groomingOrdersPage } from './pages/grooming.js';
 import { adminGroomingPage } from './pages/admin-grooming.js';
@@ -44,7 +44,7 @@ import { adminAccessPage, adminAuditPage, setupAdminAccess, setupAdminAuditPage 
 import { adminProductServiceInsightsPage, setupAdminProductServiceInsights } from './pages/admin-product-insights.js';
 import { recordAdminAction } from './admin-audit.js';
 import { recentSearchesKey, searchPage } from './pages/search.js';
-import { localFinderListPage, localFinderPage, localFinderPlacePage, setupLocalFinder } from './pages/local-finder.js';
+import { localFinderFavoritesPage, localFinderListPage, localFinderPage, localFinderPlacePage, setupLocalFinder } from './pages/local-finder.js';
 import { adminLocalFinderPage, setupAdminLocalFinder } from './pages/admin-local-finder.js';
 import { supabase, toMalaysianE164 } from './supabase.js';
 import { refreshSharedOutlets } from './pages/outlet-directory.js';
@@ -2817,17 +2817,19 @@ async function preparePromotionBanner(file, width, height) {
 
 // Saves mobile-first Home promotion banners in a compact, fixed-size format.
 function setupAdminPromotionsForm() {
-  const form = document.querySelector('[data-admin-promo-form]');
-  if (!form) return;
-  const bannerInput = form.querySelector('[data-promo-banner]');
-  const mobileInput = form.querySelector('[data-promo-mobile-banner]');
-  const preview = form.querySelector('[data-promo-preview]');
-  const mobilePreview = form.querySelector('[data-promo-mobile-preview]');
-  const feedback = form.querySelector('[data-admin-promo-feedback]');
-  const previewUrls = new Map();
+  const forms = document.querySelectorAll('[data-admin-banner-form]');
+  if (!forms.length) return;
   const maximumImageSize = 2 * 1024 * 1024;
   const supportedImageTypes = new Set(['image/png', 'image/jpeg', 'image/webp']);
-  const setupPreview = (input, image) => input.addEventListener('change', () => {
+  forms.forEach((form) => {
+    const type = form.dataset.adminBannerForm;
+    const bannerInput = form.querySelector('[data-promo-banner]');
+    const mobileInput = form.querySelector('[data-promo-mobile-banner]');
+    const preview = form.querySelector('[data-promo-preview]');
+    const mobilePreview = form.querySelector('[data-promo-mobile-preview]');
+    const feedback = form.querySelector('[data-admin-promo-feedback]');
+    const previewUrls = new Map();
+    const setupPreview = (input, image) => input.addEventListener('change', () => {
     const file = input.files?.[0];
     if (!file) return;
     if (!supportedImageTypes.has(file.type)) {
@@ -2850,21 +2852,28 @@ function setupAdminPromotionsForm() {
     image.hidden = false;
     feedback.textContent = '';
     feedback.classList.remove('visible');
-  });
-  setupPreview(bannerInput, preview);
-  setupPreview(mobileInput, mobilePreview);
+    });
+    setupPreview(bannerInput, preview);
+    setupPreview(mobileInput, mobilePreview);
 
-  form.addEventListener('submit', async (event) => {
+    form.addEventListener('submit', async (event) => {
     event.preventDefault();
     if (!form.reportValidity()) return;
-    const promotions = loadPromotions();
-    if (promotions.length >= maximumPromotions) {
-      feedback.textContent = `You can set up a maximum of ${maximumPromotions} promotions.`;
+    const isAnnouncement = type === 'announcement';
+    const banners = isAnnouncement ? loadAnnouncements() : loadPromotions();
+    if (banners.length >= maximumPromotions) {
+      feedback.textContent = `You can set up a maximum of ${maximumPromotions} ${isAnnouncement ? 'announcements' : 'promotions'}.`;
       feedback.classList.add('visible');
       return;
     }
-    const destination = normalizePromotionDestination(form.elements.destination.value);
-    if (!destination) {
+    const destinationText = form.elements.destination.value.trim();
+    const destination = destinationText ? normalizePromotionDestination(destinationText) : '';
+    if (destinationText && !destination) {
+      feedback.textContent = 'Enter an app route starting with # or a secure https:// URL.';
+      feedback.classList.add('visible');
+      return;
+    }
+    if (!isAnnouncement && !destination) {
       feedback.textContent = 'Enter an app route starting with # or a secure https:// URL.';
       feedback.classList.add('visible');
       return;
@@ -2880,30 +2889,35 @@ function setupAdminPromotionsForm() {
     try {
       const image = await preparePromotionBanner(file, 1200, 600);
       const mobileImage = mobileFile ? await preparePromotionBanner(mobileFile, 900, 450) : '';
-      const promotion = {
-        id: `promotion-${Date.now()}`,
+      const banner = {
+        id: `${isAnnouncement ? 'announcement' : 'promotion'}-${Date.now()}`,
+        ...(isAnnouncement ? { type: 'announcement', details: form.elements.details.value.trim() } : {}),
         title: form.elements.title.value.trim(),
         destination,
         image,
         ...(mobileImage ? { mobileImage } : {}),
       };
-      localStorage.setItem(promotionStorageKey, JSON.stringify([...promotions, promotion]));
-      void recordAdminAction('promotion_uploaded', 'promotion', promotion.id, { title: promotion.title });
+      const allBanners = [...loadPromotions(), ...loadAnnouncements(), banner];
+      localStorage.setItem(promotionStorageKey, JSON.stringify(allBanners));
+      void recordAdminAction(isAnnouncement ? 'announcement_uploaded' : 'promotion_uploaded', isAnnouncement ? 'announcement' : 'promotion', banner.id, { title: banner.title });
       previewUrls.forEach((url) => URL.revokeObjectURL(url));
       render();
     } catch {
       feedback.textContent = 'The banner could not be processed or saved. Try a supported image under 2 MB.';
       feedback.classList.add('visible');
     }
+    });
   });
 
-  document.querySelector('[data-admin-promo-list]')?.addEventListener('click', (event) => {
-    const deleteButton = event.target.closest('[data-delete-promotion]');
+  document.querySelector('.admin-promotions-page')?.addEventListener('click', (event) => {
+    const deleteButton = event.target.closest('[data-delete-promotion], [data-delete-announcement]');
     if (!deleteButton) return;
-    const removedPromotion = loadPromotions().find((promotion) => promotion.id === deleteButton.dataset.deletePromotion);
-    const remaining = loadPromotions().filter((promotion) => promotion.id !== deleteButton.dataset.deletePromotion);
+    const isAnnouncement = deleteButton.hasAttribute('data-delete-announcement');
+    const id = deleteButton.dataset.deleteAnnouncement || deleteButton.dataset.deletePromotion;
+    const removed = [...loadPromotions(), ...loadAnnouncements()].find((item) => item.id === id);
+    const remaining = [...loadPromotions(), ...loadAnnouncements()].filter((item) => item.id !== id);
     localStorage.setItem(promotionStorageKey, JSON.stringify(remaining));
-    if (removedPromotion) void recordAdminAction('promotion_removed', 'promotion', removedPromotion.id, { title: removedPromotion.title });
+    if (removed) void recordAdminAction(isAnnouncement ? 'announcement_removed' : 'promotion_removed', isAnnouncement ? 'announcement' : 'promotion', removed.id, { title: removed.title });
     render();
   });
 }
@@ -4214,7 +4228,7 @@ async function render() {
     window.location.hash = '#login';
     return;
   }
-  const protectedPages = ['home', 'search', 'services', 'about', 'profile', 'edit-profile', 'help-center', 'feedback', 'pet-profile', 'address', 'payment-method', 'credit', 'marketplace', 'local-finder', 'local-finder-list', 'local-finder-place', 'product', 'seller', 'cart', 'checkout', 'orders', 'check-in', 'favourites', 'grooming', 'grooming-orders', 'hotel', 'daycare'];
+  const protectedPages = ['home', 'search', 'services', 'about', 'profile', 'edit-profile', 'help-center', 'feedback', 'pet-profile', 'address', 'payment-method', 'credit', 'marketplace', 'local-finder', 'local-finder-list', 'local-finder-place', 'local-finder-favourites', 'product', 'seller', 'cart', 'checkout', 'orders', 'check-in', 'favourites', 'grooming', 'grooming-orders', 'hotel', 'daycare'];
   if (hasDemoSession && sessionStorage.getItem('furgo-demo-user-role') === 'driver' && page !== 'driver' && page !== 'login') {
     window.location.hash = '#driver';
     return;
@@ -4264,6 +4278,7 @@ async function render() {
     'local-finder': localFinderPage,
     'local-finder-list': () => localFinderListPage(routeParams),
     'local-finder-place': () => localFinderPlacePage(routeParams),
+    'local-finder-favourites': localFinderFavoritesPage,
     'admin-local-finder': () => adminLocalFinderPage(routeParams),
     favourites: marketplaceFavoritesPage,
     product: () => marketplaceProductPage(routeParams.get('id') || ''),
@@ -4312,6 +4327,7 @@ async function render() {
     'local-finder': 'Local Finder — Furgo',
     'local-finder-list': 'Nearby Places — Furgo',
     'local-finder-place': 'Place Details — Furgo',
+    'local-finder-favourites': 'Favourite Places — Furgo',
     'admin-local-finder': 'Local Finder Management — Furgo Admin',
     favourites: 'My Favourites — Furgo',
     product: 'Product Details — Furgo',
@@ -4326,7 +4342,7 @@ async function render() {
     daycare: 'Pet Daycare — Furgo',
     'pet-profile': 'Pet Profile — Furgo',
     admin: 'Admin Portal — Furgo',
-    'admin-promotions': 'Home Promotions — Furgo Admin',
+    'admin-promotions': 'Promotions & Announcements — Furgo Admin',
     'admin-marketplace': 'Marketplace — Furgo Admin',
     'admin-marketplace-manage': 'Manage Marketplace — Furgo Admin',
     'admin-marketplace-products': 'Product And Supplier Mapping — Furgo Admin',
@@ -4406,7 +4422,7 @@ document.addEventListener('click', (event) => {
 
 // Refresh customer and admin screens when a related order changes in another tab.
 window.addEventListener('storage', (event) => {
-  if (/furgo-demo-(grooming-bookings|hotel-bookings|hotel-settings|pet-hotel-bookings|daycare-bookings|daycare-settings|pet-daycare-bookings|daycare-orders|check-in-tokens|driver-locations|customer-records|help-center-details|support-requests|marketplace-orders|marketplace-products|marketplace-offers|promotions|service-banners|marketplace-cart|marketplace-favorites|addresses|payment-methods|credit-balance|credit-transactions|daycare-passes)/.test(event.key || '')) render();
+  if (/furgo-demo-(grooming-bookings|hotel-bookings|hotel-settings|pet-hotel-bookings|daycare-bookings|daycare-settings|pet-daycare-bookings|daycare-orders|check-in-tokens|driver-locations|customer-records|help-center-details|support-requests|marketplace-orders|marketplace-products|marketplace-offers|promotions|service-banners|marketplace-cart|marketplace-favorites|local-finder-favorites|addresses|payment-methods|credit-balance|credit-transactions|daycare-passes)/.test(event.key || '')) render();
 });
 
 void initializeSupabaseSession();

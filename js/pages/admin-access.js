@@ -23,7 +23,7 @@ export function adminAccessPage() {
   const isDirector = level.order >= 3;
   const availableFeatures = [
     featureCard('Current Order & Check-In', 'Review current orders and check customers in.', '#admin-orders', true),
-    featureCard('Promotions', 'Create, update, and remove home page promotions.', '#admin-promotions', true),
+    featureCard('Promotions & Announcements', 'Manage home promotions and Local Finder announcement banners.', '#admin-promotions', isManager),
     featureCard('Marketplace', 'View and manage marketplace orders, payments, and fulfillment.', '#admin-marketplace', true),
     featureCard('Manage Marketplace', 'Manage suppliers and Marketplace settings, and view live product listings.', '#admin-marketplace-manage', true),
     featureCard('Grooming', isManager ? 'Manage appointment settings, bookings, and grooming operations.' : 'View bookings, safety notes, and grooming operations.', '#admin-grooming', true),
