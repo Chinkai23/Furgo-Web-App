@@ -3944,13 +3944,48 @@ function wireForms() {
     }
     profile.name = updatedName;
     sessionStorage.setItem('furgo-demo-user-profile', JSON.stringify(profile));
-    saveCustomerRecord(profile);
+    if (profile.role === 'customer') saveCustomerRecord(profile);
     message.textContent = 'Your name has been updated.';
     message.classList.add('visible');
     if (window.location.hash.split('?')[0] === '#edit-profile') {
       const returnTo = new URLSearchParams(window.location.hash.split('?')[1] || '').get('from');
-      window.setTimeout(() => { window.location.hash = returnTo === 'home' ? '#home' : '#profile'; }, 450);
+      window.setTimeout(() => { window.location.hash = ['admin', 'admin-access', 'driver'].includes(returnTo) ? `#${returnTo}` : returnTo === 'home' ? '#home' : '#profile'; }, 450);
     }
+  });
+
+  // Password changes are shared by customer, admin, driver, and supplier profile screens.
+  document.querySelectorAll('[data-change-password-form]').forEach((passwordForm) => {
+    passwordForm.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      if (!passwordForm.reportValidity()) return;
+      const currentPassword = passwordForm.elements.currentPassword.value;
+      const newPassword = passwordForm.elements.newPassword.value;
+      const confirmPassword = passwordForm.elements.confirmPassword.value;
+      const feedback = passwordForm.querySelector('[data-password-feedback], .form-feedback');
+      const submit = passwordForm.querySelector('[type="submit"]');
+      if (newPassword !== confirmPassword) {
+        feedback.textContent = 'The new passwords do not match.';
+        feedback.classList.add('visible');
+        return;
+      }
+      submit.disabled = true;
+      feedback.textContent = 'Updating password…';
+      feedback.classList.add('visible');
+      try {
+        const { data: authData, error: userError } = await supabase.auth.getUser();
+        if (userError || !authData.user?.email) throw new Error('Your account email could not be verified. Sign in again and retry.');
+        const { error: verifyError } = await supabase.auth.signInWithPassword({ email: authData.user.email, password: currentPassword });
+        if (verifyError) throw new Error('Current password is incorrect.');
+        const { error: updateError } = await supabase.auth.updateUser({ password: newPassword });
+        if (updateError) throw updateError;
+        passwordForm.reset();
+        feedback.textContent = 'Your password has been updated.';
+      } catch (error) {
+        feedback.textContent = error.message || friendlyAuthError(error);
+      } finally {
+        submit.disabled = false;
+      }
+    });
   });
 
   // Save feedback in the account's synced app data so it appears in the Admin enquiry inbox.
@@ -4229,7 +4264,7 @@ async function render() {
     return;
   }
   const protectedPages = ['home', 'search', 'services', 'about', 'profile', 'edit-profile', 'help-center', 'feedback', 'pet-profile', 'address', 'payment-method', 'credit', 'marketplace', 'local-finder', 'local-finder-list', 'local-finder-place', 'local-finder-favourites', 'product', 'seller', 'cart', 'checkout', 'orders', 'check-in', 'favourites', 'grooming', 'grooming-orders', 'hotel', 'daycare'];
-  if (hasDemoSession && sessionStorage.getItem('furgo-demo-user-role') === 'driver' && page !== 'driver' && page !== 'login') {
+  if (hasDemoSession && sessionStorage.getItem('furgo-demo-user-role') === 'driver' && !['driver', 'edit-profile', 'login'].includes(page)) {
     window.location.hash = '#driver';
     return;
   }

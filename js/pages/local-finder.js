@@ -269,10 +269,10 @@ function localFinderLocationPicker({ values = {} } = {}) {
   return `<section class="local-finder-location-picker" aria-label="Find a place location">
     <div class="local-finder-location-picker-heading"><div><strong>Find this place on the map</strong><span>Search for a venue or use your current location to fill in its name, address and map pin.</span></div></div>
     <div class="local-finder-location-search" data-place-location-search><div><input id="place-location-query" name="query" type="search" maxlength="180" placeholder="Search a place or address" autocomplete="off" /><button class="button button-secondary" type="button" data-place-search>Search</button></div></div>
-    <button class="button button-secondary" type="button" data-place-use-location>Use current location</button>
+    <button class="button button-secondary" type="button" data-place-use-location>Use Current Location</button>
     <p class="local-finder-selected-address" data-place-selected-address>${escapeHTML(values.address || 'Choose a place to fill its address.')}</p>
     <div class="local-finder-location-results" data-place-location-results aria-live="polite"></div>
-    <p class="local-finder-google-attribution" translate="no">Google Maps</p>
+    <div class="local-finder-google-attribution"><img src="Image/Icon/GoogleMaps_Logo_White_1x.png" alt="Google Maps" /></div>
   </section>`;
 }
 
@@ -949,37 +949,100 @@ async function loadLocalFinderPlace(params, supabase) {
     const phone = place.phone;
     const website = safeExternalUrl(place.website, '');
     const myId = (await supabase.auth.getUser()).data?.user?.id;
+    const { data: reviewRows, error: reviewsError } = await supabase
+      .from('local_finder_reviews')
+      .select('id, place_id, user_id, reviewer_name, review_text, created_at, updated_at')
+      .eq('place_id', place.id)
+      .order('created_at', { ascending: false });
+    const reviews = reviewRows || [];
+    const ownReview = reviews.find((review) => review.user_id === myId);
+    const reviewsListMarkup = reviewsError
+      ? '<p class="local-finder-review-empty">Reviews are temporarily unavailable. Apply migration 0059 in Supabase to enable place reviews.</p>'
+      : reviews.length
+        ? reviews.map((review) => `<article class="local-finder-review"><header><strong>${escapeHTML(review.reviewer_name || 'Furgo user')}</strong><time datetime="${escapeHTML(review.created_at)}">${escapeHTML(new Date(review.created_at).toLocaleDateString('en-MY', { day: 'numeric', month: 'short', year: 'numeric' }))}</time></header><p>${escapeHTML(review.review_text)}</p></article>`).join('')
+        : '<p class="local-finder-review-empty">No reviews yet. Be the first to review this place.</p>';
     detail.innerHTML = `<div class="local-finder-detail-image">${photo}</div>
       <section class="local-finder-detail-summary"><div class="local-finder-detail-meta"><div class="local-finder-detail-recommend"><span data-place-recommendation-count>${place.recommendationCount} Furgomate Recommended ${place.is_verified ? verifiedBadge() : ''}</span><button type="button" class="local-finder-recommend-button" data-place-recommend data-place-id="${escapeHTML(place.id)}" data-recommended="${place.recommendedByUser}">${place.recommendedByUser ? 'Remove Recommendation' : 'Recommend This Place'}</button></div><span>${place.distance === null ? 'Approx. distance unavailable' : `Approx. distance: ${place.distance.toFixed(1)}km`}</span></div><div class="local-finder-place-title-row"><h2>${escapeHTML(place.name)}</h2><button type="button" class="button local-finder-favorite-button" data-toggle-local-favorite="${escapeHTML(place.id)}" aria-label="${place.isFavorite ? `Remove ${escapeHTML(place.name)} from favourite places` : `Save ${escapeHTML(place.name)} as favourite`}" aria-pressed="${place.isFavorite}">${place.isFavorite ? 'Remove Favourite' : 'Save As Favourite'}</button></div><p>${escapeHTML([place.city, place.state].filter(Boolean).join(', ') || place.address)}</p><div class="local-finder-rule-chips">${petRules.length ? petRules.map((rule) => `<span>${escapeHTML(rule)}</span>`).join('') : '<span>Pet rules not provided</span>'}</div></section>
       <section class="local-finder-detail-contact"><div><strong>Address:</strong><span>${escapeHTML(place.address)}</span></div><div class="local-finder-direction"><span>Approx. distance: ${place.distance === null ? 'Unavailable' : `${place.distance.toFixed(1)}km`}</span><details class="local-finder-directions-menu"><summary class="button button-primary">Go Now</summary><div role="menu"><a role="menuitem" href="${directions}" target="_blank" rel="noopener noreferrer">Google Maps</a><a role="menuitem" href="${wazeDirections}" target="_blank" rel="noopener noreferrer">Waze</a></div></details></div></section>
       <section class="local-finder-detail-facts"><p><span>Allowed Area</span><span>${escapeHTML(place.allowed_area || 'Not listed')}</span></p><p><span>Pet Allowed</span><span>${escapeHTML(place.pet_allowed || 'Not listed')}</span></p><p><span>Size</span><span>${escapeHTML(place.pet_size || 'Not listed')}</span></p><p><span>Conditions</span><span>${escapeHTML(place.conditions || 'Not listed')}</span></p>${phone ? `<p><span>Phone</span><a href="tel:${escapeHTML(phone.replaceAll(/[^+\d]/g, ''))}">${escapeHTML(phone)}</a></p>` : ''}${website ? `<p><span>Website</span><a href="${escapeHTML(website)}" target="_blank" rel="noopener noreferrer">Visit website</a></p>` : ''}<h3>Opening Hours</h3><div class="local-finder-opening-hours">${openingHours}</div></section>
       <section class="local-finder-detail-actions"><p class="local-finder-action-feedback" data-place-action-feedback role="status" aria-live="polite"></p><button class="button button-primary" type="button" data-open-place-edit>Suggest Edit</button></section>
+      <section class="local-finder-reviews" aria-labelledby="local-finder-reviews-title"><div class="local-finder-reviews-heading"><h3 id="local-finder-reviews-title">Customer Reviews</h3><span data-place-review-count>${reviews.length} ${reviews.length === 1 ? 'review' : 'reviews'}</span></div><div class="local-finder-review-list" data-place-review-list>${reviewsListMarkup}</div><form class="local-finder-review-form" data-place-review-form data-place-id="${escapeHTML(place.id)}"><label for="local-finder-review-input">${ownReview ? 'Edit your review' : 'Write a review'}</label><textarea id="local-finder-review-input" name="review" minlength="5" maxlength="1200" rows="4" placeholder="Share your experience at this place…" required>${escapeHTML(ownReview?.review_text || '')}</textarea><button class="button button-primary" type="submit">${ownReview ? 'Update Review' : 'Post Review'}</button><p class="local-finder-review-feedback" data-place-review-feedback role="status" aria-live="polite"></p></form><div class="local-finder-review-recommend-row"><span data-place-recommendation-count-bottom>${place.recommendationCount} Furgomate Recommended</span><button type="button" class="local-finder-recommend-button" data-place-review-recommend data-place-id="${escapeHTML(place.id)}" data-recommended="${place.recommendedByUser}" aria-pressed="${place.recommendedByUser}">${place.recommendedByUser ? 'Remove Recommendation' : 'Recommend This Place'}</button></div></section>
       <dialog class="local-finder-share-dialog" data-place-edit-dialog aria-labelledby="place-edit-title"><form class="local-finder-suggestion-form" data-place-edit-form data-place-id="${escapeHTML(place.id)}"><header><div><span>Suggest a correction</span><h2 id="place-edit-title">Suggest Edit</h2></div><button type="button" data-close-place-edit aria-label="Close">×</button></header>${placeFormFields({ values: place, includeCategory: false })}<p class="local-finder-suggestion-feedback" data-place-edit-feedback role="status" aria-live="polite"></p><button class="button button-primary" type="submit">Submit Edit</button></form></dialog>
       `;
-    wirePlaceActions(detail, supabase, place, myId);
+    wirePlaceActions(detail, supabase, place, myId, reviews);
   } catch (error) {
     detail.innerHTML = `<p class="local-finder-empty">${escapeHTML(error.message || 'Place details could not be loaded.')}</p><a class="button button-primary local-finder-back-button" href="#local-finder-list?category=${category.key}">Back to results</a>`;
   }
 }
 
-function wirePlaceActions(root, supabase, place, userId) {
+function wirePlaceActions(root, supabase, place, userId, reviews = []) {
   const feedback = root.querySelector('[data-place-action-feedback]');
-  const recommendButton = root.querySelector('[data-place-recommend]');
-  recommendButton?.addEventListener('click', async () => {
-    if (!userId) { feedback.textContent = 'Sign in to recommend this place.'; return; }
+  const recommendationButtons = [...root.querySelectorAll('[data-place-recommend], [data-place-review-recommend]')];
+  const setRecommendationState = (recommended) => {
+    for (const button of recommendationButtons) {
+      button.dataset.recommended = String(recommended);
+      button.setAttribute('aria-pressed', String(recommended));
+      button.textContent = recommended ? 'Remove Recommendation' : 'Recommend This Place';
+      button.disabled = false;
+    }
+  };
+  for (const recommendButton of recommendationButtons) recommendButton.addEventListener('click', async () => {
+    const message = recommendButton.hasAttribute('data-place-review-recommend') ? root.querySelector('[data-place-review-feedback]') : feedback;
+    if (!userId) { if (message) message.textContent = 'Sign in to recommend this place.'; return; }
     const isRecommended = recommendButton.dataset.recommended === 'true';
-    recommendButton.disabled = true;
+    recommendationButtons.forEach((button) => { button.disabled = true; });
     const result = isRecommended
       ? await supabase.from('local_finder_recommendations').delete().eq('place_id', place.id).eq('user_id', userId)
       : await supabase.from('local_finder_recommendations').insert({ place_id: place.id, user_id: userId });
-    recommendButton.disabled = false;
-    if (result.error) { feedback.textContent = result.error.message || 'Your recommendation could not be saved.'; return; }
+    if (result.error) { recommendationButtons.forEach((button) => { button.disabled = false; }); if (message) message.textContent = result.error.message || 'Your recommendation could not be saved.'; return; }
     const count = Math.max(0, place.recommendationCount + (isRecommended ? -1 : 1));
     place.recommendationCount = count;
-    recommendButton.dataset.recommended = String(!isRecommended);
-    recommendButton.textContent = isRecommended ? 'Recommend This Place' : 'Remove Recommendation';
-    root.querySelector('[data-place-recommendation-count]').innerHTML = `${count} Furgomate Recommended ${place.is_verified ? verifiedBadge() : ''}`;
-    feedback.textContent = isRecommended ? '' : 'Thanks for recommending this place!';
+    setRecommendationState(!isRecommended);
+    const recommendationLabel = `${count} Furgomate Recommended`;
+    root.querySelectorAll('[data-place-recommendation-count], [data-place-recommendation-count-bottom]').forEach((label) => {
+      label.innerHTML = `${recommendationLabel}${place.is_verified && label.hasAttribute('data-place-recommendation-count') ? ` ${verifiedBadge()}` : ''}`;
+    });
+    if (message) message.textContent = isRecommended ? '' : 'Thanks for recommending this place!';
+  });
+
+  const reviewForm = root.querySelector('[data-place-review-form]');
+  const reviewList = root.querySelector('[data-place-review-list]');
+  const reviewCount = root.querySelector('[data-place-review-count]');
+  const reviewFeedback = root.querySelector('[data-place-review-feedback]');
+  const reviewText = reviewForm?.elements.review;
+  const renderReviews = () => {
+    const ordered = [...reviews].sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+    if (reviewCount) reviewCount.textContent = `${ordered.length} ${ordered.length === 1 ? 'review' : 'reviews'}`;
+    if (reviewList) reviewList.innerHTML = ordered.length
+      ? ordered.map((review) => `<article class="local-finder-review"><header><strong>${escapeHTML(review.reviewer_name || 'Furgo user')}</strong><time datetime="${escapeHTML(review.created_at)}">${escapeHTML(new Date(review.created_at).toLocaleDateString('en-MY', { day: 'numeric', month: 'short', year: 'numeric' }))}</time></header><p>${escapeHTML(review.review_text)}</p></article>`).join('')
+      : '<p class="local-finder-review-empty">No reviews yet. Be the first to review this place.</p>';
+    const own = reviews.find((review) => review.user_id === userId);
+    if (reviewText && own) reviewText.value = own.review_text;
+    const submitButton = reviewForm?.querySelector('[type="submit"]');
+    if (submitButton) submitButton.textContent = own ? 'Update Review' : 'Post Review';
+    const label = reviewForm?.querySelector('label[for="local-finder-review-input"]');
+    if (label) label.textContent = own ? 'Edit your review' : 'Write a review';
+  };
+  reviewForm?.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    if (!reviewForm.reportValidity()) return;
+    if (!userId) { if (reviewFeedback) reviewFeedback.textContent = 'Sign in to leave a review.'; return; }
+    const submitButton = reviewForm.querySelector('[type="submit"]');
+    submitButton.disabled = true;
+    if (reviewFeedback) { reviewFeedback.classList.remove('is-error'); reviewFeedback.textContent = 'Saving your review…'; }
+    try {
+      const { data, error } = await supabase.rpc('submit_local_finder_review', { p_place_id: place.id, p_review: reviewText.value });
+      if (error) throw new Error(error.message.includes('submit_local_finder_review') ? 'Apply migration 0059 in Supabase to enable place reviews.' : error.message);
+      const savedReview = Array.isArray(data) ? data[0] : data;
+      if (!savedReview?.id) throw new Error('The review could not be confirmed. Please refresh and try again.');
+      const previousIndex = reviews.findIndex((review) => review.user_id === userId);
+      if (previousIndex >= 0) reviews.splice(previousIndex, 1, savedReview);
+      else reviews.push(savedReview);
+      renderReviews();
+      if (reviewFeedback) reviewFeedback.textContent = previousIndex >= 0 ? 'Your review has been updated.' : 'Thanks for sharing your review!';
+    } catch (error) {
+      if (reviewFeedback) { reviewFeedback.textContent = error.message || 'Your review could not be saved.'; reviewFeedback.classList.add('is-error'); }
+    } finally { submitButton.disabled = false; }
   });
 
   root.querySelector('[data-toggle-local-favorite]')?.addEventListener('click', (event) => {
