@@ -6,11 +6,11 @@ export const defaultPetTaxiSettings = {
   farePerKm: 2.2,
   scheduleSlots: ['09:00', '12:00', '15:00'],
   routes: [
-    { city: 'Petaling Jaya', outlet: 'Furgo Pet Care - Petaling Jaya', distanceKm: 8 },
-    { city: 'Kuala Lumpur', outlet: 'Furgo Pet Care - Petaling Jaya', distanceKm: 16 },
-    { city: 'Petaling Jaya', outlet: '*', distanceKm: 8 },
-    { city: 'Kuala Lumpur', outlet: '*', distanceKm: 18 },
-    { city: 'Subang Jaya', outlet: '*', distanceKm: 12 },
+    { city: 'Petaling Jaya', outlet: 'Furgo Pet Care - Petaling Jaya', fare: 25.6 },
+    { city: 'Kuala Lumpur', outlet: 'Furgo Pet Care - Petaling Jaya', fare: 43.2 },
+    { city: 'Petaling Jaya', outlet: '*', fare: 25.6 },
+    { city: 'Kuala Lumpur', outlet: '*', fare: 47.6 },
+    { city: 'Subang Jaya', outlet: '*', fare: 34.4 },
   ],
 };
 
@@ -22,14 +22,17 @@ export function loadPetTaxiSettings() {
       ...defaultPetTaxiSettings,
       ...saved,
       scheduleSlots: Array.isArray(saved.scheduleSlots) ? saved.scheduleSlots : defaultPetTaxiSettings.scheduleSlots,
-      routes: Array.isArray(saved.routes) ? saved.routes : defaultPetTaxiSettings.routes,
+      routes: (Array.isArray(saved.routes) ? saved.routes : defaultPetTaxiSettings.routes).map((route) => normalizeRoute(route, saved)),
     };
     const legacyGrooming = JSON.parse(localStorage.getItem('furgo-demo-grooming-settings') || 'null');
     const legacyDaycare = JSON.parse(localStorage.getItem('furgo-demo-daycare-settings') || 'null');
-    const routes = [...(legacyGrooming?.taxiRouteEstimates || defaultPetTaxiSettings.routes)];
+    const routes = [...(legacyGrooming?.taxiRouteEstimates || defaultPetTaxiSettings.routes)].map((route) => normalizeRoute(route, {
+      baseFare: legacyGrooming?.taxiBaseFare ?? defaultPetTaxiSettings.baseFare,
+      farePerKm: legacyGrooming?.taxiPerKm ?? defaultPetTaxiSettings.farePerKm,
+    }));
     for (const route of legacyDaycare?.taxiRoutes || []) {
       if (route?.city && !routes.some((item) => item.city.toLowerCase() === route.city.toLowerCase() && item.outlet === '*')) {
-        routes.push({ city: route.city, outlet: '*', distanceKm: Number(route.distanceKm) });
+        routes.push(normalizeRoute({ city: route.city, outlet: '*', distanceKm: Number(route.distanceKm) }));
       }
     }
     return {
@@ -40,6 +43,18 @@ export function loadPetTaxiSettings() {
       routes,
     };
   } catch { return { ...defaultPetTaxiSettings, scheduleSlots: [...defaultPetTaxiSettings.scheduleSlots], routes: [...defaultPetTaxiSettings.routes] }; }
+}
+
+function normalizeRoute(route, pricing = defaultPetTaxiSettings) {
+  const distanceKm = Number(route?.distanceKm) || 0;
+  const legacyFare = Number(pricing.baseFare ?? defaultPetTaxiSettings.baseFare) + distanceKm * Number(pricing.farePerKm ?? defaultPetTaxiSettings.farePerKm);
+  return { ...route, fare: Number.isFinite(Number(route?.fare)) ? Number(route.fare) : legacyFare };
+}
+
+export function petTaxiRouteFare(route, settings = loadPetTaxiSettings()) {
+  if (!route) return 0;
+  const fare = Number(route.fare);
+  return Number.isFinite(fare) ? fare : Number(settings.baseFare || 0) + Number(route.distanceKm || 0) * Number(settings.farePerKm || 0);
 }
 
 // Prefers an exact outlet route, then falls back to a wildcard route for that city.

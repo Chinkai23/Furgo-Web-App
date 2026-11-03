@@ -8,6 +8,8 @@ if (localStorage.getItem(marketplaceTestCatalogResetKey) !== 'done') {
   localStorage.setItem(marketplaceTestCatalogResetKey, 'done');
 }
 export const marketplaceCartKey = 'furgo-demo-marketplace-cart';
+export const marketplaceSubscriptionCartKey = 'furgo-demo-marketplace-subscription-cart';
+export const marketplaceSubscriptionsKey = 'furgo-demo-marketplace-active-subscriptions';
 export const marketplaceFavoritesKey = 'furgo-demo-marketplace-favorites';
 export const marketplaceOrdersKey = 'furgo-demo-marketplace-orders';
 export const marketplaceOfferSettingsKey = 'furgo-demo-marketplace-offers';
@@ -98,6 +100,22 @@ export function loadMarketplaceCart() {
   } catch { return []; }
 }
 
+// Reads subscription-cart selections; recurring billing is handled only after payment integration is added.
+export function loadMarketplaceSubscriptionCart() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(marketplaceSubscriptionCartKey) || '[]');
+    return Array.isArray(saved) ? saved : [];
+  } catch { return []; }
+}
+
+// Reads locally confirmed subscription selections; recurring billing is not active yet.
+export function loadMarketplaceSubscriptions() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(marketplaceSubscriptionsKey) || '[]');
+    return Array.isArray(saved) ? saved : [];
+  } catch { return []; }
+}
+
 // Reads unique product IDs saved to this customer's favourite list.
 export function loadMarketplaceFavorites() {
   try {
@@ -120,4 +138,12 @@ export function marketplaceLine(cartItem, products = loadMarketplaceProducts()) 
   const variant = product?.variants.find((item) => item.id === cartItem.variantId);
   if (!product || product.hidden || product.frozenByAdmin || !variant || variant.frozen) return null;
   return { product, variant, quantity: Number(cartItem.quantity) || 1, total: variant.price * (Number(cartItem.quantity) || 1) };
+}
+
+export function marketplaceSubscriptionLine(cartItem, products = loadMarketplaceProducts()) {
+  const line = marketplaceLine(cartItem, products);
+  if (!line || Number(line.variant.stock) < 1) return null;
+  const interval = ['week', 'month'].includes(cartItem.interval) ? cartItem.interval : 'month';
+  const intervalCount = Math.max(1, Math.min(12, Number(cartItem.intervalCount) || (Number(cartItem.intervalWeeks) ? 1 : 1)));
+  return { ...line, interval, intervalCount };
 }

@@ -829,6 +829,9 @@ h1, h2, h3, p { margin-top: 0; }
 .market-kicker { display: block; margin-bottom: 3px; color: var(--orange-dark); font-size: 10px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
 .marketplace-header h1 { margin: 0; font: 700 23px/1.15 'Avenir Next'; letter-spacing: -.6px; }
 .market-header-actions { display: flex; align-items: center; gap: 12px; }
+.market-subscriptions-link { min-height: 40px; position: relative; display: inline-flex; flex-direction: row; align-items: center; justify-content: center; gap: 7px; padding: 0 15px; border: 1px solid var(--orange); border-radius: 999px; color: #fff; background: var(--orange); font-size: 12px; font-weight: 700; text-decoration: none; white-space: nowrap; }
+.market-subscriptions-link img { width: 19px; height: 19px; object-fit: contain; }
+.market-subscriptions-link b { min-width: 17px; height: 17px; position: absolute; top: -5px; right: -5px; display: grid; place-items: center; border: 1px solid #fffaf6; border-radius: 50%; color: #fff; background: var(--ink); font-size: 9px; }
 .market-cart-link { width: 41px; height: 41px; position: relative; display: grid; place-items: center; flex: 0 0 auto; border: 0; border-radius: 0; background: transparent; }
 .market-cart-link img { width: 37.8px; height: 37.8px; object-fit: contain; }
 .market-favorites-link { width: 41px; height: 41px; display: grid; place-items: center; flex: 0 0 auto; }
@@ -863,8 +866,12 @@ h1, h2, h3, p { margin-top: 0; }
 .market-favorite-toggle { width: 40px; height: 40px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 50%; background: transparent; cursor: pointer; }
 .market-favorite-toggle img { width: 26px; height: 26px; object-fit: contain; }
 .market-product-card > .market-favorite-toggle { position: absolute; z-index: 1; top: 13px; right: 13px; }
-.market-pdp-title-row { display: flex; align-items: center; justify-content: space-between; }
+.market-pdp-title-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .market-pdp-title-row .market-product-category { margin: 0; }
+.market-pdp-actions { min-width: 0; display: flex; align-items: center; gap: 5px; }
+.market-subscribe-product { min-height: 36px; display: inline-flex; flex-direction: row; align-items: center; gap: 7px; padding: 0 13px; border: 1px solid var(--orange); border-radius: 999px; color: #fff; background: var(--orange); font-size: 11px; font-weight: 700; white-space: nowrap; cursor: pointer; }
+.market-subscribe-product img { width: 17px; height: 17px; object-fit: contain; }
+.market-subscribe-product:disabled { opacity: .5; cursor: not-allowed; }
 .favorite-product-card { padding-bottom: 14px; }
 .favorite-repurchase { min-height: 40px; margin-top: 12px; font-size: 12px; }
 .favorite-repurchase:disabled { opacity: .55; cursor: not-allowed; }
@@ -908,6 +915,53 @@ h1, h2, h3, p { margin-top: 0; }
 .market-field input:focus, .market-field select:focus, .market-coupon-row input:focus { border-color: var(--orange); box-shadow: 0 0 0 3px #fe78011c; }
 .market-add-button { width: 100%; min-height: 52px; }
 .market-add-button:disabled { opacity: .55; cursor: not-allowed; }
+.market-subscription-page { width: min(100%, 960px); margin: 0 auto; }
+.market-subscription-cart-section, .market-subscription-active-section { margin-bottom: 16px; padding: 18px; border-radius: 17px; }
+.market-subscription-cart-section { border: 1px solid #f0e3d9; background: #fff; }
+.market-subscription-active-section { border: 0; background: linear-gradient(135deg, #ff7900, #ff9833); }
+.market-subscription-section-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.market-subscription-section-heading h2 { margin: 3px 0 0; font: 700 20px/1.2 'Avenir Next'; }
+.market-subscription-cart-section .market-subscription-section-heading h2 { color: var(--ink); }
+.market-subscription-cart-section .market-subscription-section-heading > span { flex: none; padding: 7px 11px; border-radius: 999px; color: var(--orange-dark); background: #fff0e3; font-size: 11px; font-weight: 700; }
+.market-subscription-active-section .market-kicker { color: #fff7ed; }
+.market-subscription-active-section .market-subscription-section-heading h2 { color: #fff; }
+.market-subscription-active-section .market-subscription-section-heading > span { flex: none; padding: 7px 11px; border-radius: 999px; color: var(--orange-dark); background: #fff; font-size: 11px; font-weight: 700; }
+.market-subscription-section-copy { margin: 8px 0 14px; color: var(--muted); font-size: 11px; line-height: 1.5; }
+.market-subscription-active-section .market-subscription-section-copy { color: #fff8f1; }
+.market-subscription-list { display: grid; gap: 12px; }
+.market-subscription-item { min-width: 0; display: grid; grid-template-columns: 150px minmax(0, 1fr); align-items: center; gap: 18px; padding: 15px; border: 1px solid #f0e7df; border-radius: 17px; background: #fff; }
+.market-subscription-image { width: 150px; aspect-ratio: 1; display: grid; place-items: center; overflow: hidden; border-radius: 12px; color: #ac5c19; background: linear-gradient(145deg, #fff3e8, #ffe3c8); font-size: 40px; object-fit: cover; }
+.market-subscription-item-copy { min-width: 0; }
+.market-subscription-item-copy .market-product-category { margin-top: 0; }
+.market-subscription-item-copy h2, .market-subscription-item-copy h3 { margin: 4px 0; font: 700 16px/1.3 'Avenir Next'; }
+.market-subscription-item-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+.market-subscription-remove-active { min-height: 32px; flex: none; padding: 0 10px; border: 1px solid var(--orange); border-radius: 9px; color: var(--orange-dark); background: transparent; font: 700 10px 'Avenir Next'; cursor: pointer; }
+.market-subscription-item-copy > p { margin: 0; color: var(--muted); font-size: 11px; }
+.market-subscription-controls { width: 100%; display: grid; grid-template-columns: minmax(180px, 1fr) 82px 38px auto; align-items: end; gap: 10px; margin-top: 12px; }
+.market-subscription-item.is-active .market-subscription-controls { display: flex; align-items: end; gap: 24px; }
+.market-subscription-item.is-active .market-subscription-frequency { flex: 0 0 145px; }
+.market-subscription-item.is-active .market-subscription-quantity { flex: 0 0 82px; }
+.market-subscription-item.is-active .market-subscription-next-delivery { flex: 0 0 150px; }
+.market-subscription-controls label { display: grid; gap: 5px; color: var(--muted); font-size: 10px; font-weight: 700; }
+.market-subscription-controls select, .market-subscription-controls input { min-width: 140px; min-height: 38px; padding: 0 10px; border: 1px solid #eadfd7; border-radius: 10px; color: var(--ink); background: #fff; font: 500 11px 'Avenir Next'; }
+.market-subscription-frequency select { width: 145px; min-width: 130px; }
+.market-subscription-controls input { min-width: 78px; width: 82px; }
+.market-subscription-value { min-height: 38px; display: grid; align-content: center; gap: 4px; color: var(--muted); font-size: 10px; }
+.market-subscription-value strong { color: var(--ink); font-size: 12px; }
+.market-subscription-next-delivery { min-height: 38px; display: grid; align-content: center; gap: 3px; color: var(--muted); font-size: 10px; }
+.market-subscription-next-delivery strong { color: var(--ink); font-size: 11px; }
+.market-subscription-secondary-row { display: contents; }
+.market-subscription-actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; justify-self: end; }
+.market-subscription-item.is-active .market-subscription-actions { margin-left: auto; }
+.market-subscription-edit-action { min-height: 38px; padding: 0 13px; border: 1px solid var(--orange); border-radius: 10px; color: #fff; background: var(--orange); font: 700 11px 'Avenir Next'; white-space: nowrap; cursor: pointer; }
+.market-subscription-edit-action.is-save { border-color: var(--orange); color: #fff; background: var(--orange); }
+.market-subscription-edit-action.is-cancel { border-color: var(--orange); color: var(--orange-dark); background: transparent; }
+.market-subscription-confirm { min-height: 42px; padding: 0 18px; border-radius: 10px; font-size: 12px; }
+.market-subscription-remove { width: 38px; min-height: 38px; display: grid; place-items: center; padding: 0; border: 1px solid var(--orange); border-radius: 9px; color: var(--orange-dark); background: transparent; cursor: pointer; }
+.market-subscription-remove svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.8; }
+.market-subscription-prototype-note { margin: 15px 0; padding: 12px 14px; border-radius: 12px; color: #795535; background: #fff5e9; font-size: 10px; line-height: 1.5; }
+.market-subscription-empty { margin-top: 20px; }
+.market-subscription-empty > img { width: 48px; height: 48px; margin: 0 auto 10px; object-fit: contain; }
 .market-product-facts { margin-top: 22px; border-top: 1px solid #eee3da; }
 .market-product-facts details { padding: 13px 0; border-bottom: 1px solid #eee3da; }
 .market-product-facts summary { font-size: 12px; font-weight: 700; cursor: pointer; }
@@ -1458,6 +1512,7 @@ h1, h2, h3, p { margin-top: 0; }
 }
 /* Fixed mobile navigation for Home, Activity, Marketplace, Help, and Profile. */
 .bottom-nav { height: calc(72px + env(safe-area-inset-bottom)); position: fixed; z-index: 20; right: 0; bottom: 0; left: 0; display: grid; grid-template-columns: repeat(5, 1fr); align-items: center; padding: 5px 8px calc(5px + env(safe-area-inset-bottom)); border-top: 1px solid #f0ece8; background: #fff; box-shadow: 0 -5px 18px #3824120c; }
+.driver-bottom-nav { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .bottom-item { min-width: 0; height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; color: #18181a; font-size: 10px; }
 .bottom-item img { width: 24px; height: 24px; object-fit: contain; }
 .bottom-item.active { color: var(--orange); font-weight: 700; }
@@ -2850,10 +2905,46 @@ select::-ms-expand { display: none; }
 .driver-scan-dialog form { display: grid; gap: 10px; }
 .driver-scan-dialog form label { display: grid; gap: 5px; font-size: 11px; font-weight: 700; }
 .driver-scan-dialog input { min-height: 42px; padding: 9px 11px; border: 1px solid #e8dfd8; border-radius: 10px; font: inherit; }
-.driver-bottom-nav { height: calc(72px + env(safe-area-inset-bottom)); position: fixed; z-index: 20; right: 0; bottom: 0; left: 0; display: grid; place-items: center; padding: 5px 8px calc(5px + env(safe-area-inset-bottom)); border-top: 1px solid #f0ece8; background: #fff; box-shadow: 0 -5px 18px #3824120c; }
-.driver-bottom-nav button { min-width: 92px; height: 78px; display: grid; justify-items: center; align-content: center; gap: 2px; margin-top: -19px; padding: 0 13px 5px; border: 4px solid #fff; border-radius: 999px; color: var(--ink); background: var(--orange); box-shadow: 0 5px 12px #7e3c1d28; cursor: pointer; }
-.driver-bottom-nav img { width: 31px; height: 31px; object-fit: contain; }
-.driver-bottom-nav span { color: white; font-size: 9px; font-weight: 700; line-height: 1; }
+.admin-pet-taxi-settings-page { max-width: 1240px; margin: 0 auto; }
+.admin-pet-taxi-settings-page > .admin-grooming-heading { margin: 22px 0; }
+.admin-pet-taxi-settings-page > .admin-market-panel { margin-top: 18px; }
+.admin-pet-taxi-settings-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.admin-pet-taxi-settings-grid > label { min-width: 0; display: grid; align-content: start; gap: 7px; color: #403a37; font-size: 13px; font-weight: 700; line-height: 1.4; }
+.admin-pet-taxi-settings-grid > .admin-pet-taxi-wide { grid-column: 1 / -1; }
+.admin-pet-taxi-settings-grid input,
+.admin-pet-taxi-settings-grid textarea { width: 100%; min-width: 0; min-height: 46px; padding: 10px 12px; border: 1px solid #e8dfd8; border-radius: 11px; color: var(--ink); background: #fffdfa; font: 400 14px/1.45 'Avenir Next'; }
+.admin-pet-taxi-settings-grid textarea { min-height: 190px; resize: vertical; white-space: pre-wrap; }
+.admin-pet-taxi-settings-grid small { color: var(--muted); font-size: 11px; font-weight: 400; line-height: 1.5; }
+.admin-pet-taxi-repeat-section { margin-top: 22px; padding-top: 18px; border-top: 1px solid #f0e5dc; }
+.admin-pet-taxi-repeat-heading { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin-bottom: 12px; }
+.admin-pet-taxi-repeat-heading h3 { margin: 0; font: 700 16px/1.3 'Avenir Next'; }
+.admin-pet-taxi-repeat-heading p { margin: 4px 0 0; color: var(--muted); font-size: 12px; line-height: 1.45; }
+.admin-pet-taxi-repeat-heading > .button { min-height: 38px; flex: 0 0 auto; padding: 7px 14px; }
+.admin-pet-taxi-repeat-heading [data-add-taxi-time],
+.admin-pet-taxi-repeat-heading [data-add-taxi-route] { border: 1px solid var(--orange); color: #fff; background: var(--orange); }
+.admin-pet-taxi-repeat-heading [data-add-taxi-time]:hover,
+.admin-pet-taxi-repeat-heading [data-add-taxi-route]:hover { background: var(--orange-dark); }
+.admin-pet-taxi-schedule-list,
+.admin-pet-taxi-route-list { display: grid; gap: 10px; }
+.admin-pet-taxi-schedule-row,
+.admin-pet-taxi-route-row { min-width: 0; display: grid; align-items: end; gap: 12px; padding: 12px; border: 1px solid #f0e5dc; border-radius: 13px; background: #fffaf6; }
+.admin-pet-taxi-schedule-row { grid-template-columns: minmax(0, 1fr) auto; }
+.admin-pet-taxi-route-row { grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr) minmax(110px, .45fr) auto; }
+.admin-pet-taxi-schedule-row > label,
+.admin-pet-taxi-route-row > label { min-width: 0; display: grid; gap: 6px; color: #403a37; font-size: 12px; font-weight: 700; line-height: 1.35; }
+.admin-pet-taxi-schedule-row input,
+.admin-pet-taxi-route-row input,
+.admin-pet-taxi-route-row select { width: 100%; min-width: 0; min-height: 43px; padding: 8px 10px; border: 1px solid #e8dfd8; border-radius: 10px; color: var(--ink); background: white; font: 400 13px 'Avenir Next'; }
+.admin-pet-taxi-schedule-row > .button,
+.admin-pet-taxi-route-row > .button { min-height: 41px; padding: 7px 13px; white-space: nowrap; }
+.admin-pet-taxi-schedule-row [data-remove-taxi-time],
+.admin-pet-taxi-route-row [data-remove-taxi-route] { min-height: 30px; padding: 4px 8px; border: 1.5px solid var(--orange); border-radius: 9px; color: var(--orange-dark); background: transparent; box-shadow: none; font-size: 10px; }
+.admin-pet-taxi-schedule-row [data-remove-taxi-time]:hover,
+.admin-pet-taxi-route-row [data-remove-taxi-route]:hover { color: #fff; background: var(--orange); }
+.admin-pet-taxi-schedule-row > .button:disabled,
+.admin-pet-taxi-route-row > .button:disabled { opacity: .48; cursor: not-allowed; }
+.admin-pet-taxi-settings-page .admin-market-form-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-top: 18px; }
+.admin-pet-taxi-settings-page [data-admin-pet-taxi-feedback] { color: #287347; font-size: 12px; }
 .admin-pet-taxi-section { margin-top: 22px; padding: 20px; border: 1px solid #f1dfd0; border-radius: 18px; background: #fff; }
 .admin-pet-taxi-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; margin-bottom: 14px; }
 .admin-pet-taxi-title-row { display: flex; align-items: center; gap: 10px; margin-bottom: 5px; }
@@ -2897,6 +2988,17 @@ select::-ms-expand { display: none; }
 .live-driver-location-meta a { color: var(--orange-dark); font-weight: 700; }
 .live-driver-location-waiting { margin: 0; padding: 12px; border-radius: 10px; color: var(--muted); background: #fff; font-size: 11px; }
 @media (max-width: 560px) {
+  .admin-pet-taxi-settings-page { padding-right: 14px; padding-left: 14px; }
+  .admin-pet-taxi-settings-grid { grid-template-columns: minmax(0, 1fr); gap: 13px; }
+  .admin-pet-taxi-settings-grid > .admin-pet-taxi-wide { grid-column: auto; }
+  .admin-pet-taxi-settings-grid textarea { min-height: 160px; }
+  .admin-pet-taxi-repeat-heading { align-items: flex-start; }
+  .admin-pet-taxi-repeat-heading > .button { padding-inline: 11px; }
+  .admin-pet-taxi-schedule-row { grid-template-columns: minmax(0, 1fr) auto; gap: 8px; padding: 10px; }
+  .admin-pet-taxi-route-row { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; padding: 10px; }
+  .admin-pet-taxi-route-row > .button { grid-column: 1 / -1; justify-self: start; }
+  .admin-pet-taxi-settings-page > .admin-market-panel { padding: 16px; }
+  .admin-pet-taxi-settings-page > .admin-market-panel .admin-market-panel-heading { display: grid; gap: 8px; }
   .driver-portal-page { padding-right: 14px; padding-left: 14px; }
   .driver-portal-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .driver-section-heading { align-items: flex-start; flex-direction: column; }
@@ -2909,10 +3011,6 @@ select::-ms-expand { display: none; }
   .check-in-taxi-qr { gap: 10px; padding: 14px 11px; }
   .check-in-taxi-qr .check-in-qr { width: min(100%, 190px); height: auto; }
 }
-@media (min-width: 680px) {
-  .driver-bottom-nav { width: min(660px, calc(100% - 50px)); height: 76px; right: 50%; bottom: 15px; left: auto; transform: translateX(50%); padding: 5px 18px; border: 1px solid #f0ece8; border-radius: 26px; box-shadow: 0 7px 26px #38241218; }
-}
-
 /* Shared page title bars: keep return arrows and centered headings consistent with My Profile. */
 .profile-heading,
 .marketplace-header,
@@ -3163,6 +3261,57 @@ select::-ms-expand { display: none; }
   .marketplace-header .market-favorites-link img { width: 32px; height: 32px; }
 }
 
+/* Keep shared customer page controls on the same horizontal content rail. */
+.marketplace-page .marketplace-header {
+  width: min(1120px, 100%);
+  left: auto;
+  transform: none;
+  margin-right: auto;
+  margin-left: auto;
+}
+.marketplace-page:has(.market-pdp) .marketplace-header { width: min(960px, 100%); }
+.marketplace-page:has(.market-orders-list) .marketplace-header { width: min(860px, 100%); }
+.marketplace-page .market-search-wrap { width: min(1120px, 100%); }
+.marketplace-page .market-search { width: 100%; max-width: none; }
+.grooming-page .grooming-header { width: min(760px, 100%); left: auto; transform: none; margin-right: auto; margin-left: auto; }
+.my-orders-page .my-orders-header { width: min(720px, 100%); left: auto; transform: none; margin-right: auto; margin-left: auto; }
+
+/* Supplier shop banner follows the storefront content rail and carries the brand gradient. */
+.market-seller-profile {
+  width: min(1120px, 100%);
+  border: none;
+  outline: none;
+  background: linear-gradient(90deg, #fedbbb 0%, transparent 100%);
+  box-shadow: none;
+}
+.supplier-my-shop > .admin-market-heading { width: min(1120px, 100%); }
+.supplier-my-shop-banner { margin-top: 18px; }
+.supplier-my-shop-products { margin-top: 0; }
+.supplier-product-header-actions { display: flex; align-items: center; gap: 8px; }
+.supplier-product-header-actions > .button {
+  width: 120px;
+  min-height: 34px;
+  padding: 0 8px;
+  border-radius: 10px;
+  font-size: 10px;
+  white-space: nowrap;
+}
+.supplier-product-header-actions .supplier-view-shop-button {
+  border: 1.5px solid var(--orange);
+  color: var(--orange-dark);
+  background: transparent;
+  box-shadow: none;
+}
+.supplier-product-header-actions .supplier-view-shop-button:hover { color: #fff; background: var(--orange); }
+.supplier-shop-product-link { width: 100%; padding: 0; border: 0; color: inherit; background: transparent; text-align: left; cursor: pointer; }
+.supplier-shop-empty { grid-column: 1 / -1; }
+
+@media (max-width: 620px) {
+  .supplier-product-header-actions { width: 100%; margin-top: 10px; }
+  .supplier-product-header-actions > .button { width: auto; min-width: 0; min-height: 44px; flex: 1 1 0; padding: 0 8px; }
+  .supplier-my-shop > .admin-market-heading { width: 100%; }
+}
+
 @media (max-width: 680px) {
   .admin-search-analytics { padding: 17px; }
   .admin-search-analytics-heading { flex-direction: column; }
@@ -3229,6 +3378,40 @@ select::-ms-expand { display: none; }
 .admin-service-banner-preview { grid-column: 1 / -1; width: 100%; max-height: 130px; border-radius: 10px; object-fit: cover; }
 .admin-service-banner-actions { display: flex; flex-wrap: wrap; gap: 9px; margin-top: 12px; }
 .admin-service-banner-actions .button { min-height: 40px; }
+
+/* Use the Pet Local Finder chevron treatment for page-header back controls site-wide. */
+.local-finder-header > a,
+.profile-heading .profile-back,
+.marketplace-header .market-back,
+.grooming-header .grooming-back,
+.my-orders-header > a,
+.search-page-header .search-back,
+.admin-market-heading > a[aria-label],
+.admin-market-heading > button[aria-label],
+.admin-grooming-heading > a,
+.admin-promotions-heading > a {
+  width: 42px;
+  height: 48px;
+  display: grid;
+  flex: 0 0 42px;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  color: #171719;
+  background: transparent;
+  font: 400 42px/1 'Avenir Next';
+  text-decoration: none;
+}
+.profile-heading .profile-back::before,
+.marketplace-header .market-back::before,
+.grooming-header .grooming-back::before,
+.my-orders-header > a::before,
+.admin-market-heading > a[aria-label]::before,
+.admin-market-heading > button[aria-label]::before,
+.admin-grooming-heading > a::before,
+.supplier-admin-style-page > .admin-market-heading > button[aria-label]::before { content: none; display: none; }
+
 @media (max-width: 640px) {
   .service-promo-banners { width: min(100%, 760px); height: clamp(96px, 31vw, 138px); margin-bottom: 13px; border-radius: 13px; }
   .service-promo-banner-arrow { width: 30px; height: 30px; }
@@ -3247,3 +3430,229 @@ select::-ms-expand { display: none; }
 .admin-portal-page form textarea,
 .admin-portal-page form input::placeholder,
 .admin-portal-page form textarea::placeholder { font-weight: 400; }
+
+@media (max-width: 600px) {
+  .market-header-actions { gap: 7px; }
+  .market-subscriptions-link { min-height: 38px; gap: 6px; padding: 0 12px; font-size: 11px; }
+  .market-subscriptions-link img { width: 18px; height: 18px; }
+  .marketplace-header-centered { position: relative; display: block; min-height: 58px; }
+  .marketplace-header-centered .market-back,
+  .marketplace-header-centered .market-header-actions { position: absolute; top: 50%; transform: translateY(-50%); }
+  .marketplace-header-centered .market-back { left: 0; width: 32px; }
+  .marketplace-header-centered h1 { position: absolute; top: 50%; left: 50%; width: calc(100% - 220px); max-width: calc(100% - 220px); min-width: 0; transform: translate(-50%, -50%); font-size: 19px; text-align: center; }
+  .marketplace-header-centered .market-header-actions { right: 0; gap: 4px; }
+  .market-subscription-item { grid-template-columns: 96px minmax(0, 1fr); gap: 10px; padding: 10px; }
+  .market-subscription-image { width: 96px; border-radius: 10px; font-size: 30px; }
+  .market-subscription-item-copy h2, .market-subscription-item-copy h3 { font-size: 14px; }
+  .market-subscription-item-copy > p { font-size: 10px; }
+  .market-subscription-cart-section, .market-subscription-active-section { padding: 13px; }
+  .market-subscription-section-heading h2 { font-size: 17px; }
+  .market-subscription-controls { display: grid; grid-template-columns: minmax(0, 132px) 56px 34px; gap: 7px; }
+  .market-subscription-controls select { width: 100%; min-width: 0; padding-inline: 6px; font-size: 10px; }
+  .market-subscription-controls input { width: 56px; min-width: 0; padding-inline: 5px; }
+  .market-subscription-remove { width: 34px; min-height: 38px; }
+  .market-subscription-actions { grid-column: 1 / -1; justify-self: end; }
+  .market-subscription-confirm { min-height: 42px; padding-inline: 19px; font-size: 12px; }
+  .market-subscribe-product { min-height: 36px; gap: 6px; padding-inline: 10px; font-size: 10px; }
+  .market-subscribe-product img { width: 16px; height: 16px; }
+}
+
+@media (max-width: 520px) {
+  .marketplace-header-centered { min-height: 58px; }
+  .marketplace-header-centered .market-back { top: 50%; transform: translateY(-50%); }
+  .marketplace-header-centered h1 { top: 50%; width: calc(100% - 150px); max-width: calc(100% - 150px); transform: translate(-50%, -50%); }
+  .marketplace-header-centered .market-header-actions { top: 50%; right: 0; display: flex; gap: 8px; transform: translateY(-50%); }
+}
+
+@media (max-width: 400px) {
+  .marketplace-header-centered h1 { width: calc(100% - 180px); max-width: calc(100% - 180px); }
+}
+
+/* Subscription cards prioritize the product and right-aligned action on mobile/tablet. */
+@media (max-width: 900px) {
+  .market-subscription-item { grid-template-columns: 128px minmax(0, 1fr); gap: 12px; }
+  .market-subscription-image { width: 128px; }
+  .market-subscription-controls { grid-template-columns: minmax(0, 1fr) 52px 32px; column-gap: 5px; }
+  .market-subscription-item.is-active .market-subscription-controls { display: grid; grid-template-columns: 145px 48px minmax(0, 1fr); justify-content: start; column-gap: 8px; row-gap: 8px; }
+  .market-subscription-item.is-active .market-subscription-frequency { flex: initial; }
+  .market-subscription-item.is-active .market-subscription-quantity { flex: initial; }
+  .market-subscription-item.is-active .market-subscription-secondary-row { grid-column: 1 / -1; display: flex; align-items: end; justify-content: space-between; gap: 10px; min-width: 0; }
+  .market-subscription-item.is-active .market-subscription-next-delivery { flex: 1 1 auto; min-width: 0; }
+  .market-subscription-item.is-active .market-subscription-frequency { grid-column: 1; }
+  .market-subscription-item.is-active .market-subscription-quantity { grid-column: 2; }
+  .market-subscription-item.is-active .market-subscription-next-delivery { grid-column: 1 / -1; min-width: 0; }
+  .market-subscription-item.is-active .market-subscription-secondary-row .market-subscription-actions { grid-column: auto; justify-self: auto; align-self: end; justify-content: flex-end; flex: 0 0 auto; margin-left: auto; }
+  .market-subscription-controls select { width: 100%; max-width: none; min-width: 0; padding-inline: 5px; font-size: 10px; }
+  .market-subscription-item.is-active .market-subscription-frequency select { width: 145px; min-width: 0; max-width: 100%; padding-inline: 8px; font-size: 11px; }
+  .market-subscription-item.is-active .market-subscription-value strong { font-size: 12px; }
+  .market-subscription-item.is-active .market-subscription-next-delivery strong { font-size: 11px; }
+  .market-subscription-controls input { width: 52px; min-width: 0; padding-inline: 4px; }
+  .market-subscription-item.is-active .market-subscription-controls input { width: 48px; }
+  .market-subscription-remove { width: 32px; }
+  .market-subscription-remove-active { min-height: 30px; padding-inline: 8px; font-size: 9px; }
+  .market-subscription-actions { grid-column: 1 / -1; justify-self: end; }
+}
+
+@media (max-width: 480px) {
+  .market-subscription-item { grid-template-columns: 112px minmax(0, 1fr); gap: 9px; padding: 9px; }
+  .market-subscription-image { width: 112px; }
+  .market-subscription-controls { grid-template-columns: minmax(0, 1fr) 48px 30px; column-gap: 4px; }
+  .market-subscription-item.is-active .market-subscription-controls { grid-template-columns: minmax(0, 145px) 44px minmax(0, 1fr); column-gap: 8px; }
+  .market-subscription-controls input { width: 48px; }
+  .market-subscription-item.is-active .market-subscription-controls input { width: 44px; }
+  .market-subscription-remove { width: 30px; }
+  .market-subscription-item-heading { gap: 5px; }
+  .market-subscription-remove-active { padding-inline: 6px; font-size: 8px; }
+}
+
+@media (max-width: 360px) {
+  .market-subscription-item { grid-template-columns: 82px minmax(0, 1fr); }
+  .market-subscription-image { width: 82px; }
+  .market-subscription-controls { grid-template-columns: minmax(0, 1fr) 44px 28px; }
+  .market-subscription-item.is-active .market-subscription-controls { grid-template-columns: minmax(0, 116px) 40px minmax(0, 1fr); column-gap: 7px; }
+  .market-subscription-controls input { width: 44px; }
+  .market-subscription-item.is-active .market-subscription-controls input { width: 40px; }
+  .market-subscription-remove { width: 28px; }
+}
+
+/* Keep the Marketplace title and actions on one header row; pair search with Subscription. */
+.marketplace-header-centered .market-header-actions { gap: 8px; }
+.marketplace-page .market-search-wrap { display: flex; align-items: center; gap: 12px; }
+.marketplace-page .market-search { flex: 1 1 auto; width: auto; min-width: 0; height: 56px; margin: 18px 0 16px; }
+.market-search-subscription-link { height: 56px; min-height: 56px; flex: 0 0 auto; padding-inline: 16px; font-size: 12px; }
+
+@media (max-width: 520px) {
+  .market-search-subscription-link { padding-inline: 12px; font-size: 11px; }
+  .market-search-subscription-link img { width: 18px; height: 18px; }
+  .market-search .search-hint { display: none; }
+}
+
+/* Marketplace action buttons: icon first, with the search field's soft shadow. */
+.market-search-subscription-link {
+  flex-direction: row;
+  box-shadow: 0 3px 4px rgba(164, 68, 12, 0.3);
+}
+.marketplace-page .market-search { box-shadow: 0 3px 4px rgba(164, 68, 12, 0.3); }
+.market-pdp-actions { flex-wrap: wrap; }
+.market-pdp-actions .market-favorite-action {
+  width: auto;
+  min-height: 36px;
+  display: inline-flex;
+  flex: 0 0 auto;
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 0 12px;
+  border: 1.5px solid var(--orange);
+  border-radius: 999px;
+  color: var(--orange-dark);
+  background: transparent;
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.market-pdp-actions .market-favorite-action img { width: 19px; height: 19px; }
+
+@media (max-width: 600px) {
+  .market-pdp-title-row { flex-wrap: wrap; }
+  .market-pdp-actions { width: 100%; justify-content: flex-start; }
+}
+
+/* Marketplace product details use a full-bleed image with floating controls and a purchase dock. */
+.marketplace-product-detail-page {
+  padding: 0 0 calc(88px + env(safe-area-inset-bottom));
+}
+.market-pdp-desktop-header { display: none; }
+.marketplace-product-detail-page .market-pdp {
+  width: min(100%, 960px);
+  gap: 0;
+}
+.market-pdp-visual { border-radius: 0; }
+.market-pdp-overlay-control {
+  width: 44px;
+  height: 44px;
+  position: absolute;
+  z-index: 3;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 1px solid #ffffff85;
+  border-radius: 50%;
+  color: var(--ink);
+  background: rgba(255, 250, 246, 0.72);
+  backdrop-filter: blur(5px);
+  text-decoration: none;
+  cursor: pointer;
+}
+.market-pdp-back { top: 14px; left: 14px; font: 400 38px/1 'Avenir Next'; }
+.market-pdp-overlay-actions { position: absolute; z-index: 3; top: 14px; right: 14px; display: flex; gap: 10px; }
+.market-pdp-overlay-actions .market-pdp-overlay-control { position: relative; top: auto; right: auto; left: auto; }
+.market-pdp-overlay-control img { width: 25px; height: 25px; object-fit: contain; }
+.market-pdp-overlay-cart b { min-width: 17px; height: 17px; position: absolute; top: -2px; right: -3px; display: grid; place-items: center; border-radius: 50%; color: #fff; background: var(--orange); font-size: 9px; }
+.market-pdp-copy { padding: 18px 18px 26px; }
+.market-pdp-copy > h1 { margin: 5px 0 8px; font: 700 25px/1.2 'Avenir Next'; letter-spacing: -.7px; }
+.market-pdp-copy .market-pdp-price { margin-top: 8px; }
+.market-pdp-copy .market-supplier-profile { margin: 14px 0; }
+.market-pdp-copy > .market-subscribe-product { margin: 0 0 15px; }
+.market-pdp-detail-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0 0 15px; }
+.market-pdp-detail-actions .market-subscribe-product { margin: 0; }
+.market-pdp-inline-favorite {
+  width: auto;
+  height: 36px;
+  min-height: 36px;
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 0 12px;
+  border: 1.5px solid var(--orange);
+  border-radius: 999px;
+  color: var(--orange-dark);
+  background: transparent;
+  font: 700 11px 'Avenir Next';
+  white-space: nowrap;
+}
+.market-pdp-inline-favorite img { width: 19px; height: 19px; object-fit: contain; }
+.market-pdp-purchase-bar {
+  width: 100%;
+  min-height: 49px;
+  position: fixed;
+  z-index: 1001;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  display: grid;
+  grid-template-columns: minmax(80px, .8fr) minmax(100px, 1fr) minmax(110px, 1.2fr);
+  align-items: stretch;
+  gap: 0;
+  padding: 0 0 env(safe-area-inset-bottom);
+  border-top: 1px solid #f0e5dc;
+  background: #fff;
+  box-shadow: 0 -3px 4px rgba(68, 39, 19, 0.12);
+}
+.market-pdp-purchase-bar > * { min-width: 0; min-height: 49px; display: flex; align-items: center; justify-content: center; border-radius: 10px; font: 700 12px 'Avenir Next'; text-align: center; text-decoration: none; white-space: nowrap; cursor: pointer; }
+.market-pdp-chat { flex-direction: column; gap: 2px; border: 0; border-right: 1.5px solid #e9ddd4; border-radius: 0; color: var(--ink); background: transparent; font-size: 10px !important; }
+.market-pdp-chat svg { width: 19px; height: 19px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.8; }
+.market-pdp-add-cart { flex-direction: column; gap: 1px; border: 0; color: var(--orange-dark); background: transparent; font-size: 10px !important; }
+.market-pdp-add-cart img { width: 20px; height: 20px; object-fit: contain; }
+.market-pdp-buy-now { border: 0; border-radius: 0; color: #fff; background: var(--orange); font-size: 15px !important; }
+.market-pdp-purchase-bar button:disabled { opacity: .5; cursor: not-allowed; }
+
+@media (min-width: 680px) {
+  .marketplace-product-detail-page { padding: 22px 34px calc(88px + env(safe-area-inset-bottom)); }
+  .marketplace-product-detail-page .market-pdp-desktop-header { width: min(960px, 100%); min-height: 58px; display: flex; justify-content: space-between; margin: 0 auto 12px; }
+  .marketplace-product-detail-page .market-pdp-overlay-control,
+  .marketplace-product-detail-page .market-pdp-overlay-actions { display: none; }
+  .marketplace-product-detail-page .market-pdp { gap: 24px; padding: 12px 18px 24px; }
+  .marketplace-product-detail-page .market-pdp-visual { border-radius: 22px; }
+  .marketplace-product-detail-page .market-pdp-copy { padding: 8px 0; }
+  .market-pdp-purchase-bar { width: min(100%, 720px); right: 50%; bottom: 14px; left: auto; transform: translateX(50%); padding: 0; border: 1px solid #f0e5dc; border-radius: 16px; box-shadow: 0 5px 20px #39200f1a; overflow: hidden; }
+  .market-pdp-buy-now { border-radius: 0; }
+}
+
+@media (max-width: 380px) {
+  .market-pdp-purchase-bar { grid-template-columns: 68px minmax(88px, 1fr) minmax(94px, 1fr); gap: 5px; padding-right: 8px; padding-left: 8px; }
+  .market-pdp-purchase-bar > * { font-size: 10px; }
+}

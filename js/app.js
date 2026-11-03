@@ -13,10 +13,11 @@ import { creditPage } from './pages/credit.js';
 import { marketplaceFavoritesPage, marketplacePage, marketplaceProductPage, marketplaceSellerPage } from './pages/marketplace.js';
 import { marketplaceCartPage, marketplaceCheckoutPage } from './pages/cart.js';
 import { adminMarketplaceManagePage, adminMarketplacePage, adminMarketplaceProductsPage } from './pages/admin-marketplace.js';
-import { marketplaceSupplierPage, supplierOrderRows, supplierProductRows } from './pages/marketplace-supplier.js';
+import { marketplaceSupplierPage, marketplaceSupplierProductEditPage, supplierOrderRows, supplierProductRows } from './pages/marketplace-supplier.js';
 import { adminOrderStage } from './admin-order-ui.js';
 import { setupPortalNotifications } from './portal-notifications.js';
-import { loadMarketplaceCart, loadMarketplaceFavorites, loadMarketplaceOfferSettings, loadMarketplaceOrders, loadMarketplaceProducts, marketplaceCartKey, marketplaceFavoritesKey, marketplaceLine, marketplaceOfferSettingsKey, marketplaceOrdersKey, marketplaceProductsKey, safeMarketplaceImage } from './pages/marketplace-data.js';
+import { loadMarketplaceCart, loadMarketplaceFavorites, loadMarketplaceOfferSettings, loadMarketplaceOrders, loadMarketplaceProducts, loadMarketplaceSubscriptionCart, loadMarketplaceSubscriptions, marketplaceCartKey, marketplaceFavoritesKey, marketplaceLine, marketplaceOfferSettingsKey, marketplaceOrdersKey, marketplaceProductsKey, marketplaceSubscriptionCartKey, marketplaceSubscriptionsKey, marketplaceSubscriptionLine, safeMarketplaceImage } from './pages/marketplace-data.js';
+import { marketplaceSubscriptionsPage } from './pages/marketplace-subscriptions.js';
 import { petProfilePage } from './pages/pet-profile.js';
 import { adminPromotionsPage, loadAnnouncements, loadPromotions, maximumPromotions, normalizePromotionDestination, promotionStorageKey } from './pages/admin-promotions.js';
 import { adminPortalPage, setupAdminPortal } from './pages/admin.js';
@@ -30,13 +31,13 @@ import { adminDaycarePage, setupAdminDaycare } from './pages/admin-daycare.js';
 import { adminPetTaxiPage, setupAdminPetTaxi } from './pages/admin-pet-taxi.js';
 import { setupAdminServiceBanners } from './pages/admin-service-banners.js';
 import { setupServiceBannerCarousel } from './pages/service-banners.js';
-import { loadPetTaxiSettings, matchPetTaxiRoute, petTaxiSettingsKey } from './pages/pet-taxi-data.js';
+import { loadPetTaxiSettings, matchPetTaxiRoute, petTaxiRouteFare, petTaxiSettingsKey } from './pages/pet-taxi-data.js';
 import { setupPetTaxiAddressPicker } from './pages/pet-taxi-addresses.js';
 import { defaultGroomingSettings, groomingBookingsKey, groomingSettingsKey, groomingWeightTier, loadGroomingBookings, loadGroomingSettings } from './pages/grooming-data.js';
 import { myOrdersPage, setupMyOrders } from './pages/my-orders.js';
 import { adminOrdersPage, setupAdminOrders } from './pages/admin-orders.js';
 import { checkInPage, extractCheckInCode, formatCheckInToken, refreshCheckInTokens, setupCheckInInteractions } from './pages/check-in.js';
-import { adminBottomNavigation, escapeHTML } from './shared.js';
+import { adminBottomNavigation, driverBottomNavigation, escapeHTML } from './shared.js';
 import { adminEnquiriesPage, setupAdminEnquiries } from './pages/admin-enquiries.js';
 import { adminCustomersPage, getCustomerAccountStatus, getCustomerRecordId, saveCustomerRecord, setupAdminCustomers } from './pages/admin-customers.js';
 import { driverPortalPage, setupDriverPortal } from './pages/driver.js';
@@ -1071,6 +1072,8 @@ function setupMarketplaceInteractions() {
       toggle.setAttribute('aria-label', `${saved ? 'Remove' : 'Add'} ${productName} ${saved ? 'from' : 'to'} favourites`);
       const image = toggle.querySelector('img');
       if (image) image.src = `Image/Icon/${saved ? 'Icon-16.png' : 'Icon-15.png'}`;
+      const label = toggle.querySelector('span');
+      if (label && (toggle.classList.contains('market-favorite-action') || toggle.classList.contains('market-pdp-inline-favorite'))) label.textContent = saved ? 'Saved to Favourites' : 'Save as Favourite';
     });
     toast(isSaved ? 'Removed from your favourites.' : 'Saved to your favourites.');
   }));
@@ -1143,6 +1146,10 @@ function setupMarketplaceInteractions() {
     quantity.max = option.dataset.stock;
     quantity.value = '1';
     document.querySelector('[data-add-to-cart]').disabled = Number(option.dataset.stock) < 1;
+    const buyNowButton = document.querySelector('[data-buy-now]');
+    if (buyNowButton) buyNowButton.disabled = Number(option.dataset.stock) < 1;
+    const subscribeButton = document.querySelector('[data-add-to-subscription]');
+    if (subscribeButton) subscribeButton.disabled = Number(option.dataset.stock) < 1;
     updateSupplierCard(option.dataset.supplier);
   };
   variantSelect?.addEventListener('change', updateVariant);
@@ -1174,6 +1181,131 @@ function setupMarketplaceInteractions() {
     localStorage.setItem(marketplaceCartKey, JSON.stringify(cart));
     window.location.hash = '#cart';
   });
+  document.querySelector('[data-buy-now]')?.addEventListener('click', (event) => {
+    const productId = event.currentTarget.dataset.buyNow;
+    const variantId = variantSelect?.value;
+    const quantity = Math.max(1, Number(document.querySelector('[data-product-quantity]')?.value) || 1);
+    const variant = loadMarketplaceProducts().find((product) => product.id === productId)?.variants.find((item) => item.id === variantId);
+    if (!variant || variant.frozen || variant.stock < quantity) { toast('That quantity is not currently available.'); return; }
+    const cart = loadMarketplaceCart();
+    const existing = cart.find((item) => item.productId === productId && item.variantId === variantId);
+    if (existing) existing.quantity = Math.min(variant.stock, Number(existing.quantity) + quantity);
+    else cart.push({ productId, variantId, quantity });
+    localStorage.setItem(marketplaceCartKey, JSON.stringify(cart));
+    window.location.hash = '#checkout';
+  });
+  document.querySelector('[data-add-to-subscription]')?.addEventListener('click', (event) => {
+    const productId = event.currentTarget.dataset.addToSubscription;
+    const variantId = variantSelect?.value;
+    const quantity = Math.max(1, Number(document.querySelector('[data-product-quantity]')?.value) || 1);
+    const product = loadMarketplaceProducts().find((item) => item.id === productId);
+    const variant = product?.variants.find((item) => item.id === variantId);
+    if (!variant || variant.frozen || Number(variant.stock) < quantity) { toast('That quantity is not currently available for subscription.'); return; }
+    const subscriptions = loadMarketplaceSubscriptionCart();
+    const existing = subscriptions.find((item) => item.productId === productId && item.variantId === variantId);
+    if (existing) existing.quantity = Math.min(Number(variant.stock), Number(existing.quantity || 0) + quantity);
+    else subscriptions.push({ productId, variantId, quantity, interval: 'month', intervalCount: 1 });
+    localStorage.setItem(marketplaceSubscriptionCartKey, JSON.stringify(subscriptions));
+    window.location.hash = '#subscriptions';
+  });
+  document.querySelectorAll('[data-subscription-confirm]').forEach((button) => button.addEventListener('click', () => {
+    const cart = loadMarketplaceSubscriptionCart();
+    const item = cart[Number(button.dataset.subscriptionConfirm)];
+    const line = item && marketplaceSubscriptionLine(item);
+    if (!item || !line || line.variant.frozen || Number(line.variant.stock) < Number(item.quantity)) { toast('This product is no longer available in the selected quantity.'); return; }
+    if (!window.confirm(`Subscribe to ${line.product.name} (${line.variant.label || 'Standard'}) every ${item.intervalCount || 1} month${Number(item.intervalCount || 1) === 1 ? '' : 's'}? This preview will not charge your card or place an order.`)) return;
+    const active = loadMarketplaceSubscriptions();
+    const existing = active.find((entry) => entry.productId === item.productId && entry.variantId === item.variantId);
+    if (existing) existing.quantity = Math.min(Number(line.variant.stock), Number(existing.quantity || 0) + Number(item.quantity || 1));
+    else active.push({ ...item, startedAt: new Date().toISOString() });
+    cart.splice(Number(button.dataset.subscriptionConfirm), 1);
+    localStorage.setItem(marketplaceSubscriptionCartKey, JSON.stringify(cart));
+    localStorage.setItem(marketplaceSubscriptionsKey, JSON.stringify(active));
+    render({ preserveScroll: true });
+  }));
+  document.querySelectorAll('[data-subscription-edit]').forEach((button) => button.addEventListener('click', () => {
+    const subscriptions = loadMarketplaceSubscriptions();
+    const item = subscriptions[Number(button.dataset.subscriptionEdit)];
+    if (!item) return;
+    item.draftInterval = item.interval || 'month';
+    item.draftIntervalCount = Number(item.intervalCount) || 1;
+    item.draftQuantity = Number(item.quantity) || 1;
+    item.editing = true;
+    localStorage.setItem(marketplaceSubscriptionsKey, JSON.stringify(subscriptions));
+    render({ preserveScroll: true });
+  }));
+  document.querySelectorAll('[data-subscription-save]').forEach((button) => button.addEventListener('click', () => {
+    const subscriptions = loadMarketplaceSubscriptions();
+    const item = subscriptions[Number(button.dataset.subscriptionSave)];
+    const line = item && marketplaceSubscriptionLine(item);
+    if (!item || !line) return;
+    const quantity = Math.max(1, Math.min(Number(line.variant.stock), Number(item.draftQuantity) || 1));
+    const frequency = Number(item.draftIntervalCount) || 1;
+    if (!window.confirm(`Save this subscription as every ${frequency} month${frequency === 1 ? '' : 's'}, quantity ${quantity}?`)) return;
+    item.interval = item.draftInterval || 'month';
+    item.intervalCount = frequency;
+    item.quantity = quantity;
+    delete item.draftInterval;
+    delete item.draftIntervalCount;
+    delete item.draftQuantity;
+    delete item.editing;
+    localStorage.setItem(marketplaceSubscriptionsKey, JSON.stringify(subscriptions));
+    render({ preserveScroll: true });
+  }));
+  document.querySelectorAll('[data-subscription-cancel-edit]').forEach((button) => button.addEventListener('click', () => {
+    const subscriptions = loadMarketplaceSubscriptions();
+    const item = subscriptions[Number(button.dataset.subscriptionCancelEdit)];
+    if (!item) return;
+    delete item.draftInterval;
+    delete item.draftIntervalCount;
+    delete item.draftQuantity;
+    delete item.editing;
+    localStorage.setItem(marketplaceSubscriptionsKey, JSON.stringify(subscriptions));
+    render({ preserveScroll: true });
+  }));
+  document.querySelectorAll('[data-subscription-remove]').forEach((button) => button.addEventListener('click', () => {
+    const [group, rawIndex] = button.dataset.subscriptionRemove.split(':');
+    const isActive = group === 'active-subscription';
+    const subscriptions = isActive ? loadMarketplaceSubscriptions() : loadMarketplaceSubscriptionCart();
+    subscriptions.splice(Number(rawIndex), 1);
+    localStorage.setItem(isActive ? marketplaceSubscriptionsKey : marketplaceSubscriptionCartKey, JSON.stringify(subscriptions));
+    render({ preserveScroll: true });
+  }));
+  document.querySelectorAll('[data-subscription-interval]').forEach((select) => select.addEventListener('change', () => {
+    const [group, rawIndex] = select.dataset.subscriptionInterval.split(':');
+    const isActive = group === 'active-subscription';
+    const subscriptions = isActive ? loadMarketplaceSubscriptions() : loadMarketplaceSubscriptionCart();
+    const item = subscriptions[Number(rawIndex)];
+    if (!item) return;
+    const [unit, count] = select.value.split(':');
+    if (isActive && item.editing) {
+      item.draftInterval = unit;
+      item.draftIntervalCount = Number(count);
+      localStorage.setItem(marketplaceSubscriptionsKey, JSON.stringify(subscriptions));
+      return;
+    }
+    item.interval = unit;
+    item.intervalCount = Number(count);
+    localStorage.setItem(isActive ? marketplaceSubscriptionsKey : marketplaceSubscriptionCartKey, JSON.stringify(subscriptions));
+    render({ preserveScroll: true });
+  }));
+  document.querySelectorAll('[data-subscription-quantity]').forEach((input) => input.addEventListener('change', () => {
+    const [group, rawIndex] = input.dataset.subscriptionQuantity.split(':');
+    const isActive = group === 'active-subscription';
+    const subscriptions = isActive ? loadMarketplaceSubscriptions() : loadMarketplaceSubscriptionCart();
+    const item = subscriptions[Number(rawIndex)];
+    const line = item && marketplaceSubscriptionLine(item);
+    if (!item || !line) return;
+    const quantity = Math.max(1, Math.min(Number(line.variant.stock), Number(input.value) || 1));
+    if (isActive && item.editing) {
+      item.draftQuantity = quantity;
+      localStorage.setItem(marketplaceSubscriptionsKey, JSON.stringify(subscriptions));
+      return;
+    }
+    item.quantity = quantity;
+    localStorage.setItem(isActive ? marketplaceSubscriptionsKey : marketplaceSubscriptionCartKey, JSON.stringify(subscriptions));
+    render({ preserveScroll: true });
+  }));
   document.querySelectorAll('[data-cart-quantity]').forEach((button) => button.addEventListener('click', () => {
     const cart = loadMarketplaceCart();
     const item = cart[Number(button.dataset.cartQuantity)];
@@ -2120,7 +2252,6 @@ function setupMarketplaceSupplierPortal() {
       }).catch((error) => console.warn('Director Marketplace notification could not load:', error));
   }
   const supplierForm = document.querySelector('[data-marketplace-supplier-product]');
-  const supplierEditor = document.querySelector('[data-supplier-editor]');
   const supplierPhotoList = document.querySelector('[data-supplier-photo-list]');
   let supplierEditorImages = [];
   const clearSupplierPhotoPreviews = () => supplierEditorImages.forEach((photo) => {
@@ -2149,17 +2280,48 @@ function setupMarketplaceSupplierPortal() {
     const title = document.querySelector('[data-supplier-form-title]');
     if (title) title.textContent = 'Add a Product';
   };
+  const navigateToSupplierProductEditor = (params = {}) => {
+    const query = new URLSearchParams(Object.entries(params).filter(([, value]) => value));
+    const queryString = query.toString();
+    window.location.hash = `#supplier-product-edit${queryString ? `?${queryString}` : ''}`;
+  };
+  const openSupplierProductEditor = (productId, variantId = '') => {
+    const product = supplierCatalog.find((entry) => entry.id === productId);
+    const variant = product?.variants?.find((entry) => entry.id === variantId) || product?.variants?.[0];
+    if (!product || !variant) return false;
+    const fields = supplierForm.elements;
+    fields.productId.value = product.id;
+    fields.variantId.value = variant.id || '';
+    fields.pendingSubmissionId.value = '';
+    fields.name.value = product.name || '';
+    fields.category.value = product.category || 'Other';
+    fields.description.value = product.description || '';
+    fields.petTypes.value = product.petTypes || '';
+    fields.ingredients.value = product.ingredients || '';
+    fields.nutrition.value = product.nutrition || '';
+    fields.price.value = Number(variant.price || 0);
+    fields.variantLabel.value = variant.label || '';
+    fields.stock.value = Number(variant.stock || 0);
+    clearSupplierPhotoPreviews();
+    supplierEditorImages = (product.images || []).map((url) => ({ url }));
+    renderSupplierPhotoList();
+    document.querySelector('[data-supplier-form-title]').textContent = `Edit ${product.name}`;
+    supplierForm.querySelector('[data-supplier-submit-label]').textContent = 'Save Product';
+    return true;
+  };
   document.querySelector('[data-supplier-add-product]')?.addEventListener('click', () => {
-    resetSupplierEditor();
-    if (supplierEditor) supplierEditor.hidden = false;
-    supplierEditor?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    navigateToSupplierProductEditor();
+  });
+  document.querySelector('[data-supplier-view-shop]')?.addEventListener('click', () => {
+    document.querySelectorAll('[data-supplier-section]').forEach((section) => { section.hidden = section.dataset.supplierSection !== 'shop'; });
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   });
   document.querySelectorAll('[data-supplier-tab]').forEach((button) => button.addEventListener('click', () => {
     const target = button.dataset.supplierTab;
     const supplierNavIcons = { home: ['Icon-01.png', 'Icon-02.png'], orders: ['Icon-03.png', 'Icon-04.png'], help: ['Icon-05.png', 'Icon-06.png'], profile: ['Icon-07.png', 'Icon-08.png'] };
     document.querySelectorAll('[data-supplier-section]').forEach((section) => { section.hidden = section.dataset.supplierSection !== target; });
     document.querySelectorAll('[data-supplier-tab]').forEach((tab) => {
-      const active = tab === button;
+      const active = tab.dataset.supplierTab === target;
       tab.classList.toggle('active', active);
       const icons = supplierNavIcons[tab.dataset.supplierTab];
       const image = tab.querySelector('img');
@@ -2370,18 +2532,69 @@ function setupMarketplaceSupplierPortal() {
   });
   const refreshSupplierPortal = async () => {
     const submissionsTarget = document.querySelector('[data-supplier-products]');
+    const shopTarget = document.querySelector('[data-supplier-shop-products]');
     const ordersTarget = document.querySelector('[data-supplier-orders]');
-    if (!submissionsTarget && !ordersTarget) return;
+    const editPageTarget = document.querySelector('[data-marketplace-supplier-product]');
+    if (!submissionsTarget && !shopTarget && !ordersTarget && !editPageTarget) return;
     const [submissionsResult, catalogResult, ordersResult] = await Promise.all([
       supabase.from('marketplace_product_submissions').select('*').order('submitted_at', { ascending: false }),
       supabase.rpc('get_marketplace_supplier_catalog'),
-      supabase.rpc('get_marketplace_supplier_orders'),
+      ordersTarget ? supabase.rpc('get_marketplace_supplier_orders') : Promise.resolve({ data: [], error: null }),
     ]);
     if (submissionsResult.error) throw submissionsResult.error;
     if (catalogResult.error) throw catalogResult.error;
     if (ordersResult.error) throw ordersResult.error;
     supplierSubmissions = submissionsResult.data || [];
     supplierCatalog = catalogResult.data || [];
+    if (editPageTarget && !editPageTarget.dataset.supplierRouteInitialized) {
+      editPageTarget.dataset.supplierRouteInitialized = 'true';
+      const routeParams = new URLSearchParams(window.location.hash.split('?')[1] || '');
+      const requestId = routeParams.get('requestId');
+      const productId = routeParams.get('productId');
+      const variantId = routeParams.get('variantId') || '';
+      if (requestId) {
+        const request = supplierSubmissions.find((entry) => entry.id === requestId && entry.action === 'add' && ['Pending Review', 'Rejected'].includes(entry.status));
+        if (request) {
+          const product = request.product_data || {};
+          const variant = product.variants?.[0] || {};
+          const fields = supplierForm.elements;
+          fields.pendingSubmissionId.value = request.id;
+          fields.name.value = product.name || '';
+          fields.category.value = product.category || 'Other';
+          fields.description.value = product.description || '';
+          fields.petTypes.value = product.petTypes || '';
+          fields.ingredients.value = product.ingredients || '';
+          fields.nutrition.value = product.nutrition || '';
+          fields.price.value = Number(variant.price || 0);
+          fields.variantLabel.value = variant.label || '';
+          fields.stock.value = Number(variant.stock || 0);
+          supplierEditorImages = (product.images || []).map((url) => ({ url }));
+          renderSupplierPhotoList();
+          document.querySelector('[data-supplier-form-title]').textContent = `Edit ${request.status === 'Rejected' ? 'rejected' : 'pending'} ${product.name || 'product'}`;
+          supplierForm.querySelector('[data-supplier-submit-label]').textContent = request.status === 'Rejected' ? 'Save & Resubmit' : 'Save Request';
+        } else {
+          setSupplierFeedback('This product request is no longer available to edit.', true);
+        }
+      } else if (productId) {
+        if (!openSupplierProductEditor(productId, variantId)) setSupplierFeedback('This product or variant could not be found.', true);
+      }
+    }
+    if (shopTarget) {
+      const shopProducts = supplierCatalog.filter((product) => !product.hidden && !product.frozenByAdmin).flatMap((product) => {
+        const variants = (product.variants || []).filter((variant) => !variant.frozen && Number(variant.stock) > 0);
+        if (!variants.length) return [];
+        const price = Math.min(...variants.map((variant) => Number(variant.price) || 0));
+        const variant = variants[0];
+        const image = (product.images || []).map(safeMarketplaceImage).find(Boolean);
+        const visual = image
+          ? `<img class="market-product-visual" src="${escapeHTML(image)}" alt="${escapeHTML(product.name || 'Product')}" loading="lazy" />`
+          : `<span class="market-product-visual" aria-hidden="true">${escapeHTML(product.emoji || '🐾')}</span>`;
+        return [`<article class="market-product-card"><button class="market-product-link supplier-shop-product-link" type="button" data-supplier-edit-product="${escapeHTML(product.id)}" data-supplier-variant-id="${escapeHTML(variant.id || '')}" aria-label="Edit ${escapeHTML(product.name || 'product')}">${visual}<span class="market-product-category">${escapeHTML(product.category || 'Other')}</span><strong>${escapeHTML(product.name || 'Product')}</strong><span class="market-product-price">From MYR ${price.toFixed(2)}</span></button></article>`];
+      });
+      shopTarget.innerHTML = shopProducts.join('') || '<p class="market-empty supplier-shop-empty">No products are live in your shop yet.</p>';
+      const count = document.querySelector('[data-supplier-shop-count]');
+      if (count) count.textContent = `${shopProducts.length} ${shopProducts.length === 1 ? 'product' : 'products'}`;
+    }
     const supplierOrders = (ordersResult.data || []).map((row) => row.order_details || row);
     const newOrderCount = supplierOrders.filter((order) => adminOrderStage({ ...order, serviceId: 'marketplace' }) === 'new').length;
     const progressingOrderCount = supplierOrders.filter((order) => adminOrderStage({ ...order, serviceId: 'marketplace' }) === 'progressing').length;
@@ -2476,8 +2689,11 @@ function setupMarketplaceSupplierPortal() {
       }
       supplierForm.reset();
       resetSupplierEditor();
-      supplierEditor.hidden = true;
       setSupplierFeedback(feedbackMessage);
+      if (window.location.hash.startsWith('#supplier-product-edit')) {
+        window.location.hash = '#supplier';
+        return;
+      }
       await refreshSupplierPortal();
     } catch (error) {
       console.error('Supplier product submission failed:', error);
@@ -2485,8 +2701,7 @@ function setupMarketplaceSupplierPortal() {
     } finally { submit.disabled = false; }
   });
   supplierForm?.querySelector('[data-supplier-cancel-edit]')?.addEventListener('click', () => {
-    resetSupplierEditor();
-    if (supplierEditor) supplierEditor.hidden = true;
+    window.location.hash = '#supplier';
   });
   document.querySelector('[data-supplier-products]')?.addEventListener('click', async (event) => {
     const editButton = event.target.closest('[data-supplier-edit-product]');
@@ -2496,27 +2711,7 @@ function setupMarketplaceSupplierPortal() {
     if (editRequestButton) {
       const submission = supplierSubmissions.find((entry) => entry.id === editRequestButton.dataset.supplierEditRequest && entry.action === 'add' && ['Pending Review', 'Rejected'].includes(entry.status));
       if (!submission) return;
-      const product = submission.product_data || {};
-      const variant = product.variants?.[0] || {};
-      const fields = supplierForm.elements;
-      resetSupplierEditor();
-      fields.pendingSubmissionId.value = submission.id;
-      fields.name.value = product.name || '';
-      fields.category.value = product.category || 'Other';
-      fields.description.value = product.description || '';
-      fields.petTypes.value = product.petTypes || '';
-      fields.ingredients.value = product.ingredients || '';
-      fields.nutrition.value = product.nutrition || '';
-      fields.price.value = Number(variant.price || 0);
-      fields.variantLabel.value = variant.label || '';
-      fields.stock.value = Number(variant.stock || 0);
-      clearSupplierPhotoPreviews();
-      supplierEditorImages = (product.images || []).map((url) => ({ url }));
-      renderSupplierPhotoList();
-      document.querySelector('[data-supplier-form-title]').textContent = `Edit ${submission.status === 'Rejected' ? 'rejected' : 'pending'} ${product.name || 'product'}`;
-      supplierForm.querySelector('[data-supplier-submit-label]').textContent = submission.status === 'Rejected' ? 'Save & Resubmit' : 'Save Request';
-      if (supplierEditor) supplierEditor.hidden = false;
-      supplierForm.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      navigateToSupplierProductEditor({ requestId: submission.id });
       return;
     }
     if (deleteRequestButton) {
@@ -2538,28 +2733,7 @@ function setupMarketplaceSupplierPortal() {
       return;
     }
     if (editButton) {
-      const product = supplierCatalog.find((entry) => entry.id === editButton.dataset.supplierEditProduct);
-      const variant = product?.variants?.find((entry) => entry.id === editButton.dataset.supplierVariantId) || product?.variants?.[0];
-      if (!product || !variant) return;
-      const fields = supplierForm.elements;
-      fields.productId.value = product.id;
-      fields.variantId.value = variant.id || '';
-      fields.name.value = product.name || '';
-      fields.category.value = product.category || 'Other';
-      fields.description.value = product.description || '';
-      fields.petTypes.value = product.petTypes || '';
-      fields.ingredients.value = product.ingredients || '';
-      fields.nutrition.value = product.nutrition || '';
-      fields.price.value = Number(variant.price || 0);
-      fields.variantLabel.value = variant.label || '';
-      fields.stock.value = Number(variant.stock || 0);
-      clearSupplierPhotoPreviews();
-      supplierEditorImages = (product.images || []).map((url) => ({ url }));
-      renderSupplierPhotoList();
-      document.querySelector('[data-supplier-form-title]').textContent = `Edit ${product.name}`;
-      supplierForm.querySelector('[data-supplier-submit-label]').textContent = 'Save Product';
-      if (supplierEditor) supplierEditor.hidden = false;
-      supplierForm.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      navigateToSupplierProductEditor({ productId: editButton.dataset.supplierEditProduct, variantId: editButton.dataset.supplierVariantId });
       return;
     }
     if (!actionButton) return;
@@ -2579,6 +2753,11 @@ function setupMarketplaceSupplierPortal() {
     setSupplierFeedback(isHide ? `The listing is now ${product.hidden ? 'visible' : 'hidden'} in the Marketplace.` : 'The product has been deleted from the Marketplace catalog.');
     try { await refreshSupplierPortal(); }
     catch (refreshError) { setSupplierFeedback(refreshError.message || 'Request sent, but the product list could not refresh.', true); }
+  });
+  document.querySelector('[data-supplier-shop-products]')?.addEventListener('click', (event) => {
+    const productButton = event.target.closest('[data-supplier-edit-product]');
+    if (!productButton) return;
+    navigateToSupplierProductEditor({ productId: productButton.dataset.supplierEditProduct, variantId: productButton.dataset.supplierVariantId });
   });
   const ordersTarget = document.querySelector('[data-supplier-orders]');
   ordersTarget?.addEventListener('click', async (event) => {
@@ -2955,7 +3134,8 @@ function setupGroomingBooking() {
     const taxiOn = form.elements.includeTaxi.checked;
     const taxiDistance = Number(form.elements.taxiDistance.value || 0);
     const petTaxiSettings = loadPetTaxiSettings();
-    const taxiTotal = taxiOn && taxiDistance > 0 ? (Number(petTaxiSettings.baseFare) + taxiDistance * Number(petTaxiSettings.farePerKm)) * pets.length : 0;
+    const taxiFare = Number(form.elements.taxiFare?.value || 0);
+    const taxiTotal = taxiOn && form.elements.taxiRouteMatched?.value === 'true' ? taxiFare * pets.length : 0;
     const customAddOns = [...form.querySelectorAll('[data-grooming-custom-addon]:checked')].map((input) => liveSettings.addOns?.find((item) => item.id === input.value)).filter(Boolean);
     const customAddOnTotal = customAddOns.reduce((sum, item) => sum + Number(item.price || 0), 0) * pets.length;
     const subtotal = packagePrice + daycareTotal + taxiTotal + customAddOnTotal;
@@ -2976,7 +3156,7 @@ function setupGroomingBooking() {
     form.querySelector('[data-grooming-discount-row]').hidden = voucherDiscount <= 0;
     form.querySelector('[data-grooming-total]').textContent = money(total);
     form.dataset.quotedTotal = String(total);
-    return { pet, pets, tier, packageItem, petPackages, packagePrice, daycareTotal, taxiTotal, taxiDistance, customAddOns, customAddOnTotal, total };
+    return { pet, pets, tier, packageItem, petPackages, packagePrice, daycareTotal, taxiTotal, taxiDistance, taxiFare, customAddOns, customAddOnTotal, total };
   };
 
   const refreshWeightTier = () => {
@@ -3130,10 +3310,13 @@ function setupGroomingBooking() {
     const latestSettings = loadPetTaxiSettings();
     const route = matchPetTaxiRoute(locationText, outlet, latestSettings);
     const distanceKm = route ? Number(route.distanceKm) : 0;
+    const routeFare = petTaxiRouteFare(route, latestSettings);
     distanceInput.value = String(distanceKm);
+    form.elements.taxiFare.value = String(routeFare);
+    form.elements.taxiRouteMatched.value = String(Boolean(route));
     const petCount = Math.max(1, selectedPets().length);
     quote.innerHTML = route
-      ? `<strong>Estimated taxi fare for ${petCount} pet${petCount === 1 ? '' : 's'}: ${money((Number(latestSettings.baseFare) + distanceKm * Number(latestSettings.farePerKm)) * petCount)}</strong><span>${escapeHTML(route.city)} to ${escapeHTML(outlet)} · ${distanceKm} km · one way</span>`
+      ? `<strong>Estimated taxi fare for ${petCount} pet${petCount === 1 ? '' : 's'}: ${money(routeFare * petCount)}</strong><span>${escapeHTML(route.city)} to ${escapeHTML(outlet)} · ${money(routeFare)} per one-way trip</span>`
       : '<strong>Route estimate unavailable</strong><span>Choose an address in a configured city, or ask Admin to add this city and outlet route.</span>';
     renderQuote();
   };
@@ -3305,7 +3488,7 @@ function setupGroomingBooking() {
       feedback.classList.add('visible');
       return;
     }
-    if (form.elements.includeTaxi.checked && (!Number(form.elements.taxiDistance.value) || !form.elements.taxiSchedule.value)) {
+    if (form.elements.includeTaxi.checked && (form.elements.taxiRouteMatched.value !== 'true' || !form.elements.taxiSchedule.value)) {
       feedback.textContent = 'Choose a pickup address with an available route estimate and select a pet taxi pickup time.';
       feedback.classList.add('visible');
       return;
@@ -3387,7 +3570,7 @@ function setupGroomingBooking() {
       daycareTiming: form.elements.daycareTiming.value, daycareTotal: quote.daycareTotal,
       addOns: quote.customAddOns.map((item) => ({ id: item.id, name: item.name, description: item.description || '', price: Number(item.price || 0), quantity: quote.pets.length, lineTotal: Number(item.price || 0) * quote.pets.length })),
       addOnTotal: quote.customAddOnTotal,
-      includeTaxi: form.elements.includeTaxi.checked, pickup, dropoff, taxiDistance: quote.taxiDistance, taxiTotal: quote.taxiTotal, taxiSchedule: form.elements.taxiSchedule.value,
+      includeTaxi: form.elements.includeTaxi.checked, pickup, dropoff, taxiDistance: quote.taxiDistance, taxiFare: quote.taxiFare, taxiTotal: quote.taxiTotal, taxiSchedule: form.elements.taxiSchedule.value,
       voucherCode: appliedVoucher, discount: voucherDiscount, total: quote.total,
       paymentMethod, paymentStatus: paymentMethod === 'wallet' ? 'Paid with Furgo Credit' : paymentMethod === 'bank-transfer' ? 'Awaiting verification' : 'Pending Payment',
       paymentDeadlineAt: paymentMethod === 'gateway' ? new Date(Date.now() + 60 * 60 * 1000).toISOString() : '',
@@ -4197,11 +4380,12 @@ function wireForms() {
 }
 
 // Chooses the screen module for the current route and applies the Supabase authentication gate.
-async function render() {
+async function render({ preserveScroll = false } = {}) {
   if (!supabaseAuthReady) return;
+  const previousScrollY = window.scrollY;
   const requestedHash = window.location.hash;
   const requestedPage = requestedHash.slice(1).split('?')[0];
-  if (['grooming', 'hotel', 'daycare', 'admin-access', 'admin-grooming', 'admin-hotel', 'admin-daycare'].includes(requestedPage)) {
+  if (['grooming', 'hotel', 'daycare', 'admin-access', 'admin-grooming', 'admin-hotel', 'admin-daycare', 'admin-pet-taxi'].includes(requestedPage)) {
     await refreshSharedOutlets();
     if (window.location.hash !== requestedHash) return render();
   }
@@ -4219,7 +4403,7 @@ async function render() {
   const managerPages = ['admin-promotions', 'admin-pet-taxi', 'admin-marketplace-manage', 'admin-marketplace-products', 'admin-local-finder'];
   const serviceAdminPages = ['admin-marketplace', 'admin-grooming', 'admin-hotel', 'admin-daycare'];
   const portalPages = ['admin', 'admin-orders', 'admin-access', 'admin-enquiries', 'admin-audit', ...managerPages, ...serviceAdminPages, ...directorPages];
-  const supplierPages = ['supplier'];
+  const supplierPages = ['supplier', 'supplier-product-edit'];
   const driverPages = ['driver'];
   const savedRole = sessionStorage.getItem('furgo-demo-user-role');
   const currentRole = savedRole === 'staff' ? 'executive' : savedRole === 'admin' ? 'director' : savedRole;
@@ -4255,7 +4439,7 @@ async function render() {
     window.location.hash = '#login';
     return;
   }
-  if (hasDemoSession && currentRole === 'supplier' && page !== 'supplier' && page !== 'login') {
+  if (hasDemoSession && currentRole === 'supplier' && !supplierPages.includes(page) && page !== 'login') {
     window.location.hash = '#supplier';
     return;
   }
@@ -4263,8 +4447,9 @@ async function render() {
     window.location.hash = '#login';
     return;
   }
-  const protectedPages = ['home', 'search', 'services', 'about', 'profile', 'edit-profile', 'help-center', 'feedback', 'pet-profile', 'address', 'payment-method', 'credit', 'marketplace', 'local-finder', 'local-finder-list', 'local-finder-place', 'local-finder-favourites', 'product', 'seller', 'cart', 'checkout', 'orders', 'check-in', 'favourites', 'grooming', 'grooming-orders', 'hotel', 'daycare'];
-  if (hasDemoSession && sessionStorage.getItem('furgo-demo-user-role') === 'driver' && !['driver', 'edit-profile', 'login'].includes(page)) {
+  const protectedPages = ['home', 'search', 'services', 'about', 'profile', 'edit-profile', 'help-center', 'feedback', 'pet-profile', 'address', 'payment-method', 'credit', 'marketplace', 'local-finder', 'local-finder-list', 'local-finder-place', 'local-finder-favourites', 'product', 'seller', 'cart', 'checkout', 'orders', 'check-in', 'favourites', 'subscriptions', 'grooming', 'grooming-orders', 'hotel', 'daycare'];
+  const driverAllowedPages = ['driver', 'profile', 'edit-profile', 'help-center', 'feedback', 'login'];
+  if (hasDemoSession && sessionStorage.getItem('furgo-demo-user-role') === 'driver' && !driverAllowedPages.includes(page)) {
     window.location.hash = '#driver';
     return;
   }
@@ -4316,6 +4501,7 @@ async function render() {
     'local-finder-favourites': localFinderFavoritesPage,
     'admin-local-finder': () => adminLocalFinderPage(routeParams),
     favourites: marketplaceFavoritesPage,
+    subscriptions: marketplaceSubscriptionsPage,
     product: () => marketplaceProductPage(routeParams.get('id') || ''),
     seller: () => marketplaceSellerPage(routeParams.get('name') || ''),
     cart: marketplaceCartPage,
@@ -4334,6 +4520,7 @@ async function render() {
     'admin-marketplace-manage': adminMarketplaceManagePage,
     'admin-marketplace-products': adminMarketplaceProductsPage,
     supplier: marketplaceSupplierPage,
+    'supplier-product-edit': marketplaceSupplierProductEditPage,
     'admin-grooming': () => adminGroomingPage({ settingsOnly: routeParams.get('manage') === '1', stage: routeParams.get('stage') || 'new' }),
     'admin-hotel': () => adminHotelPage({ settingsOnly: routeParams.get('manage') === '1', stage: routeParams.get('stage') || 'new' }),
     'admin-daycare': () => adminDaycarePage({ settingsOnly: routeParams.get('manage') === '1', stage: routeParams.get('stage') || 'new' }),
@@ -4365,6 +4552,7 @@ async function render() {
     'local-finder-favourites': 'Favourite Places — Furgo',
     'admin-local-finder': 'Local Finder Management — Furgo Admin',
     favourites: 'My Favourites — Furgo',
+    subscriptions: 'Subscriptions — Furgo',
     product: 'Product Details — Furgo',
     seller: 'Seller Shop — Furgo',
     cart: 'Shopping Cart — Furgo',
@@ -4398,15 +4586,22 @@ async function render() {
   document.querySelector('#app').innerHTML = renderPage();
   // Keep the Admin Portal navigation consistent across dashboard and management pages.
   if (portalPages.includes(page)) document.querySelector('#app').insertAdjacentHTML('beforeend', adminBottomNavigation(page === 'admin' ? 'admin' : page === 'admin-orders' ? 'orders' : page === 'admin-enquiries' ? 'enquiries' : page === 'admin-access' ? 'admin-access' : '', currentRole));
+  if (currentRole === 'driver' && ['driver', 'profile', 'help-center', 'feedback'].includes(page)) {
+    const active = page === 'driver' ? (routeParams.get('view') === 'orders' ? 'orders' : 'driver') : page === 'profile' ? 'profile' : ['help-center', 'feedback'].includes(page) ? 'help' : '';
+    document.querySelector('#app').insertAdjacentHTML('beforeend', driverBottomNavigation(active));
+  }
   if (page === 'login' || page === 'register') recordOnboardingEvent('auth_portal_opened', page);
   if (page === 'register' && sessionStorage.getItem('furgo-demo-registration-started') !== 'true') {
     recordOnboardingEvent('registration_started', 'phone_direct');
     sessionStorage.setItem('furgo-demo-registration-started', 'true');
   }
   wireForms();
-  window.scrollTo(0, 0);
+  window.scrollTo(0, preserveScroll ? previousScrollY : 0);
   if (page === 'admin-orders' && routeParams.get('view') === 'scan') {
     window.requestAnimationFrame(() => document.querySelector('.admin-checkin-scan-panel')?.scrollIntoView({ behavior: 'smooth', block: 'center' }));
+  }
+  if (page === 'driver' && routeParams.get('view') === 'orders') {
+    window.requestAnimationFrame(() => document.querySelector('#driver-trips')?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
   }
 }
 
@@ -4457,7 +4652,7 @@ document.addEventListener('click', (event) => {
 
 // Refresh customer and admin screens when a related order changes in another tab.
 window.addEventListener('storage', (event) => {
-  if (/furgo-demo-(grooming-bookings|hotel-bookings|hotel-settings|pet-hotel-bookings|daycare-bookings|daycare-settings|pet-daycare-bookings|daycare-orders|check-in-tokens|driver-locations|customer-records|help-center-details|support-requests|marketplace-orders|marketplace-products|marketplace-offers|promotions|service-banners|marketplace-cart|marketplace-favorites|local-finder-favorites|addresses|payment-methods|credit-balance|credit-transactions|daycare-passes)/.test(event.key || '')) render();
+  if (event.key === 'furgo-service-outlet-directory' || /furgo-demo-(grooming-bookings|hotel-bookings|hotel-settings|pet-hotel-bookings|daycare-bookings|daycare-settings|pet-daycare-bookings|daycare-orders|check-in-tokens|driver-locations|customer-records|help-center-details|support-requests|marketplace-orders|marketplace-products|marketplace-offers|promotions|service-banners|marketplace-cart|marketplace-subscription-cart|marketplace-favorites|local-finder-favorites|addresses|payment-methods|credit-balance|credit-transactions|daycare-passes)/.test(event.key || '')) render();
 });
 
 void initializeSupabaseSession();
