@@ -61,7 +61,7 @@ export function petProfileOverviewPage(petId = '') {
         ${petSettingRow(pet, 'Record', `#pet-record?id=${encodeURIComponent(pet.id)}`)}
         ${petSettingRow(pet, 'Data', `#pet-data?id=${encodeURIComponent(pet.id)}`)}
       </section>
-      <button class="pet-assistant-profile-toggle ${isPetAssistantSelected(pet.id) ? 'is-selected' : ''}" type="button" data-toggle-pet-assistant="${escapeHTML(pet.id)}" aria-pressed="${isPetAssistantSelected(pet.id)}">${isPetAssistantSelected(pet.id) ? '✓ Showing This Pet As Pet Assistant' : 'Show This Pet As Pet Assistant'}</button>
+      <button class="pet-assistant-profile-toggle ${isPetAssistantSelected(pet.id) ? 'is-selected' : ''}" type="button" data-toggle-pet-assistant="${escapeHTML(pet.id)}" aria-pressed="${isPetAssistantSelected(pet.id)}">${isPetAssistantSelected(pet.id) ? '✓ Shown as Home Page Pet Assistant' : 'Show as Home Page Pet Assistant'}</button>
     </nav>
     </section>
     <div class="pet-profile-delete-area">
@@ -254,7 +254,7 @@ export function setupPetCarePages() {
     else if (String(selectedPetAssistantId()) === petId) saveSelectedPetAssistantId(next[0] || '');
     button.classList.toggle('is-selected', enabling);
     button.setAttribute('aria-pressed', String(enabling));
-    button.textContent = enabling ? '✓ Showing This Pet As Pet Assistant' : 'Show This Pet As Pet Assistant';
+    button.textContent = enabling ? '✓ Shown as Home Page Pet Assistant' : 'Show as Home Page Pet Assistant';
   }));
 
   const reminderForm = document.querySelector('[data-pet-reminder-form]');

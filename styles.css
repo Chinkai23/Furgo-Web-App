@@ -900,7 +900,7 @@ h1, h2, h3, p { margin-top: 0; }
 .mobile-home .home-content .section-title-row h2 { display: flex; align-items: center; gap: 10px; }
 .mobile-home .home-content .section-title-row h2::before { content: ''; width: 6px; height: 1.2em; flex: 0 0 6px; border-radius: 5px; background: linear-gradient(180deg, #ff9c28, #ff7200); }
 .small-link { color: var(--orange-dark); font-size: 11px; font-weight: 700; }
-.pet-carousel { display: flex; gap: 12px; overflow-x: auto; margin: 0 -20px 0 -12px; padding: 12px 20px 18px 12px; scrollbar-width: none; scroll-snap-type: x mandatory; }
+.pet-carousel { display: flex; gap: 12px; overflow-x: auto; margin: 0 -20px 0 0; padding: 12px 20px 18px 0; scrollbar-width: none; scroll-snap-type: x mandatory; scroll-padding-left: 0; }
 .pet-carousel::-webkit-scrollbar { display: none; }
 .pet-card, .add-pet-card { width: 340px; min-width: 340px; height: 214px; flex: 0 0 340px; scroll-snap-align: start; }
 .pet-card { position: relative; display: grid; grid-template-columns: 112px minmax(0, 1fr); grid-template-rows: auto auto; align-content: center; align-items: center; justify-content: center; column-gap: 12px; row-gap: 7px; padding: 18px 26px 54px; border: 0; border-radius: 22px; color: var(--ink); text-align: left; background: url("Image/Other%20Image/Pet%20Profile%20Background.png") center / 100% 100% no-repeat; box-shadow: 0px 4px 4px rgba(206, 88, 0, 0.55); }
@@ -5075,22 +5075,23 @@ select::-ms-expand { display: none; }
   box-sizing: border-box;
 }
 
-/* Assistant selection: orange when off, black when active, with no outline. */
+/* Assistant selection: light orange when inactive and Furgo orange when active. */
 .pet-profile-page .pet-assistant-profile-toggle,
 .pet-profile-page .pet-assistant-profile-toggle:not(.is-selected),
 .pet-profile-page .pet-assistant-profile-toggle.is-selected {
   border: 0;
   outline: 0;
-  color: #fff;
 }
 .pet-profile-page .pet-assistant-profile-toggle,
 .pet-profile-page .pet-assistant-profile-toggle:not(.is-selected) {
-  background: #ff7900;
-  box-shadow: inset 0 2px 5px rgba(255, 239, 175, 0.55), inset 0 -5px 7px rgba(153, 59, 0, 0.34), 0 4px 8px rgba(169, 76, 22, 0.2);
+  color: #e96600;
+  background: #fff5ee;
+  box-shadow: inset 0 2px 5px rgba(255, 250, 239, 0.8), inset 0 -5px 7px rgba(178, 82, 14, 0.2), 0 4px 8px rgba(169, 76, 22, 0.16);
 }
 .pet-profile-page .pet-assistant-profile-toggle.is-selected {
-  background: #252329;
-  box-shadow: inset 0 2px 5px rgba(255, 255, 255, 0.18), inset 0 -5px 7px rgba(0, 0, 0, 0.28), 0 4px 8px rgba(31, 29, 35, 0.2);
+  color: #fff;
+  background: #ff7900;
+  box-shadow: inset 0 2px 5px rgba(255, 239, 175, 0.55), inset 0 -5px 7px rgba(153, 59, 0, 0.34), 0 4px 8px rgba(169, 76, 22, 0.2);
 }
 .pet-profile-add-settings .profile-menu-row:disabled,
 .pet-profile-add-settings .pet-setting-icon,
