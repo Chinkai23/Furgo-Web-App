@@ -1,5 +1,5 @@
 import { bottomNavigation, escapeHTML } from '../shared.js';
-import { loadMarketplaceCart, loadMarketplaceOfferSettings, loadMarketplaceProducts, marketplaceLine } from './marketplace-data.js';
+import { loadMarketplaceCart, loadMarketplaceCartSelection, loadMarketplaceOfferSettings, loadMarketplaceProducts, marketplaceCartLineKey, marketplaceCheckoutSelectionKey, marketplaceLine, safeMarketplaceImage } from './marketplace-data.js';
 import { customerOrderStatus } from '../order-status.js';
 
 // Shopping Cart: multi-item quantity management and free-shipping progress calculation.
@@ -8,12 +8,19 @@ export function marketplaceCartPage() {
   const offers = loadMarketplaceOfferSettings();
   const freeShippingMinimum = Number(offers.freeShippingMinimum) || 0;
   const deliveryFee = Number(offers.deliveryFee) || 0;
-  const lines = loadMarketplaceCart().map((item, index) => ({ ...marketplaceLine(item), index })).filter((item) => item.product && item.variant);
-  const subtotal = lines.reduce((sum, item) => sum + item.total, 0);
+  const cart = loadMarketplaceCart();
+  const lines = cart.map((item, index) => ({ ...marketplaceLine(item), index, key: marketplaceCartLineKey(item) })).filter((item) => item.product && item.variant);
+  const storedSelection = loadMarketplaceCartSelection();
+  const selectedKeys = storedSelection ?? lines.map((item) => item.key);
+  const selectedLines = lines.filter((item) => selectedKeys.includes(item.key));
+  const subtotal = selectedLines.reduce((sum, item) => sum + item.total, 0);
   const remaining = Math.max(0, freeShippingMinimum - subtotal);
   const progress = freeShippingMinimum ? Math.min(100, subtotal / freeShippingMinimum * 100) : 100;
-  const cartItems = lines.map(({ product, variant, quantity, total, index }) => `<article class="market-cart-item"><div class="market-cart-visual" aria-hidden="true">${escapeHTML(product.emoji || '🐾')}</div><div class="market-cart-copy"><h2>${escapeHTML(product.name)}</h2><p>${escapeHTML(variant.label)} · MYR ${Number(variant.price).toFixed(2)}</p><strong>MYR ${total.toFixed(2)}</strong><div class="market-quantity-controls"><button type="button" data-cart-quantity="${index}" data-delta="-1" aria-label="Reduce ${escapeHTML(product.name)} quantity">−</button><span>${quantity}</span><button type="button" data-cart-quantity="${index}" data-delta="1" aria-label="Increase ${escapeHTML(product.name)} quantity">+</button><button class="market-remove-item" type="button" data-remove-cart-item="${index}">Remove</button></div></div></article>`).join('');
-  return `<main class="marketplace-page"><header class="marketplace-header"><a class="market-back" href="#marketplace" aria-label="Back to Marketplace">‹</a><div><span class="market-kicker">Your selection</span><h1>Shopping Cart</h1></div></header>${lines.length ? `<section class="market-cart-layout"><div><section class="market-shipping-meter"><div><strong>${remaining ? `Add MYR ${remaining.toFixed(2)} for free shipping` : 'You unlocked free shipping'}</strong><span>${freeShippingMinimum ? `${subtotal.toFixed(2)} / ${freeShippingMinimum.toFixed(2)} MYR` : 'Free shipping'}</span></div><div class="market-progress-track"><span style="width:${progress}%"></span></div></section><div class="market-cart-list">${cartItems}</div><a class="market-continue-shopping" href="#marketplace">‹ Continue shopping</a></div><aside class="market-order-summary"><h2>Order Summary</h2><p><span>Subtotal</span><b>MYR ${subtotal.toFixed(2)}</b></p><p><span>Delivery</span><b>${remaining ? `MYR ${deliveryFee.toFixed(2)}` : 'Free'}</b></p><div class="market-summary-total"><span>Estimated total</span><strong>MYR ${(subtotal + (remaining ? deliveryFee : 0)).toFixed(2)}</strong></div><a class="button button-primary" href="#checkout">Continue to Checkout</a><small>${escapeHTML(offers.offerDescription || 'Shipping and offers are confirmed at checkout.')}</small></aside></section>` : `<section class="market-empty-cart"><h2>Your Cart Is Waiting For A Little Joy.</h2><p>Explore pet essentials and add your favourites here.</p><a class="button button-primary" href="#marketplace">Explore Marketplace</a></section>`}${bottomNavigation('marketplace', icon)}<div class="home-toast" role="status" aria-live="polite"></div></main>`;
+  const cartItems = lines.map(({ product, variant, quantity, total, index, key }) => {
+    const image = (product.images || []).map(safeMarketplaceImage).find(Boolean);
+    return `<article class="market-cart-item"><label class="market-cart-select"><input type="checkbox" data-cart-select="${index}" value="${escapeHTML(key)}" ${selectedKeys.includes(key) ? 'checked' : ''} aria-label="Select ${escapeHTML(product.name)} for checkout" /></label><div class="market-cart-visual" ${image ? '' : 'aria-hidden="true"'}>${image ? `<img src="${escapeHTML(image)}" alt="${escapeHTML(product.name)}" loading="lazy" />` : escapeHTML(product.emoji || '🐾')}</div><div class="market-cart-copy"><h2>${escapeHTML(product.name)}</h2><p>${escapeHTML(variant.label)} · <span class="market-cart-unit-price">MYR ${Number(variant.price).toFixed(2)}</span></p><strong>MYR ${total.toFixed(2)}</strong><div class="market-quantity-controls"><button type="button" data-cart-quantity="${index}" data-delta="-1" aria-label="Reduce ${escapeHTML(product.name)} quantity">−</button><span>${quantity}</span><button type="button" data-cart-quantity="${index}" data-delta="1" aria-label="Increase ${escapeHTML(product.name)} quantity">+</button><button class="market-remove-item" type="button" data-remove-cart-item="${index}">Remove</button></div></div></article>`;
+  }).join('');
+  return `<main class="marketplace-page"><header class="marketplace-header"><a class="market-back" href="#marketplace" aria-label="Back to Marketplace">‹</a><div><span class="market-kicker">Your selection</span><h1>Shopping Cart</h1></div></header>${lines.length ? `<section class="market-cart-layout"><div><section class="market-shipping-meter"><div><strong>${remaining ? `Add MYR ${remaining.toFixed(2)} for free shipping` : 'You unlocked free shipping'}</strong><span>${freeShippingMinimum ? `${subtotal.toFixed(2)} / ${freeShippingMinimum.toFixed(2)} MYR` : 'Free shipping'}</span></div><div class="market-progress-track"><span style="width:${progress}%"></span></div></section><div class="market-cart-selection-bar"><label><input type="checkbox" data-cart-select-all ${selectedLines.length === lines.length ? 'checked' : ''} /> Select all</label><span>${selectedLines.length} of ${lines.length} selected</span></div><div class="market-cart-list">${cartItems}</div><a class="market-continue-shopping" href="#marketplace">‹ Continue shopping</a></div><aside class="market-order-summary"><h2>Order Summary</h2><p><span>Selected items</span><b>${selectedLines.length}</b></p><p><span>Subtotal</span><b>MYR ${subtotal.toFixed(2)}</b></p><p><span>Delivery</span><b>${remaining ? `MYR ${deliveryFee.toFixed(2)}` : 'Free'}</b></p><div class="market-summary-total"><span>Estimated total</span><strong>MYR ${(subtotal + (remaining ? deliveryFee : 0)).toFixed(2)}</strong></div><button class="button button-primary" type="button" data-selected-checkout ${selectedLines.length ? '' : 'disabled'}>Continue to Checkout</button><small>${escapeHTML(offers.offerDescription || 'Shipping and offers are confirmed at checkout.')}</small></aside></section>` : `<section class="market-empty-cart"><h2>Your Cart Is Waiting For A Little Joy.</h2><p>Explore pet essentials and add your favourites here.</p><a class="button button-primary" href="#marketplace">Explore Marketplace</a></section>`}${bottomNavigation('marketplace', icon)}<div class="home-toast" role="status" aria-live="polite"></div></main>`;
 }
 
 // Checkout: collects delivery details and payment choice before creating a demo marketplace order.
@@ -23,7 +30,12 @@ export function marketplaceCheckoutPage() {
   const freeShippingMinimum = Number(offers.freeShippingMinimum) || 0;
   const deliveryFee = Number(offers.deliveryFee) || 0;
   const cart = loadMarketplaceCart();
-  const lines = cart.map((item) => marketplaceLine(item)).filter(Boolean);
+  let checkoutKeys = null;
+  try {
+    const saved = JSON.parse(localStorage.getItem(marketplaceCheckoutSelectionKey) || 'null');
+    checkoutKeys = Array.isArray(saved) ? saved : null;
+  } catch { checkoutKeys = null; }
+  const lines = cart.filter((item) => !checkoutKeys || checkoutKeys.includes(marketplaceCartLineKey(item))).map((item) => marketplaceLine(item)).filter(Boolean);
   const subtotal = lines.reduce((sum, item) => sum + item.total, 0);
   const addresses = (() => { try { return JSON.parse(localStorage.getItem('furgo-demo-addresses') || '[]'); } catch { return []; } })();
   const addressOptions = addresses.map((address, index) => `<option value="${index}">${escapeHTML(address.label)} — ${escapeHTML(address.street)}, ${escapeHTML(address.city)}</option>`).join('');

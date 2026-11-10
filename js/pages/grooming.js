@@ -1,5 +1,5 @@
 import { bottomNavigation, escapeHTML } from '../shared.js';
-import { loadPetProfiles } from './home.js';
+import { loadPetProfiles, petProfilePictureUrl } from './home.js';
 import { groomingWeightTier, loadGroomingBookings, loadGroomingSettings } from './grooming-data.js';
 import { loadPetTaxiSettings } from './pet-taxi-data.js';
 import { renderPetTaxiAddressPicker, setupPetTaxiAddressPicker } from './pet-taxi-addresses.js';
@@ -19,7 +19,7 @@ export function groomingBookingPage(selectedPetId = '') {
   const minimumDate = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
   const maximumBookingDate = new Date(today.getFullYear(), today.getMonth(), today.getDate() + Number(settings.bookingHorizonDays || 60));
   const maximumDate = `${maximumBookingDate.getFullYear()}-${String(maximumBookingDate.getMonth() + 1).padStart(2, '0')}-${String(maximumBookingDate.getDate()).padStart(2, '0')}`;
-  const petCards = pets.map((pet) => `<button class="grooming-pet-card ${pet.id === selectedPet?.id ? 'is-selected' : ''}" type="button" data-grooming-pet-choice="${escapeHTML(pet.id)}" aria-pressed="${pet.id === selectedPet?.id}" aria-label="Select ${escapeHTML(pet.name)}"><img class="grooming-pet-photo" src="${escapeHTML(pet.photo || icon('Profile Picture.png'))}" alt="" /><span class="grooming-pet-card-copy"><strong>${escapeHTML(pet.name)}</strong><span>${escapeHTML(pet.breed || 'Breed not added')}</span><small>${escapeHTML(pet.weight || 'Weight not added')} kg</small></span>${pet.id === selectedPet?.id ? `<span class="grooming-pet-selected-mark"><img src="${icon('Icon-13.png')}" alt="Selected" /></span>` : ''}</button>`).join('');
+  const petCards = pets.map((pet) => `<button class="grooming-pet-card ${pet.id === selectedPet?.id ? 'is-selected' : ''}" type="button" data-grooming-pet-choice="${escapeHTML(pet.id)}" aria-pressed="${pet.id === selectedPet?.id}" aria-label="Select ${escapeHTML(pet.name)}"><img class="grooming-pet-photo" src="${escapeHTML(petProfilePictureUrl(pet))}" alt="" /><span class="grooming-pet-card-copy"><strong>${escapeHTML(pet.name)}</strong><span>${escapeHTML(pet.breed || 'Breed not added')}</span><small>${escapeHTML(pet.weight || 'Weight not added')} kg</small></span>${pet.id === selectedPet?.id ? `<span class="grooming-pet-selected-mark"><img src="${icon('Icon-13.png')}" alt="Selected" /></span>` : ''}</button>`).join('');
   const activePackages = settings.packages.filter((item) => item.active !== false);
   const activeAddOns = (settings.addOns || []).filter((item) => item.active !== false);
   // Service package carousel: each card shows its package details and weight-based price.

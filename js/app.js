@@ -1,24 +1,30 @@
 // Main app controller: routes between the individual page files and wires shared interactions.
-import { fitPetCardRemarks, homePage, loadPetProfiles, petCarouselMarkup, petProfilesStorageKeyForCurrentUser } from './pages/home.js';
+import { defaultPetAvatarPath, fitPetCardRemarks, freePetAssistantAvatars, homeAssistantBubbleMessages, homePage, loadPetProfiles, petAvatarUrl, petCustomAvatarLibrary, petProfilePictureUrl, petCarouselMarkup, petProfilesStorageKeyForCurrentUser, savePetAssistantIds, saveSelectedPetAssistantId, selectedHomeAssistantPet, selectedHomeAssistantPets, selectedPetAssistantIds } from './pages/home.js';
+import { petAssistantPage, setupPetAssistant } from './pages/pet-assistant.js';
+import { aiNutritionistPage, setupAiNutritionist } from './pages/ai-nutritionist.js';
+import { adminHomeMvpPage, setupHomeShortcutLiveRefresh } from './pages/home-shortcuts.js';
 import { loginPage } from './pages/login.js';
 import { registerPage } from './pages/register.js';
 import { onboardingPage } from './pages/onboarding.js';
 import { profilePage } from './pages/profile.js';
+import { notificationSettingsPage } from './pages/notification-settings.js';
 import { editProfilePage } from './pages/edit-profile.js';
-import { helpCenterPage } from './pages/help-center.js';
+import { helpCenterPage, setupRoleApplication } from './pages/help-center.js';
 import { feedbackPage } from './pages/feedback.js';
 import { addressPage } from './pages/address.js';
 import { paymentMethodPage } from './pages/payment-method.js';
 import { creditPage } from './pages/credit.js';
+import { setupTokensPage, tokensPage } from './pages/tokens.js';
 import { marketplaceFavoritesPage, marketplacePage, marketplaceProductPage, marketplaceSellerPage } from './pages/marketplace.js';
 import { marketplaceCartPage, marketplaceCheckoutPage } from './pages/cart.js';
 import { adminMarketplaceManagePage, adminMarketplacePage, adminMarketplaceProductsPage } from './pages/admin-marketplace.js';
-import { marketplaceSupplierPage, marketplaceSupplierProductEditPage, supplierOrderRows, supplierProductRows } from './pages/marketplace-supplier.js';
-import { adminOrderStage } from './admin-order-ui.js';
+import { marketplaceSupplierPage, marketplaceSupplierProductEditPage, matchesSupplierOrderStatus, supplierOrderRows, supplierProductRows } from './pages/marketplace-supplier.js';
 import { setupPortalNotifications } from './portal-notifications.js';
-import { loadMarketplaceCart, loadMarketplaceFavorites, loadMarketplaceOfferSettings, loadMarketplaceOrders, loadMarketplaceProducts, loadMarketplaceSubscriptionCart, loadMarketplaceSubscriptions, marketplaceCartKey, marketplaceFavoritesKey, marketplaceLine, marketplaceOfferSettingsKey, marketplaceOrdersKey, marketplaceProductsKey, marketplaceSubscriptionCartKey, marketplaceSubscriptionsKey, marketplaceSubscriptionLine, safeMarketplaceImage } from './pages/marketplace-data.js';
+import { loadMarketplaceCart, loadMarketplaceCartSelection, loadMarketplaceFavorites, loadMarketplaceOfferSettings, loadMarketplaceOrders, loadMarketplaceProducts, loadMarketplaceSubscriptionCart, loadMarketplaceSubscriptions, marketplaceCartKey, marketplaceCartLineKey, marketplaceCartSelectionKey, marketplaceCheckoutSelectionKey, marketplaceFavoritesKey, marketplaceLine, marketplaceOfferSettingsKey, marketplaceOrdersKey, marketplaceProductsKey, marketplaceSubscriptionCartKey, marketplaceSubscriptionsKey, marketplaceSubscriptionLine, safeMarketplaceImage } from './pages/marketplace-data.js';
 import { marketplaceSubscriptionsPage } from './pages/marketplace-subscriptions.js';
-import { petProfilePage } from './pages/pet-profile.js';
+import { petProfileEditPage } from './pages/pet-profile.js';
+import { petAvatarPage, petDataPage, petProfileAddCardPage, petProfileOverviewPage, petRecordPage, petReminderPage, petVaccinationPage, setupPetCarePages } from './pages/pet-care-pages.js';
+import { deletePetCareData, loadPetReminders, savePetReminders } from './pages/pet-care-data.js';
 import { adminPromotionsPage, loadAnnouncements, loadPromotions, maximumPromotions, normalizePromotionDestination, promotionStorageKey } from './pages/admin-promotions.js';
 import { adminPortalPage, setupAdminPortal } from './pages/admin.js';
 import { groomingBookingPage, groomingOrdersPage } from './pages/grooming.js';
@@ -37,19 +43,21 @@ import { defaultGroomingSettings, groomingBookingsKey, groomingSettingsKey, groo
 import { myOrdersPage, setupMyOrders } from './pages/my-orders.js';
 import { adminOrdersPage, setupAdminOrders } from './pages/admin-orders.js';
 import { checkInPage, extractCheckInCode, formatCheckInToken, refreshCheckInTokens, setupCheckInInteractions } from './pages/check-in.js';
-import { adminBottomNavigation, driverBottomNavigation, escapeHTML } from './shared.js';
+import { adminBottomNavigation, bottomNavigation, driverBottomNavigation, escapeHTML } from './shared.js';
 import { adminEnquiriesPage, setupAdminEnquiries } from './pages/admin-enquiries.js';
 import { adminCustomersPage, getCustomerAccountStatus, getCustomerRecordId, saveCustomerRecord, setupAdminCustomers } from './pages/admin-customers.js';
 import { driverPortalPage, setupDriverPortal } from './pages/driver.js';
 import { adminAccessPage, adminAuditPage, setupAdminAccess, setupAdminAuditPage } from './pages/admin-access.js';
+import { adminSuppliersPage, setupAdminSuppliers } from './pages/admin-suppliers.js';
 import { adminProductServiceInsightsPage, setupAdminProductServiceInsights } from './pages/admin-product-insights.js';
 import { recordAdminAction } from './admin-audit.js';
 import { recentSearchesKey, searchPage } from './pages/search.js';
-import { localFinderFavoritesPage, localFinderListPage, localFinderPage, localFinderPlacePage, setupLocalFinder } from './pages/local-finder.js';
+import { localFinderFavoritesPage, localFinderListPage, localFinderPage, localFinderPlacePage, localFinderSearchPage, setupLocalFinder } from './pages/local-finder.js';
 import { adminLocalFinderPage, setupAdminLocalFinder } from './pages/admin-local-finder.js';
 import { supabase, toMalaysianE164 } from './supabase.js';
 import { refreshSharedOutlets } from './pages/outlet-directory.js';
-import { cacheSyncedRecords, loadCloudAppData } from './app-data-sync.js';
+import { cacheSyncedRecords, loadCloudAppData, saveMarketplaceOrder, saveOrderRecords } from './app-data-sync.js';
+import { refreshFurgoCoinBalance } from './coin-wallet.js';
 import { startQRScanner } from './qr-scanner.js';
 
 // Section: Supabase-backed authentication state
@@ -58,11 +66,21 @@ let supabaseAuthReady = false;
 let groomingQrSyncListenerInstalled = false;
 let activeSupabaseUserId = '';
 
+// Close any native modal popup when the user clicks outside its visible panel.
+document.addEventListener('click', (event) => {
+  const dialog = event.target;
+  if (!dialog || dialog.tagName !== 'DIALOG' || !dialog.open) return;
+  const bounds = dialog.getBoundingClientRect();
+  const clickedOutside = event.clientX < bounds.left || event.clientX > bounds.right
+    || event.clientY < bounds.top || event.clientY > bounds.bottom;
+  if (clickedOutside) dialog.close();
+});
+
 // Section: Supabase pet records
 // Function: Convert the signed-in owner's browser pet model to and from their pet_profiles rows.
 const petProfilesStorageKey = 'furgo-demo-pet-profiles';
 
-function petFromDatabase(row, photo = '', vaccinationCards = []) {
+function petFromDatabase(row, photo = '', vaccinationCards = [], localPet = {}, avatar = '') {
   return {
     id: row.id,
     ownerId: row.user_id,
@@ -75,6 +93,11 @@ function petFromDatabase(row, photo = '', vaccinationCards = []) {
     colour: row.colour || '',
     remarks: Array.isArray(row.remarks) ? row.remarks : [],
     photo,
+    avatar: avatar || localPet.avatar || '',
+    avatars: Array.isArray(localPet.avatars) ? localPet.avatars : (avatar || localPet.avatar ? [avatar || localPet.avatar] : []),
+    activeAvatarIndex: Number.isInteger(localPet.activeAvatarIndex) ? localPet.activeAvatarIndex : null,
+    avatarPath: row.avatar_path || localPet.avatarPath || '',
+    profilePictureMode: row.profile_picture_mode || localPet.profilePictureMode || (photo ? 'photo' : 'default'),
     photoPath: row.photo_path || '',
     vaccinationCards,
     vaccinationValidUntil: row.vaccination_valid_until || '',
@@ -88,12 +111,30 @@ async function signedPetFile(path) {
   return data.signedUrl;
 }
 
+async function listCloudPetAvatars(userId, petId) {
+  const folder = `${userId}/${petId}`;
+  const { data, error } = await supabase.storage.from('pet-records').list(folder, { limit: 100, sortBy: { column: 'created_at', order: 'asc' } });
+  if (error) {
+    console.warn('Saved pet avatars could not be listed:', error);
+    return [];
+  }
+  return Promise.all((data || []).filter((file) => file.name?.startsWith('avatar-')).map(async (file) => {
+    const path = `${folder}/${file.name}`;
+    return { path, url: await signedPetFile(path) };
+  }));
+}
+
 async function loadCloudPetProfiles(userId) {
   let { data, error } = await supabase.from('pet_profiles').select('*').eq('user_id', userId).order('created_at');
   if (error) throw error;
   let cachedPets = [];
-  try { cachedPets = JSON.parse(localStorage.getItem(petProfilesStorageKey) || '[]'); } catch { cachedPets = []; }
-  if (!Array.isArray(cachedPets)) cachedPets = [];
+  try {
+    const legacyPets = JSON.parse(localStorage.getItem(petProfilesStorageKey) || '[]');
+    const currentUserPets = JSON.parse(localStorage.getItem(petProfilesStorageKeyForCurrentUser()) || '[]');
+    const petsById = new Map((Array.isArray(legacyPets) ? legacyPets : []).map((pet) => [String(pet.id), pet]));
+    (Array.isArray(currentUserPets) ? currentUserPets : []).forEach((pet) => petsById.set(String(pet.id), pet));
+    cachedPets = [...petsById.values()];
+  } catch { cachedPets = []; }
   const profile = JSON.parse(sessionStorage.getItem('furgo-demo-user-profile') || '{}');
   const email = String(profile.email || '').toLowerCase();
   const phone = String(profile.phone || '').replace(/[\s-]/g, '');
@@ -113,14 +154,25 @@ async function loadCloudPetProfiles(userId) {
       data = refreshed.data;
     }
   }
+  const cachedPetsById = new Map(cachedPets.map((pet) => [String(pet.id), pet]));
   const pets = await Promise.all((data || []).map(async (row) => {
     const photo = await signedPetFile(row.photo_path);
+    const avatar = row.avatar_path?.startsWith('builtin:') ? row.avatar_path.slice('builtin:'.length) : await signedPetFile(row.avatar_path);
+    const avatars = await listCloudPetAvatars(userId, row.id);
     const vaccinationCards = await Promise.all((Array.isArray(row.vaccination_cards) ? row.vaccination_cards : []).map(async (card) => ({
       name: card.name || 'Vaccination record',
       path: card.path || '',
       data: card.path ? await signedPetFile(card.path) : '',
     })));
-    return petFromDatabase(row, photo, vaccinationCards);
+    const cachedPet = cachedPetsById.get(String(row.id)) || {};
+    const cloudActiveAvatarIndex = row.avatar_path && !row.avatar_path.startsWith('builtin:')
+      ? avatars.findIndex((item) => item.path === row.avatar_path)
+      : -1;
+    return petFromDatabase(row, photo, vaccinationCards, {
+      ...cachedPet,
+      avatars: avatars.length ? avatars : cachedPet.avatars,
+      activeAvatarIndex: avatars.length ? (cloudActiveAvatarIndex >= 0 ? cloudActiveAvatarIndex : null) : cachedPet.activeAvatarIndex,
+    }, avatar);
   }));
   localStorage.setItem(petProfilesStorageKeyForCurrentUser(), JSON.stringify(pets));
   return pets;
@@ -139,8 +191,13 @@ async function uploadPetDataUrl(userId, petId, label, dataUrl) {
 
 async function saveCloudPet(pet, userId) {
   const petId = pet.id || crypto.randomUUID();
+  const previousPhotoPath = pet.photoPath || '';
+  const previousAvatarPath = pet.avatarPath || '';
   let photoPath = pet.photoPath || '';
   if (pet.photo?.startsWith('data:')) photoPath = await uploadPetDataUrl(userId, petId, 'profile', pet.photo);
+  let avatarPath = pet.avatarPath || '';
+  if (pet.avatar?.startsWith('data:')) avatarPath = await uploadPetDataUrl(userId, petId, 'avatar', pet.avatar);
+  else if (pet.avatar?.startsWith('Image/')) avatarPath = `builtin:${pet.avatar}`;
   const cards = await Promise.all((pet.vaccinationCards || []).map(async (card) => ({
     name: card.name || 'Vaccination record',
     path: card.path || await uploadPetDataUrl(userId, petId, 'vaccination', card.data),
@@ -157,22 +214,35 @@ async function saveCloudPet(pet, userId) {
     colour: pet.colour || '',
     remarks: pet.remarks || [],
     photo_path: photoPath || null,
+    avatar_path: avatarPath || null,
+    profile_picture_mode: ['photo', 'avatar', 'default'].includes(pet.profilePictureMode)
+      ? pet.profilePictureMode
+      : (photoPath ? 'photo' : 'default'),
     vaccination_cards: cards,
     vaccination_valid_until: pet.vaccinationValidUntil || null,
   };
   const { data, error } = await supabase.from('pet_profiles').upsert(row).select('*').single();
   if (error) throw error;
+  const replacedPaths = [
+    previousPhotoPath && photoPath && previousPhotoPath !== photoPath ? previousPhotoPath : '',
+  ].filter(Boolean);
+  if (replacedPaths.length) {
+    const { error: oldFileError } = await supabase.storage.from('pet-records').remove(replacedPaths);
+    if (oldFileError) console.warn('Previous pet pictures could not be removed:', oldFileError);
+  }
   const photo = await signedPetFile(data.photo_path);
+  const avatar = data.avatar_path?.startsWith('builtin:') ? data.avatar_path.slice('builtin:'.length) : await signedPetFile(data.avatar_path);
   const vaccinationCards = await Promise.all(cards.map(async (card) => ({ ...card, data: await signedPetFile(card.path) })));
-  return petFromDatabase(data, photo, vaccinationCards);
+  return petFromDatabase(data, photo, vaccinationCards, pet, avatar);
 }
 
 async function deleteCloudPet(petId, userId) {
-  const { data: pet, error: readError } = await supabase.from('pet_profiles').select('photo_path,vaccination_cards').eq('id', petId).eq('user_id', userId).maybeSingle();
+  const { data: pet, error: readError } = await supabase.from('pet_profiles').select('photo_path,avatar_path,vaccination_cards').eq('id', petId).eq('user_id', userId).maybeSingle();
   if (readError) throw readError;
   const { error } = await supabase.from('pet_profiles').delete().eq('id', petId).eq('user_id', userId);
   if (error) throw error;
-  const paths = [pet?.photo_path, ...(pet?.vaccination_cards || []).map((card) => card.path)].filter(Boolean);
+  const savedAvatars = await listCloudPetAvatars(userId, petId);
+  const paths = [...new Set([pet?.photo_path, ...(pet?.avatar_path && !pet.avatar_path.startsWith('builtin:') ? [pet.avatar_path] : []), ...savedAvatars.map((avatar) => avatar.path), ...(pet?.vaccination_cards || []).map((card) => card.path)].filter(Boolean))];
   if (paths.length) {
     const { error: storageError } = await supabase.storage.from('pet-records').remove(paths);
     if (storageError) console.warn('Pet record files could not be removed:', storageError);
@@ -526,6 +596,7 @@ async function initializeSupabaseSession() {
     if (data.session?.user) await loadSupabaseIdentity(data.session.user);
     else {
       sessionStorage.removeItem('furgo-demo-auth');
+      sessionStorage.removeItem('furgo-customer-portal-view');
       sessionStorage.removeItem('furgo-demo-profile-complete');
       sessionStorage.removeItem('furgo-demo-user-role');
       sessionStorage.removeItem('furgo-demo-user-profile');
@@ -580,14 +651,67 @@ async function petPhotoDataUrl(file) {
   }
 }
 
-// Connects the Home pet carousel to photo uploads and saved pet-profile links.
+// Prepares an uploaded pet photo or the Furgo mascot reference for the avatar-generation Edge Function.
+async function petAvatarReferenceDataUrl(source, { maxSide = 1024, format = 'image/jpeg' } = {}) {
+  let objectUrl = '';
+  try {
+    if (String(source).startsWith('data:')) objectUrl = source;
+    else {
+      const response = await fetch(source);
+      if (!response.ok) throw new Error('Could not load the avatar reference image.');
+      objectUrl = URL.createObjectURL(await response.blob());
+    }
+    const image = new Image();
+    image.src = objectUrl;
+    await image.decode();
+    const scale = Math.min(1, maxSide / Math.max(image.naturalWidth, image.naturalHeight));
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.max(1, Math.round(image.naturalWidth * scale));
+    canvas.height = Math.max(1, Math.round(image.naturalHeight * scale));
+    canvas.getContext('2d').drawImage(image, 0, 0, canvas.width, canvas.height);
+    return canvas.toDataURL(format, format === 'image/jpeg' ? 0.88 : undefined);
+  } finally {
+    if (objectUrl && !String(source).startsWith('data:')) URL.revokeObjectURL(objectUrl);
+  }
+}
+
+// Connects the Home pet carousel to pet-profile links and assistant selection.
 function setupHomePetProfiles() {
   const carousel = document.querySelector('[data-pet-carousel]');
   if (!carousel) return;
   const icon = (file) => `Image/Icon/${encodeURIComponent(file)}`;
   const savePets = (items) => localStorage.setItem(petProfilesStorageKeyForCurrentUser(), JSON.stringify(items));
+  let assistantMessageIndex = 0;
+  const updateAssistantDisplay = (assistantPet, pets, saveSelection = false, showPetSpecificMessage = false) => {
+    const assistantLink = document.querySelector('.home-pet-assistant-shortcut');
+    const assistantBubble = document.querySelector('.home-pet-assistant-bubble');
+    const messages = homeAssistantBubbleMessages(assistantPet);
+    if (saveSelection && assistantPet) saveSelectedPetAssistantId(assistantPet.id);
+    if (assistantLink) {
+      const assistantImage = assistantLink.querySelector('.home-pet-art');
+      if (assistantImage) assistantImage.src = petAvatarUrl(assistantPet);
+      assistantLink.href = assistantPet ? `#pet-profile?id=${encodeURIComponent(assistantPet.id)}` : '#pet-profile?mode=add';
+      assistantLink.setAttribute('aria-label', `Open ${assistantPet ? `${assistantPet.name}'s` : 'a pet'} profile. Swipe to switch Pet Assistant.`);
+      assistantLink.dataset.assistantPetIds = JSON.stringify(selectedHomeAssistantPets(pets).map((pet) => String(pet.id)));
+    }
+    if (assistantBubble) {
+      assistantBubble.href = assistantPet ? `#pet-assistant?pet=${encodeURIComponent(assistantPet.id)}` : '#pet-assistant';
+      assistantBubble.setAttribute('aria-label', `Open AI Pet Assistant${assistantPet ? ` for ${assistantPet.name}` : ''}`);
+      assistantBubble.dataset.messages = JSON.stringify(messages);
+      const name = assistantBubble.querySelector('[data-assistant-pet-name]');
+      const text = assistantBubble.querySelector('[data-assistant-bubble-text]');
+      if (name) name.textContent = assistantPet?.name || 'Furgo Assistant';
+      if (text) {
+        assistantMessageIndex = showPetSpecificMessage && messages.length > 1 ? 1 : 0;
+        text.classList.remove('is-fading');
+        text.textContent = messages[assistantMessageIndex] || 'Hi! Chat with me now';
+      }
+    }
+  };
   const renderPets = () => {
-    carousel.innerHTML = petCarouselMarkup(icon, loadPetProfiles());
+    const pets = loadPetProfiles();
+    carousel.innerHTML = petCarouselMarkup(icon, pets);
+    updateAssistantDisplay(selectedHomeAssistantPet(pets), pets);
     fitPetCardRemarks(carousel);
     window.requestAnimationFrame(() => fitPetCardRemarks(carousel));
     document.fonts?.ready.then(() => fitPetCardRemarks(carousel));
@@ -602,31 +726,665 @@ function setupHomePetProfiles() {
 
   renderPets();
 
-  // Saves a chosen photo with its pet and updates that pet card immediately.
-  carousel.addEventListener('change', async (event) => {
-    const input = event.target.closest('[data-pet-photo]');
-    const file = input?.files?.[0];
-    if (!input || !file) return;
-    try {
-      const photo = await petPhotoDataUrl(file);
-      const updatedPets = loadPetProfiles().map((pet) => pet.id === input.dataset.petPhoto ? { ...pet, photo } : pet);
-      const { data: authData } = await supabase.auth.getUser();
-      if (authData.user) {
-        const pet = updatedPets.find((item) => item.id === input.dataset.petPhoto);
-        const savedPet = await saveCloudPet(pet, authData.user.id);
-        const cloudPets = updatedPets.map((item) => item.id === pet.id ? savedPet : item);
-        savePets(cloudPets);
-        renderPets();
+  const mascot = document.querySelector('.home-pet-assistant-shortcut');
+  if (mascot) {
+    let pointerStart = null;
+    let suppressClickUntil = 0;
+    let mascotClickTimer = null;
+    const mascotImage = mascot.querySelector('.home-pet-art');
+    mascot.style.touchAction = 'pan-y';
+    mascot.addEventListener('pointerdown', (event) => {
+      if (event.button !== 0) return;
+      let ids = [];
+      try { ids = JSON.parse(mascot.dataset.assistantPetIds || '[]'); } catch { ids = []; }
+      if (ids.length < 2) return;
+      pointerStart = { x: event.clientX, y: event.clientY, id: event.pointerId, moved: false };
+      mascot.setPointerCapture?.(event.pointerId);
+    });
+    mascot.addEventListener('pointermove', (event) => {
+      if (!pointerStart || pointerStart.id !== event.pointerId) return;
+      const dx = event.clientX - pointerStart.x;
+      const dy = event.clientY - pointerStart.y;
+      if (Math.abs(dx) > Math.abs(dy) + 4 && Math.abs(dx) > 8) pointerStart.moved = true;
+      if (pointerStart.moved && mascotImage) mascotImage.style.translate = `${Math.max(-30, Math.min(30, dx * 0.3))}px 0`;
+    });
+    mascot.addEventListener('pointerup', (event) => {
+      if (!pointerStart || pointerStart.id !== event.pointerId) return;
+      const dx = event.clientX - pointerStart.x;
+      const dy = event.clientY - pointerStart.y;
+      const moved = pointerStart.moved && Math.abs(dx) > 48 && Math.abs(dx) > Math.abs(dy);
+      pointerStart = null;
+      if (mascotImage) mascotImage.style.translate = '';
+      if (!moved) return;
+      suppressClickUntil = Date.now() + 500;
+      const pets = loadPetProfiles();
+      const assistantPets = selectedHomeAssistantPets(pets);
+      if (assistantPets.length < 2) return;
+      const currentId = selectedHomeAssistantPet(pets)?.id;
+      const currentIndex = Math.max(0, assistantPets.findIndex((pet) => String(pet.id) === String(currentId)));
+      const nextIndex = Math.max(0, Math.min(assistantPets.length - 1, currentIndex + (dx < 0 ? 1 : -1)));
+      if (nextIndex === currentIndex) return;
+      const nextPet = assistantPets[nextIndex];
+      if (mascotImage) mascotImage.classList.add('is-switching-pet');
+      window.setTimeout(() => {
+        updateAssistantDisplay(nextPet, pets, true, true);
+        if (mascotImage) {
+          mascotImage.classList.remove('is-switching-pet');
+          mascotImage.classList.add('has-switched-pet');
+          window.setTimeout(() => mascotImage.classList.remove('has-switched-pet'), 260);
+        }
+      }, 100);
+    });
+    mascot.addEventListener('pointercancel', () => {
+      pointerStart = null;
+      if (mascotImage) mascotImage.style.translate = '';
+    });
+    mascot.addEventListener('click', (event) => {
+      if (Date.now() < suppressClickUntil) { event.preventDefault(); return; }
+      const pets = loadPetProfiles();
+      const assistantPets = selectedHomeAssistantPets(pets);
+      if (assistantPets.length < 2) return;
+      event.preventDefault();
+      if (event.detail > 1) {
+        if (mascotClickTimer) window.clearTimeout(mascotClickTimer);
+        mascotClickTimer = null;
+        const currentPet = selectedHomeAssistantPet(pets);
+        if (currentPet) window.location.hash = `#pet-profile?id=${encodeURIComponent(currentPet.id)}`;
         return;
       }
-      savePets(updatedPets);
-      renderPets();
+      if (mascotClickTimer) {
+        window.clearTimeout(mascotClickTimer);
+        mascotClickTimer = null;
+        const currentPet = selectedHomeAssistantPet(pets);
+        if (currentPet) window.location.hash = `#pet-profile?id=${encodeURIComponent(currentPet.id)}`;
+        return;
+      }
+      mascotClickTimer = window.setTimeout(() => {
+        mascotClickTimer = null;
+        const latestPets = loadPetProfiles();
+        const enabledPets = selectedHomeAssistantPets(latestPets);
+        if (enabledPets.length < 2) return;
+        const currentId = selectedHomeAssistantPet(latestPets)?.id;
+        const currentIndex = Math.max(0, enabledPets.findIndex((pet) => String(pet.id) === String(currentId)));
+        const nextPet = enabledPets[(currentIndex + 1) % enabledPets.length];
+        if (mascotImage) mascotImage.classList.add('is-switching-pet');
+        window.setTimeout(() => {
+          updateAssistantDisplay(nextPet, latestPets, true, true);
+          if (mascotImage) {
+            mascotImage.classList.remove('is-switching-pet');
+            mascotImage.classList.add('has-switched-pet');
+            window.setTimeout(() => mascotImage.classList.remove('has-switched-pet'), 260);
+          }
+        }, 100);
+      }, 260);
+    });
+  }
+
+  const assistantBubble = document.querySelector('[data-assistant-bubble]');
+  const bubbleText = assistantBubble?.querySelector('[data-assistant-bubble-text]');
+  if (assistantBubble && bubbleText) {
+    const bubbleTimer = window.setInterval(() => {
+      if (!assistantBubble.isConnected) { window.clearInterval(bubbleTimer); return; }
+      let messages = [];
+      try { messages = JSON.parse(assistantBubble.dataset.messages || '[]'); } catch { messages = []; }
+      if (messages.length < 2) return;
+      bubbleText.classList.add('is-fading');
+      window.setTimeout(() => {
+        assistantMessageIndex = (assistantMessageIndex + 1) % messages.length;
+        bubbleText.textContent = messages[assistantMessageIndex];
+        bubbleText.classList.remove('is-fading');
+      }, 420);
+    }, 3600);
+  }
+
+}
+
+// Lets owners update a pet's profile picture or generated mascot from the Pet Profile overview.
+function setupPetOverviewMedia() {
+  const section = document.querySelector('[data-pet-overview-media]');
+  if (!section) return;
+  const petId = section.dataset.petId;
+  const pictureButton = section.querySelector('[data-open-profile-picture-menu]');
+  const pictureDialog = section.querySelector('[data-profile-picture-dialog]');
+  const useAvatarButton = section.querySelector('[data-use-created-avatar]');
+  const uploadButton = section.querySelector('[data-upload-profile-photo]');
+  const deletePictureButton = section.querySelector('[data-delete-profile-picture]');
+  const deletePictureConfirmDialog = section.querySelector('[data-delete-profile-picture-confirm]');
+  const confirmDeletePictureButton = section.querySelector('[data-confirm-delete-profile-picture]');
+  const closeButton = section.querySelector('[data-close-profile-picture-dialog]');
+  const photoInput = section.querySelector('[data-pet-overview-photo]');
+  const cropDialog = section.querySelector('[data-pet-profile-crop-dialog]');
+  const cropViewport = section.querySelector('[data-pet-profile-crop-viewport]');
+  const cropImage = section.querySelector('[data-pet-profile-crop-image]');
+  const cropZoom = section.querySelector('[data-pet-profile-crop-zoom]');
+  const cropFeedback = section.querySelector('[data-pet-profile-crop-feedback]');
+  const createButton = section.querySelector('[data-create-pet-avatar]');
+  const avatarInput = section.querySelector('[data-pet-avatar-source-photo]');
+  const preview = section.querySelector('[data-pet-profile-preview]');
+  const prompt = section.querySelector('.pet-photo-prompt');
+  const avatarResult = section.querySelector('[data-pet-avatar-result]');
+  const avatarPreview = section.querySelector('[data-pet-avatar-preview]');
+  const avatarResultLabel = section.querySelector('[data-pet-avatar-result-label]');
+  const feedback = section.querySelector('[data-pet-avatar-feedback]');
+  let cropObjectUrl = '';
+  let cropLayout = null;
+  let cropSourceImage = null;
+  section.querySelector('[data-open-pet-avatar]')?.addEventListener('click', () => pictureDialog?.showModal());
+  const updatePicture = async (changes) => {
+    const pets = loadPetProfiles();
+    const oldPet = pets.find((pet) => String(pet.id) === String(petId));
+    if (!oldPet) throw new Error('This pet profile could not be found.');
+    let updatedPet = { ...oldPet, ...changes };
+    const { data: authData } = await supabase.auth.getUser();
+    if (authData.user) {
+      updatedPet = await saveCloudPet(updatedPet, authData.user.id);
+      if (changes.photo === '' && oldPet.photoPath) {
+        const { error } = await supabase.storage.from('pet-records').remove([oldPet.photoPath]);
+        if (error) console.warn('Removed pet profile picture could not be deleted from storage:', error);
+      }
+    }
+    localStorage.setItem(petProfilesStorageKeyForCurrentUser(), JSON.stringify(pets.map((pet) => String(pet.id) === String(petId) ? updatedPet : pet)));
+    return updatedPet;
+  };
+  const showPicture = (pet, modeLabel = '') => {
+    const pictureUrl = petProfilePictureUrl(pet);
+    const pictureAlt = `${pet.name || 'Pet'} profile picture`;
+    preview.src = pictureUrl;
+    preview.alt = pictureAlt;
+    // The swipe wrapper now contains only the card; the photo editor sits beside it in the page.
+    const cardPicture = section.closest('[data-pet-profile-page]')?.querySelector('.pet-profile-card-avatar');
+    if (cardPicture) {
+      cardPicture.src = pictureUrl;
+      cardPicture.alt = pictureAlt;
+    }
+    pictureButton.classList.toggle('has-photo', Boolean(pet.photo || pet.profilePictureMode === 'avatar'));
+    prompt.textContent = modeLabel || (pet.photo ? 'Change Photo' : pet.profilePictureMode === 'avatar' ? 'Pet Avatar' : 'Add Photo');
+    deletePictureButton.hidden = !Boolean(pet.photo || pet.profilePictureMode === 'avatar');
+    if (pet.avatar) {
+      useAvatarButton.textContent = 'Use Pet Avatar';
+      useAvatarButton.disabled = false;
+      avatarPreview.src = pet.avatar;
+      avatarResult.hidden = false;
+      avatarResultLabel.textContent = 'Current pet avatar';
+    }
+  };
+
+  pictureButton?.addEventListener('click', () => pictureDialog?.showModal());
+  closeButton?.addEventListener('click', () => pictureDialog?.close());
+  uploadButton?.addEventListener('click', () => { pictureDialog?.close(); photoInput?.click(); });
+  deletePictureButton?.addEventListener('click', () => {
+    pictureDialog?.close();
+    deletePictureConfirmDialog?.showModal();
+  });
+  section.querySelector('[data-cancel-delete-profile-picture]')?.addEventListener('click', () => {
+    deletePictureConfirmDialog?.close();
+    pictureDialog?.showModal();
+  });
+  confirmDeletePictureButton?.addEventListener('click', async () => {
+    confirmDeletePictureButton.disabled = true;
+    confirmDeletePictureButton.textContent = 'Removing…';
+    try {
+      const updated = await updatePicture({ photo: '', photoPath: '', profilePictureMode: 'default' });
+      showPicture(updated);
+      feedback.textContent = 'Profile picture removed.';
+      feedback.classList.remove('is-error');
+      feedback.classList.add('is-success');
+      deletePictureConfirmDialog?.close();
     } catch (error) {
-      console.error('Pet photo could not be saved:', error);
-      showMessage('That photo could not be saved. Please try again.');
+      feedback.textContent = error.message || 'The profile picture could not be removed.';
+      feedback.classList.add('is-error');
+      deletePictureConfirmDialog?.close();
+      pictureDialog?.showModal();
+    } finally {
+      confirmDeletePictureButton.disabled = false;
+      confirmDeletePictureButton.textContent = 'Yes, Delete';
     }
   });
+  const updateCropImage = () => {
+    if (!cropLayout) return;
+    cropLayout.left = Math.min(0, Math.max(cropLayout.size - cropLayout.width, cropLayout.left));
+    cropLayout.top = Math.min(0, Math.max(cropLayout.size - cropLayout.height, cropLayout.top));
+    cropImage.style.width = `${cropLayout.width}px`;
+    cropImage.style.height = `${cropLayout.height}px`;
+    cropImage.style.left = `${cropLayout.left}px`;
+    cropImage.style.top = `${cropLayout.top}px`;
+  };
+  const openCropper = async (file) => {
+    if (!file.type.startsWith('image/')) throw new Error('Choose an image file.');
+    cropObjectUrl = URL.createObjectURL(file);
+    cropImage.src = cropObjectUrl;
+    await cropImage.decode();
+    cropSourceImage = cropImage;
+    cropDialog.showModal();
+    await new Promise((resolve) => requestAnimationFrame(resolve));
+    const size = cropViewport.getBoundingClientRect().width || Math.min(window.innerWidth * 0.72, 300);
+    const scale = Math.max(size / cropImage.naturalWidth, size / cropImage.naturalHeight);
+    cropLayout = { size, baseWidth: cropImage.naturalWidth * scale, baseHeight: cropImage.naturalHeight * scale };
+    cropLayout.width = cropLayout.baseWidth;
+    cropLayout.height = cropLayout.baseHeight;
+    cropLayout.left = (size - cropLayout.width) / 2;
+    cropLayout.top = (size - cropLayout.height) / 2;
+    cropZoom.value = '1';
+    updateCropImage();
+  };
+  photoInput?.addEventListener('change', async () => {
+    const file = photoInput.files?.[0];
+    if (!file) return;
+    try {
+      await openCropper(file);
+      feedback.textContent = '';
+      feedback.classList.remove('is-error', 'is-success');
+      cropFeedback.textContent = '';
+    } catch (error) {
+      if (cropDialog?.open) cropDialog.close();
+      feedback.textContent = error.message || 'That photo could not be loaded.';
+      feedback.classList.add('is-error');
+    }
+  });
+  cropZoom?.addEventListener('input', () => {
+    if (!cropLayout) return;
+    const centerX = cropLayout.left + cropLayout.width / 2;
+    const centerY = cropLayout.top + cropLayout.height / 2;
+    const zoom = Number(cropZoom.value);
+    cropLayout.width = cropLayout.baseWidth * zoom;
+    cropLayout.height = cropLayout.baseHeight * zoom;
+    cropLayout.left = centerX - cropLayout.width / 2;
+    cropLayout.top = centerY - cropLayout.height / 2;
+    updateCropImage();
+  });
+  cropViewport?.addEventListener('pointerdown', (event) => {
+    if (!cropLayout) return;
+    cropViewport.setPointerCapture(event.pointerId);
+    cropViewport.dataset.dragX = String(event.clientX);
+    cropViewport.dataset.dragY = String(event.clientY);
+  });
+  cropViewport?.addEventListener('pointermove', (event) => {
+    if (!cropLayout || !cropViewport.hasPointerCapture(event.pointerId)) return;
+    cropLayout.left += event.clientX - Number(cropViewport.dataset.dragX);
+    cropLayout.top += event.clientY - Number(cropViewport.dataset.dragY);
+    cropViewport.dataset.dragX = String(event.clientX);
+    cropViewport.dataset.dragY = String(event.clientY);
+    updateCropImage();
+  });
+  cropViewport?.addEventListener('keydown', (event) => {
+    if (!cropLayout) return;
+    const step = event.shiftKey ? 10 : 2;
+    if (event.key === 'ArrowLeft') cropLayout.left -= step;
+    else if (event.key === 'ArrowRight') cropLayout.left += step;
+    else if (event.key === 'ArrowUp') cropLayout.top -= step;
+    else if (event.key === 'ArrowDown') cropLayout.top += step;
+    else return;
+    event.preventDefault();
+    updateCropImage();
+  });
+  section.querySelector('[data-pet-profile-cancel-crop]')?.addEventListener('click', () => cropDialog?.close());
+  section.querySelector('[data-pet-profile-use-crop]')?.addEventListener('click', async () => {
+    if (!cropSourceImage || !cropLayout) return;
+    const scale = cropLayout.width / cropSourceImage.naturalWidth;
+    const canvas = document.createElement('canvas');
+    canvas.width = canvas.height = 512;
+    canvas.getContext('2d').drawImage(cropSourceImage, -cropLayout.left / scale, -cropLayout.top / scale, cropLayout.size / scale, cropLayout.size / scale, 0, 0, 512, 512);
+    const photo = canvas.toDataURL('image/jpeg', 0.88);
+    const useButton = section.querySelector('[data-pet-profile-use-crop]');
+    useButton.disabled = true;
+    feedback.textContent = 'Saving profile picture…';
+    cropFeedback.textContent = 'Saving profile picture…';
+    feedback.classList.remove('is-error', 'is-success');
+    try {
+      const updated = await updatePicture({ photo, profilePictureMode: 'photo' });
+      showPicture(updated);
+      feedback.textContent = 'Profile picture updated.';
+      feedback.classList.add('is-success');
+      cropFeedback.textContent = '';
+      cropDialog.close();
+    } catch (error) {
+      feedback.textContent = error.message || 'The profile picture could not be saved.';
+      feedback.classList.add('is-error');
+      cropFeedback.textContent = error.message || 'The profile picture could not be saved.';
+    } finally { useButton.disabled = false; }
+  });
+  cropDialog?.addEventListener('close', () => {
+    cropSourceImage = null;
+    cropImage?.removeAttribute('src');
+    if (cropObjectUrl) URL.revokeObjectURL(cropObjectUrl);
+    cropObjectUrl = '';
+    cropLayout = null;
+    if (photoInput) photoInput.value = '';
+  });
+  useAvatarButton?.addEventListener('click', async () => {
+    const pet = loadPetProfiles().find((item) => String(item.id) === String(petId));
+    if (!pet?.avatar) { pictureDialog?.close(); createButton?.click(); return; }
+    try {
+      const updated = await updatePicture({ profilePictureMode: 'avatar' });
+      showPicture(updated, 'Pet Avatar');
+      pictureDialog?.close();
+    } catch (error) {
+      feedback.textContent = error.message || 'The pet avatar could not be selected.';
+      feedback.classList.add('is-error');
+    }
+  });
+  createButton?.addEventListener('click', () => avatarInput?.click());
+  avatarInput?.addEventListener('change', async () => {
+    const file = avatarInput.files?.[0];
+    if (!file) return;
+    createButton.disabled = true;
+    createButton.textContent = 'Creating your avatar…';
+    feedback.textContent = 'Checking for a dog face, then creating a Furgo-style avatar. This may take a little while.';
+    feedback.classList.remove('is-error', 'is-success');
+    try {
+      const { data: authData, error: authError } = await supabase.auth.getUser();
+      if (authError || !authData.user) throw new Error('Sign in to create and save your pet avatar.');
+      const [photo, styleReference] = await Promise.all([
+        petPhotoDataUrl(file),
+        petAvatarReferenceDataUrl('Image/Pet%20Assistant%20Library/optimized/Furgo%20Assistant.png', { maxSide: 1024, format: 'image/png' }),
+      ]);
+      const { data, error } = await supabase.functions.invoke('pet-avatar-create', { body: { photo, style_reference: styleReference } });
+      if (error) {
+        let detail = data?.error || '';
+        try { detail ||= (await error.context?.json())?.error || ''; } catch { /* Use the function's message. */ }
+        throw new Error(detail || error.message || 'Avatar creation is not available yet.');
+      }
+      if (!data?.avatar) throw new Error(data?.error || 'The avatar could not be created. Please try again.');
+      const currentPet = loadPetProfiles().find((item) => String(item.id) === String(petId));
+      const currentAvatars = Array.isArray(currentPet?.avatars) ? currentPet.avatars : (currentPet?.avatar ? [currentPet.avatar] : []);
+      const avatarUrls = currentAvatars.map((item) => typeof item === 'string' ? item : item?.url).filter(Boolean);
+      const createdAvatars = [...currentAvatars];
+      if (!avatarUrls.includes(data.avatar)) createdAvatars.push(data.avatar);
+      const updated = await updatePicture({ avatar: data.avatar, avatars: createdAvatars, activeAvatarIndex: createdAvatars.length - 1 });
+      showPicture(updated);
+      useAvatarButton.textContent = 'Use Pet Avatar';
+      avatarResult.hidden = false;
+      avatarResultLabel.textContent = 'Saved pet avatar';
+      feedback.textContent = 'Avatar created and saved. It is ready for the AI Pet Assistant mascot.';
+      feedback.classList.add('is-success');
+    } catch (error) {
+      const message = error.message || 'Avatar creation failed. Please try again.';
+      feedback.textContent = /dog_not_detected|no dog/i.test(message)
+        ? 'No dog detected. Upload a clear photo showing your dog’s face and try again.'
+        : message;
+      feedback.classList.add('is-error');
+      feedback.classList.remove('is-success');
+    } finally {
+      createButton.disabled = false;
+      createButton.textContent = 'Create your pet avatar';
+      avatarInput.value = '';
+    }
+  });
+}
 
+// Previews selected avatars and saves the choice for this pet's home assistant.
+function setupPetAvatarPage() {
+  const page = document.querySelector('[data-pet-avatar-page]');
+  if (!page) return;
+  const feedback = page.querySelector('[data-pet-avatar-feedback]');
+  const preview = page.querySelector('[data-pet-avatar-current-preview]');
+  page.querySelectorAll('input[name="pet-avatar-choice"]').forEach((input) => input.addEventListener('change', () => {
+    if (!input.checked || !preview) return;
+    const card = input.closest('.pet-avatar-choice');
+    const image = card?.querySelector('img');
+    const label = card?.querySelector('span')?.textContent?.trim() || 'Pet Assistant';
+    if (image) preview.src = image.src;
+    preview.alt = `${label} avatar preview`;
+    if (feedback) feedback.textContent = 'Preview updated. Save this avatar to apply it.';
+  }));
+  const button = page.querySelector('[data-save-pet-avatar]');
+  button?.addEventListener('click', async () => {
+    const choice = page.querySelector('input[name="pet-avatar-choice"]:checked')?.value || 'default';
+    const pets = loadPetProfiles();
+    const oldPet = pets.find((pet) => String(pet.id) === String(page.dataset.petId));
+    if (!oldPet) return;
+    const avatarList = petCustomAvatarLibrary(pets);
+    let avatar = '';
+    let avatarPath = '';
+    let activeAvatarIndex = null;
+    if (choice.startsWith('custom:')) {
+      activeAvatarIndex = Number(choice.slice('custom:'.length));
+      const selectedAvatar = avatarList[activeAvatarIndex];
+      avatar = selectedAvatar?.url || '';
+      avatarPath = selectedAvatar?.path || (avatar === oldPet.avatar ? oldPet.avatarPath || '' : '');
+    } else if (choice === 'free:furgo') avatar = defaultPetAvatarPath;
+    else if (choice.startsWith('free:')) avatar = freePetAssistantAvatars.find((item) => item.id === choice.slice('free:'.length))?.url || defaultPetAvatarPath;
+    if (choice.startsWith('free:')) avatarPath = `builtin:${avatar}`;
+    const changes = { avatar, avatarPath, activeAvatarIndex };
+    button.disabled = true;
+    if (feedback) feedback.textContent = 'Saving your choice…';
+    try {
+      let updatedPet = { ...oldPet, ...changes };
+      const { data: authData } = await supabase.auth.getUser();
+      if (authData.user) updatedPet = await saveCloudPet(updatedPet, authData.user.id);
+      localStorage.setItem(petProfilesStorageKeyForCurrentUser(), JSON.stringify(pets.map((pet) => String(pet.id) === String(oldPet.id) ? updatedPet : pet)));
+      const selected = selectedPetAssistantIds() || (selectedHomeAssistantPet(pets) ? [selectedHomeAssistantPet(pets).id] : []);
+      savePetAssistantIds([...selected, String(oldPet.id)]);
+      saveSelectedPetAssistantId(oldPet.id);
+      if (feedback) feedback.textContent = `${oldPet.name}’s avatar is saved and used by the home Pet Assistant.`;
+    } catch (error) {
+      if (feedback) feedback.textContent = error.message || 'This avatar could not be saved.';
+    } finally { button.disabled = false; }
+  });
+}
+
+// Lets customers swipe across the current Pet Profile to visit the previous or next pet.
+function setupPetProfileDelete() {
+  const page = document.querySelector('[data-pet-profile-page]');
+  const trigger = page?.querySelector('[data-open-pet-profile-delete]');
+  const dialog = page?.querySelector('[data-pet-profile-delete-dialog]');
+  if (!page || !trigger || !dialog) return;
+  const feedback = page.querySelector('[data-pet-profile-delete-feedback]');
+  trigger.addEventListener('click', () => dialog.showModal());
+  page.querySelector('[data-cancel-pet-profile-delete]')?.addEventListener('click', () => dialog.close());
+  dialog.addEventListener('click', (event) => {
+    if (event.target === dialog) dialog.close();
+  });
+  page.querySelector('[data-confirm-pet-profile-delete]')?.addEventListener('click', async (event) => {
+    const confirmButton = event.currentTarget;
+    const petId = trigger.dataset.deletePetId;
+    confirmButton.disabled = true;
+    try {
+      const { data: authData } = await supabase.auth.getUser();
+      if (authData.user) await deleteCloudPet(petId, authData.user.id);
+      const storedPets = JSON.parse(localStorage.getItem(petProfilesStorageKeyForCurrentUser()) || '[]');
+      const currentPets = Array.isArray(storedPets) ? storedPets : [];
+      const remainingPets = currentPets.filter((pet) => String(pet.id) !== String(petId));
+      const selectedAssistantId = String(selectedHomeAssistantPet(currentPets)?.id || '');
+      localStorage.setItem(petProfilesStorageKeyForCurrentUser(), JSON.stringify(remainingPets));
+      deletePetCareData(petId);
+      const enabledIds = (selectedPetAssistantIds() || []).filter((id) => String(id) !== String(petId));
+      savePetAssistantIds(enabledIds);
+      if (selectedAssistantId === String(petId)) {
+        saveSelectedPetAssistantId(enabledIds[0] || '');
+      }
+      dialog.close();
+      window.location.hash = '#home';
+    } catch (error) {
+      if (feedback) feedback.textContent = `Could not delete this pet profile: ${friendlyAuthError(error)}`;
+      confirmButton.disabled = false;
+    }
+  });
+}
+
+function setupPetProfileSwipe() {
+  const page = document.querySelector('[data-pet-profile-page]');
+  if (!page) return;
+  const placeSwapArrows = () => {
+    if (!page.isConnected) {
+      window.removeEventListener('scroll', placeSwapArrows);
+      window.removeEventListener('resize', placeSwapArrows);
+      return;
+    }
+    const viewport = page.querySelector('[data-pet-profile-swipe-viewport]');
+    if (!viewport) return;
+    const bounds = viewport.getBoundingClientRect();
+    page.querySelectorAll('.pet-profile-swap-arrow').forEach((arrow) => {
+      if (arrow.classList.contains('is-previous')) {
+        arrow.style.left = `${Math.max(8, bounds.left + 10)}px`;
+        arrow.style.right = 'auto';
+      } else {
+        arrow.style.right = `${Math.max(8, window.innerWidth - bounds.right + 10)}px`;
+        arrow.style.left = 'auto';
+      }
+    });
+  };
+  placeSwapArrows();
+  window.addEventListener('scroll', placeSwapArrows, { passive: true });
+  window.addEventListener('resize', placeSwapArrows);
+  let startPoint = null;
+  let activeSwipe = null;
+  let isChangingPet = false;
+  const getTarget = (direction) => {
+    const pets = loadPetProfiles();
+    const routeParams = new URLSearchParams(window.location.hash.split('?')[1] || '');
+    if (routeParams.get('mode') === 'add-card') {
+      const previousPet = direction < 0 ? pets[pets.length - 1] : null;
+      return previousPet ? { destination: `#pet-profile?id=${encodeURIComponent(previousPet.id)}`, nextPet: previousPet } : null;
+    }
+    const currentId = routeParams.get('id');
+    const currentIndex = pets.findIndex((pet) => String(pet.id) === String(currentId));
+    if (currentIndex < 0) return null;
+    let destination = '';
+    let nextPet = null;
+    if (direction > 0) {
+      nextPet = pets[currentIndex + 1] || null;
+      destination = nextPet
+        ? `#pet-profile?id=${encodeURIComponent(nextPet.id)}`
+        : '#pet-profile?mode=add-card';
+    } else if (currentIndex > 0) {
+      nextPet = pets[currentIndex - 1];
+      destination = `#pet-profile?id=${encodeURIComponent(nextPet.id)}`;
+    }
+    return destination ? { destination, nextPet } : null;
+  };
+  const prepareSwipe = (direction) => {
+    const target = getTarget(direction);
+    if (!target) return null;
+    const viewport = page.querySelector('[data-pet-profile-swipe-viewport]');
+    const track = viewport?.querySelector('[data-pet-profile-swipe-track]');
+    const currentPanel = page.querySelector('[data-pet-profile-transition-content]');
+    if (!viewport || !track || !currentPanel) return null;
+
+    let nextPanel;
+    if (target.nextPet) {
+      const template = document.createElement('template');
+      template.innerHTML = petProfileOverviewPage(target.nextPet.id);
+      nextPanel = template.content.querySelector('[data-pet-profile-transition-content]');
+      if (!nextPanel) return null;
+    } else {
+      const template = document.createElement('template');
+      template.innerHTML = petProfileAddCardPage();
+      nextPanel = template.content.querySelector('[data-pet-profile-transition-content]');
+      if (!nextPanel) return null;
+    }
+    const gap = parseFloat(getComputedStyle(track).columnGap || getComputedStyle(track).gap) || 16;
+    const width = viewport.getBoundingClientRect().width || page.clientWidth;
+    const travel = width + gap;
+    track.style.width = `calc(200% + ${gap}px)`;
+    track.style.gap = `${gap}px`;
+    currentPanel.style.flex = `0 0 calc(50% - ${gap / 2}px)`;
+    currentPanel.style.minWidth = '0';
+    nextPanel.style.flex = `0 0 calc(50% - ${gap / 2}px)`;
+    nextPanel.style.minWidth = '0';
+    if (direction > 0) track.append(nextPanel);
+    else track.prepend(nextPanel);
+    nextPanel.querySelectorAll('.pet-profile-swap-arrow').forEach((arrow) => { arrow.style.visibility = 'hidden'; });
+    const startX = direction > 0 ? 0 : -travel;
+    track.style.transition = 'none';
+    track.style.transform = `translateX(${startX}px)`;
+    track.getBoundingClientRect();
+    return { direction, destination: target.destination, viewport, track, currentPanel, nextPanel, width, travel, startX, deltaX: 0 };
+  };
+  const resetSwipe = (swipe) => {
+    if (!swipe) return;
+    swipe.nextPanel.remove();
+    swipe.track.style.width = '';
+    swipe.track.style.gap = '';
+    swipe.track.style.transform = '';
+    swipe.track.style.transition = '';
+    swipe.currentPanel.style.flex = '';
+    swipe.currentPanel.style.minWidth = '';
+    swipe.viewport.style.pointerEvents = '';
+  };
+  const animateTrack = (swipe, endX, onFinish) => {
+    const endTransform = `translateX(${endX}px)`;
+    if (typeof swipe.track.animate === 'function') {
+      const animation = swipe.track.animate(
+        [{ transform: swipe.track.style.transform }, { transform: endTransform }],
+        { duration: 220, easing: 'cubic-bezier(.22,.72,.24,1)', fill: 'forwards' },
+      );
+      animation.onfinish = onFinish;
+    } else {
+      swipe.track.style.transition = 'transform 220ms cubic-bezier(.22,.72,.24,1)';
+      swipe.track.style.transform = endTransform;
+      window.setTimeout(onFinish, 240);
+    }
+  };
+  const movePet = (direction) => {
+    if (isChangingPet) return;
+    const swipe = prepareSwipe(direction);
+    if (!swipe) return;
+    isChangingPet = true;
+    swipe.viewport.style.pointerEvents = 'none';
+    const endX = direction > 0 ? -swipe.travel : 0;
+    const finish = () => { window.location.hash = swipe.destination; };
+    animateTrack(swipe, endX, finish);
+  };
+  const finishFingerSwipe = (commit) => {
+    const swipe = activeSwipe;
+    activeSwipe = null;
+    if (!swipe) return;
+    const endX = commit ? (swipe.direction > 0 ? -swipe.travel : 0) : swipe.startX;
+    if (commit) {
+      isChangingPet = true;
+      swipe.viewport.style.pointerEvents = 'none';
+      animateTrack(swipe, endX, () => { window.location.hash = swipe.destination; });
+    } else {
+      animateTrack(swipe, endX, () => resetSwipe(swipe));
+    }
+  };
+  page.addEventListener('click', (event) => {
+    const nextButton = event.target.closest('[data-pet-profile-next]');
+    const previousButton = event.target.closest('[data-pet-profile-previous]');
+    if (!nextButton && !previousButton) return;
+    event.preventDefault();
+    movePet(nextButton ? 1 : -1);
+  });
+  page.addEventListener('touchstart', (event) => {
+    if (isChangingPet || event.target.closest('.bottom-nav, dialog, input, textarea, select')) { startPoint = null; return; }
+    const touch = event.changedTouches[0];
+    startPoint = touch ? { x: touch.clientX, y: touch.clientY, time: performance.now() } : null;
+  }, { passive: true });
+  page.addEventListener('touchmove', (event) => {
+    if (!startPoint || isChangingPet) return;
+    const touch = event.changedTouches[0];
+    if (!touch) return;
+    const deltaX = touch.clientX - startPoint.x;
+    const deltaY = touch.clientY - startPoint.y;
+    if (!activeSwipe) {
+      if (Math.abs(deltaX) < 8 || Math.abs(deltaX) < Math.abs(deltaY) * 1.15) return;
+      activeSwipe = prepareSwipe(deltaX < 0 ? 1 : -1);
+      if (!activeSwipe) return;
+    }
+    event.preventDefault();
+    activeSwipe.deltaX = deltaX;
+    const boundedDelta = activeSwipe.direction > 0
+      ? Math.max(-activeSwipe.travel, Math.min(0, deltaX))
+      : Math.max(0, Math.min(activeSwipe.travel, deltaX));
+    activeSwipe.track.style.transform = `translateX(${activeSwipe.startX + boundedDelta}px)`;
+  }, { passive: false });
+  page.addEventListener('touchend', (event) => {
+    if (!startPoint) return;
+    const touch = event.changedTouches[0];
+    const deltaX = touch ? touch.clientX - startPoint.x : 0;
+    const elapsed = performance.now() - startPoint.time;
+    startPoint = null;
+    if (!activeSwipe) return;
+    if (event.cancelable) event.preventDefault();
+    const passedDistance = Math.abs(deltaX) >= activeSwipe.width * 0.22;
+    const quickFlick = elapsed < 220 && Math.abs(deltaX) >= 48;
+    finishFingerSwipe(passedDistance || quickFlick);
+  }, { passive: false });
+  page.addEventListener('touchcancel', () => {
+    startPoint = null;
+    if (activeSwipe) finishFingerSwipe(false);
+  }, { passive: true });
 }
 
 // Saves a new or edited Pet Profile and its removable remark chips in browser storage.
@@ -635,33 +1393,14 @@ function setupPetProfileForm() {
   if (!form) return;
   const remarksList = form.querySelector('[data-remarks-list]');
   const remarkInput = form.querySelector('[data-remark-draft]');
-  const photoInput = form.querySelector('[data-pet-profile-photo]');
-  const cropDialog = form.querySelector('[data-photo-crop-dialog]');
-  const cropViewport = form.querySelector('[data-photo-crop-viewport]');
-  const cropImage = form.querySelector('[data-photo-crop-image]');
-  const cropZoom = form.querySelector('[data-photo-crop-zoom]');
-  const vaccinationInput = form.querySelector('[data-vaccination-upload]');
-  const vaccinationList = form.querySelector('[data-vaccination-list]');
   const breedInput = form.querySelector('[data-breed-input]');
   const breedListbox = form.querySelector('[data-breed-listbox]');
-  const photoPreview = form.querySelector('[data-pet-profile-preview]');
   const feedback = form.querySelector('.form-feedback');
-  const deleteDialog = form.querySelector('[data-pet-delete-dialog]');
   const petReturnContext = new URLSearchParams(window.location.hash.split('?')[1] || '').get('from') || 'home';
-  const petReturnTo = petReturnContext === 'profile' ? '#profile' : petReturnContext === 'grooming' ? '#grooming' : petReturnContext === 'hotel' ? '#hotel' : '#home';
+  const petReturnTo = petReturnContext === 'pet-profile' && form.dataset.petId ? `#pet-profile?id=${encodeURIComponent(form.dataset.petId)}` : petReturnContext === 'profile' ? '#profile' : petReturnContext === 'grooming' ? '#grooming' : petReturnContext === 'hotel' ? '#hotel' : '#home';
   const initialRemarks = [...remarksList.querySelectorAll('[data-remark-value]')].map((chip) => chip.dataset.remarkValue);
   let remarks = initialRemarks;
-  let uploadedPhoto = '';
-  let cropSourceImage = null;
-  let cropObjectUrl = '';
-  let cropLayout = null;
-  let vaccinationCards = (() => {
-    try {
-      const savedPets = JSON.parse(localStorage.getItem(petProfilesStorageKeyForCurrentUser()) || '[]');
-      const existingPet = savedPets.find((pet) => pet.id === form.dataset.petId);
-      return Array.isArray(existingPet?.vaccinationCards) ? existingPet.vaccinationCards : [];
-    } catch { return []; }
-  })();
+  let profilePictureMode = form.dataset.profilePictureMode || 'default';
   const birthMonth = form.querySelector('[data-birth-month]');
   const birthDay = form.querySelector('[data-birth-day]');
   const birthYear = form.querySelector('[data-birth-year]');
@@ -744,33 +1483,6 @@ function setupPetProfileForm() {
   birthYear.addEventListener('change', updateBirthDays);
   birthDay.addEventListener('change', syncBirthDate);
 
-  // Keeps the vaccination document list current and lets an owner remove an uploaded card.
-  const renderVaccinationCards = () => {
-    vaccinationList.replaceChildren();
-    if (!vaccinationCards.length) {
-      const empty = document.createElement('li');
-      empty.className = 'pet-vaccination-empty';
-      empty.textContent = 'No vaccination cards uploaded.';
-      vaccinationList.append(empty);
-      return;
-    }
-    vaccinationCards.forEach((card, index) => {
-      const row = document.createElement('li');
-      const link = document.createElement('a');
-      link.href = card.data;
-      link.target = '_blank';
-      link.rel = 'noopener';
-      link.textContent = card.name;
-      const removeButton = document.createElement('button');
-      removeButton.type = 'button';
-      removeButton.dataset.removeVaccinationCard = String(index);
-      removeButton.setAttribute('aria-label', `Remove ${card.name}`);
-      removeButton.textContent = '×';
-      row.append(link, removeButton);
-      vaccinationList.append(row);
-    });
-  };
-
   // Renders each remark with an X control that removes it before the profile is saved.
   const renderRemarks = () => {
     remarksList.replaceChildren();
@@ -806,193 +1518,6 @@ function setupPetProfileForm() {
     remarks.splice(Number(removeButton.dataset.removeRemark), 1);
     renderRemarks();
   });
-  vaccinationList.addEventListener('click', (event) => {
-    const removeButton = event.target.closest('[data-remove-vaccination-card]');
-    if (!removeButton) return;
-    vaccinationCards.splice(Number(removeButton.dataset.removeVaccinationCard), 1);
-    renderVaccinationCards();
-  });
-  vaccinationInput.addEventListener('change', async () => {
-    const files = Array.from(vaccinationInput.files || []);
-    if (vaccinationCards.length + files.length > 3) {
-      feedback.textContent = 'You can add up to 3 vaccination card files.';
-      feedback.classList.add('visible');
-      vaccinationInput.value = '';
-      return;
-    }
-    const existingDocumentBytes = vaccinationCards.reduce((total, card) => total + Math.ceil((card.data?.length || 0) * 0.75), 0);
-    if (existingDocumentBytes + files.reduce((total, file) => total + file.size, 0) > 2.5 * 1024 * 1024) {
-      feedback.textContent = 'Vaccination card uploads have a combined 2.5 MB limit. Remove a file or choose smaller files.';
-      feedback.classList.add('visible');
-      vaccinationInput.value = '';
-      return;
-    }
-    try {
-      for (const file of files) {
-        if (file.size > 1.5 * 1024 * 1024) throw new Error(`${file.name} is larger than 1.5 MB.`);
-        const isImage = file.type.startsWith('image/');
-        const isPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
-        if (!isImage && !isPdf) throw new Error(`${file.name} is not an image or PDF.`);
-        const data = isImage ? await petPhotoDataUrl(file) : await new Promise((resolve, reject) => {
-          const reader = new FileReader();
-          reader.onload = () => resolve(reader.result);
-          reader.onerror = () => reject(new Error(`Could not read ${file.name}.`));
-          reader.readAsDataURL(file);
-        });
-        vaccinationCards.push({ name: file.name, type: isImage ? 'image/jpeg' : 'application/pdf', data });
-      }
-      feedback.textContent = '';
-      feedback.classList.remove('visible');
-      renderVaccinationCards();
-    } catch (error) {
-      feedback.textContent = error.message || 'That file could not be uploaded.';
-      feedback.classList.add('visible');
-      renderVaccinationCards();
-    } finally {
-      vaccinationInput.value = '';
-    }
-  });
-  // Opens a circular cropper so owners can reposition and zoom their pet photo before saving it.
-  const clampCropPosition = () => {
-    if (!cropLayout) return;
-    cropLayout.left = Math.min(0, Math.max(cropLayout.size - cropLayout.width, cropLayout.left));
-    cropLayout.top = Math.min(0, Math.max(cropLayout.size - cropLayout.height, cropLayout.top));
-    cropImage.style.width = `${cropLayout.width}px`;
-    cropImage.style.height = `${cropLayout.height}px`;
-    cropImage.style.left = `${cropLayout.left}px`;
-    cropImage.style.top = `${cropLayout.top}px`;
-  };
-  const closeCropper = () => {
-    cropSourceImage = null;
-    cropImage.removeAttribute('src');
-    photoInput.value = '';
-    if (cropObjectUrl) URL.revokeObjectURL(cropObjectUrl);
-    cropObjectUrl = '';
-    cropLayout = null;
-  };
-  const openCropper = async (file) => {
-    if (!file.type.startsWith('image/')) throw new Error('Choose an image file.');
-    closeCropper();
-    cropObjectUrl = URL.createObjectURL(file);
-    cropImage.src = cropObjectUrl;
-    await cropImage.decode();
-    cropSourceImage = cropImage;
-    cropDialog.showModal();
-    await new Promise((resolve) => requestAnimationFrame(resolve));
-    const size = cropViewport.getBoundingClientRect().width || Math.min(window.innerWidth * 0.72, 300);
-    if (!size) throw new Error('The photo adjustment area could not be opened. Please try again.');
-    const scale = Math.max(size / cropImage.naturalWidth, size / cropImage.naturalHeight);
-    cropLayout = {
-      size,
-      baseWidth: cropImage.naturalWidth * scale,
-      baseHeight: cropImage.naturalHeight * scale,
-      width: cropImage.naturalWidth * scale,
-      height: cropImage.naturalHeight * scale,
-    };
-    cropLayout.left = (size - cropLayout.width) / 2;
-    cropLayout.top = (size - cropLayout.height) / 2;
-    cropZoom.value = '1';
-    clampCropPosition();
-  };
-  photoInput.addEventListener('change', async () => {
-    const file = photoInput.files?.[0];
-    if (!file) return;
-    try {
-      await openCropper(file);
-      feedback.textContent = '';
-      feedback.classList.remove('visible');
-    } catch (error) {
-      if (cropDialog.open) cropDialog.close();
-      feedback.textContent = error.message || 'That photo could not be loaded. Please choose another image.';
-      feedback.classList.add('visible');
-      photoInput.value = '';
-    }
-  });
-  cropZoom.addEventListener('input', () => {
-    if (!cropLayout) return;
-    const centerX = cropLayout.left + cropLayout.width / 2;
-    const centerY = cropLayout.top + cropLayout.height / 2;
-    const zoom = Number(cropZoom.value);
-    cropLayout.width = cropLayout.baseWidth * zoom;
-    cropLayout.height = cropLayout.baseHeight * zoom;
-    cropLayout.left = centerX - cropLayout.width / 2;
-    cropLayout.top = centerY - cropLayout.height / 2;
-    clampCropPosition();
-  });
-  cropViewport.addEventListener('pointerdown', (event) => {
-    if (!cropLayout) return;
-    cropViewport.setPointerCapture(event.pointerId);
-    cropViewport.dataset.dragX = String(event.clientX);
-    cropViewport.dataset.dragY = String(event.clientY);
-  });
-  cropViewport.addEventListener('pointermove', (event) => {
-    if (!cropLayout || !cropViewport.hasPointerCapture(event.pointerId)) return;
-    const previousX = Number(cropViewport.dataset.dragX);
-    const previousY = Number(cropViewport.dataset.dragY);
-    cropLayout.left += event.clientX - previousX;
-    cropLayout.top += event.clientY - previousY;
-    cropViewport.dataset.dragX = String(event.clientX);
-    cropViewport.dataset.dragY = String(event.clientY);
-    clampCropPosition();
-  });
-  cropViewport.addEventListener('keydown', (event) => {
-    if (!cropLayout) return;
-    const step = event.shiftKey ? 10 : 2;
-    if (event.key === 'ArrowLeft') cropLayout.left -= step;
-    else if (event.key === 'ArrowRight') cropLayout.left += step;
-    else if (event.key === 'ArrowUp') cropLayout.top -= step;
-    else if (event.key === 'ArrowDown') cropLayout.top += step;
-    else return;
-    event.preventDefault();
-    clampCropPosition();
-  });
-  form.querySelector('[data-cancel-photo-crop]')?.addEventListener('click', () => cropDialog.close());
-  form.querySelector('[data-use-photo-crop]')?.addEventListener('click', () => {
-    if (!cropSourceImage || !cropLayout) return;
-    try {
-      const scale = cropLayout.width / cropSourceImage.naturalWidth;
-      const sourceX = -cropLayout.left / scale;
-      const sourceY = -cropLayout.top / scale;
-      const sourceSize = cropLayout.size / scale;
-      const canvas = document.createElement('canvas');
-      canvas.width = 512;
-      canvas.height = 512;
-      canvas.getContext('2d').drawImage(cropSourceImage, sourceX, sourceY, sourceSize, sourceSize, 0, 0, 512, 512);
-      uploadedPhoto = canvas.toDataURL('image/jpeg', 0.88);
-      photoPreview.src = uploadedPhoto;
-      form.querySelector('.pet-profile-photo').classList.add('has-photo');
-      form.querySelector('.pet-photo-prompt').textContent = 'Change Photo';
-      photoInput.value = '';
-      cropDialog.close();
-    } catch {
-      feedback.textContent = 'That photo could not be cropped. Please choose another image.';
-      feedback.classList.add('visible');
-    }
-  });
-  cropDialog.addEventListener('close', closeCropper);
-  form.querySelector('[data-open-delete-confirm]')?.addEventListener('click', () => deleteDialog?.showModal());
-  form.querySelector('[data-cancel-delete]')?.addEventListener('click', () => deleteDialog?.close());
-  form.querySelector('[data-confirm-delete]')?.addEventListener('click', async () => {
-    const petId = form.dataset.petId;
-    const { data: authData } = await supabase.auth.getUser();
-    if (authData.user) {
-      try {
-        await deleteCloudPet(petId, authData.user.id);
-      } catch (error) {
-        feedback.textContent = `Could not delete this pet profile: ${friendlyAuthError(error)}`;
-        feedback.classList.add('visible');
-        return;
-      }
-    }
-    let savedPets = [];
-    try {
-      const storedPets = JSON.parse(localStorage.getItem(petProfilesStorageKeyForCurrentUser()) || '[]');
-      savedPets = Array.isArray(storedPets) ? storedPets : [];
-    } catch { savedPets = []; }
-    localStorage.setItem(petProfilesStorageKeyForCurrentUser(), JSON.stringify(savedPets.filter((pet) => pet.id !== petId)));
-    deleteDialog.close();
-    window.location.hash = petReturnTo;
-  });
   form.addEventListener('submit', async (event) => {
     event.preventDefault();
     if (!form.reportValidity()) return;
@@ -1005,8 +1530,10 @@ function setupPetProfileForm() {
     }
     const savedPets = loadPetProfiles();
     const currentId = form.dataset.petId;
-    const petId = currentId && /^[0-9a-f]{8}-[0-9a-f-]{27}$/i.test(currentId) ? currentId : crypto.randomUUID();
-    const existingPet = savedPets.find((pet) => pet.id === petId) || {};
+    const existingPet = savedPets.find((pet) => pet.id === currentId) || {};
+    const { data: authData } = await supabase.auth.getUser();
+    const currentIdIsUuid = /^[0-9a-f]{8}-[0-9a-f-]{27}$/i.test(currentId || '');
+    const petId = currentId && (!authData.user || currentIdIsUuid) ? currentId : crypto.randomUUID();
     const pet = {
       ...existingPet,
       id: petId,
@@ -1020,13 +1547,15 @@ function setupPetProfileForm() {
       neutered: form.elements.neutered.value,
       weight: form.elements.weight.value,
       colour: existingPet.colour || '',
-      photo: uploadedPhoto || existingPet.photo || '',
+      photo: existingPet.photo || '',
+      avatar: existingPet.avatar || '',
+      avatarPath: existingPet.avatarPath || '',
+      profilePictureMode,
       photoPath: existingPet.photoPath || '',
-      vaccinationCards,
+      vaccinationCards: existingPet.vaccinationCards || [],
       vaccinationValidUntil: existingPet.vaccinationValidUntil || '',
       remarks,
     };
-    const { data: authData } = await supabase.auth.getUser();
     if (authData.user) {
       try {
         const savedPet = await saveCloudPet(pet, authData.user.id);
@@ -1041,7 +1570,115 @@ function setupPetProfileForm() {
       const updatedPets = existingPet.id ? savedPets.map((item) => item.id === currentId ? pet : item) : [...savedPets, pet];
       localStorage.setItem(petProfilesStorageKeyForCurrentUser(), JSON.stringify(updatedPets));
     }
-    window.location.hash = petReturnTo;
+    window.location.hash = petReturnContext === 'pet-profile' ? `#pet-profile?id=${encodeURIComponent(petId)}` : petReturnTo;
+  });
+}
+
+// Saves a pet's vaccination date and uploaded cards from its dedicated Vaccination page.
+function setupPetVaccinationPage() {
+  const form = document.querySelector('[data-pet-vaccination-form]');
+  if (!form) return;
+  const petId = form.dataset.petId;
+  const input = form.querySelector('[data-vaccination-upload]');
+  const list = form.querySelector('[data-vaccination-list]');
+  const feedback = form.querySelector('.form-feedback');
+  const pet = loadPetProfiles().find((item) => String(item.id) === String(petId));
+  let cards = Array.isArray(pet?.vaccinationCards) ? [...pet.vaccinationCards] : [];
+  const showFeedback = (message, isError = false) => {
+    feedback.textContent = message;
+    feedback.classList.toggle('visible', Boolean(message));
+    feedback.classList.toggle('is-error', isError);
+  };
+  const renderCards = () => {
+    list.replaceChildren();
+    if (!cards.length) {
+      const empty = document.createElement('li');
+      empty.className = 'pet-vaccination-empty';
+      empty.textContent = 'No vaccination cards uploaded.';
+      list.append(empty);
+      return;
+    }
+    cards.forEach((card, index) => {
+      const row = document.createElement('li');
+      const link = document.createElement('a');
+      link.href = card.data || '#';
+      link.target = '_blank';
+      link.rel = 'noopener';
+      link.textContent = card.name || `Vaccination card ${index + 1}`;
+      const remove = document.createElement('button');
+      remove.type = 'button';
+      remove.dataset.removeVaccinationCard = String(index);
+      remove.setAttribute('aria-label', `Remove ${card.name || 'vaccination card'}`);
+      remove.textContent = '×';
+      row.append(link, remove);
+      list.append(row);
+    });
+  };
+  renderCards();
+  list.addEventListener('click', (event) => {
+    const remove = event.target.closest('[data-remove-vaccination-card]');
+    if (!remove) return;
+    cards.splice(Number(remove.dataset.removeVaccinationCard), 1);
+    renderCards();
+    showFeedback('Card removed. Save Vaccination Details to confirm the change.');
+  });
+  input.addEventListener('change', async () => {
+    const files = Array.from(input.files || []);
+    const existingBytes = cards.reduce((total, card) => total + (card.data?.startsWith('data:') ? Math.ceil(card.data.length * 0.75) : 0), 0);
+    if (cards.length + files.length > 3) {
+      showFeedback('You can add up to 3 vaccination card files.', true);
+      input.value = '';
+      return;
+    }
+    if (existingBytes + files.reduce((total, file) => total + file.size, 0) > 2.5 * 1024 * 1024) {
+      showFeedback('Vaccination card uploads have a combined 2.5 MB limit. Remove a file or choose smaller files.', true);
+      input.value = '';
+      return;
+    }
+    try {
+      for (const file of files) {
+        if (file.size > 1.5 * 1024 * 1024) throw new Error(`${file.name} is larger than 1.5 MB.`);
+        const isImage = file.type.startsWith('image/');
+        const isPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
+        if (!isImage && !isPdf) throw new Error(`${file.name} is not an image or PDF.`);
+        const data = isImage ? await petPhotoDataUrl(file) : await new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(reader.result);
+          reader.onerror = () => reject(new Error(`Could not read ${file.name}.`));
+          reader.readAsDataURL(file);
+        });
+        cards.push({ name: file.name, type: isImage ? 'image/jpeg' : 'application/pdf', data });
+      }
+      showFeedback('Cards added. Save Vaccination Details to confirm the changes.');
+      renderCards();
+    } catch (error) {
+      showFeedback(error.message || 'That file could not be uploaded.', true);
+    } finally {
+      input.value = '';
+    }
+  });
+  form.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    if (!pet) { showFeedback('Pet profile not found.', true); return; }
+    const saveButton = form.querySelector('[type="submit"]');
+    saveButton.disabled = true;
+    showFeedback('Saving vaccination details…');
+    try {
+      const { data: authData } = await supabase.auth.getUser();
+      const updatedPet = { ...pet, vaccinationCards: cards, vaccinationValidUntil: form.elements.vaccinationValidUntil.value };
+      const savedPet = authData.user ? await saveCloudPet(updatedPet, authData.user.id) : updatedPet;
+      const savedPets = loadPetProfiles();
+      const updatedPets = savedPets.map((item) => String(item.id) === String(petId) ? savedPet : item);
+      localStorage.setItem(petProfilesStorageKeyForCurrentUser(), JSON.stringify(updatedPets));
+      savePetReminders(petId, { ...loadPetReminders(petId), vaccinationDate: updatedPet.vaccinationValidUntil });
+      cards = Array.isArray(savedPet.vaccinationCards) ? [...savedPet.vaccinationCards] : [];
+      renderCards();
+      showFeedback('Vaccination details saved.');
+    } catch (error) {
+      showFeedback(`Could not save vaccination details: ${friendlyAuthError(error)}`, true);
+    } finally {
+      saveButton.disabled = false;
+    }
   });
 }
 
@@ -1127,7 +1764,7 @@ function setupMarketplaceInteractions() {
     image.alt = `${name || 'Supplier'} profile photo`;
     image.src = supplier?.avatar_path
       ? supabase.storage.from('supplier-profile-photos').getPublicUrl(supplier.avatar_path).data.publicUrl
-      : 'Image/Icon/Supplier%20Profile%20Picture.png';
+      : 'Image/Other%20Image/Supplier%20Profile%20Picture.png';
   };
   if (supplierCard) {
     updateSupplierCard(supplierCard.dataset.marketplaceSupplierProfile);
@@ -1179,6 +1816,7 @@ function setupMarketplaceInteractions() {
     if (existing) existing.quantity = Math.min(variant.stock, Number(existing.quantity) + quantity);
     else cart.push({ productId, variantId, quantity });
     localStorage.setItem(marketplaceCartKey, JSON.stringify(cart));
+    localStorage.removeItem(marketplaceCheckoutSelectionKey);
     window.location.hash = '#cart';
   });
   document.querySelector('[data-buy-now]')?.addEventListener('click', (event) => {
@@ -1192,6 +1830,7 @@ function setupMarketplaceInteractions() {
     if (existing) existing.quantity = Math.min(variant.stock, Number(existing.quantity) + quantity);
     else cart.push({ productId, variantId, quantity });
     localStorage.setItem(marketplaceCartKey, JSON.stringify(cart));
+    localStorage.removeItem(marketplaceCheckoutSelectionKey);
     window.location.hash = '#checkout';
   });
   document.querySelector('[data-add-to-subscription]')?.addEventListener('click', (event) => {
@@ -1322,12 +1961,44 @@ function setupMarketplaceInteractions() {
     render();
   }));
 
+  const cartSelectionControls = document.querySelectorAll('[data-cart-select], [data-cart-select-all]');
+  if (cartSelectionControls.length) {
+    const cart = loadMarketplaceCart();
+    const allKeys = cart.filter((item) => marketplaceLine(item)).map(marketplaceCartLineKey);
+    const getSelectedKeys = () => loadMarketplaceCartSelection() ?? allKeys;
+    document.querySelectorAll('[data-cart-select]').forEach((checkbox) => checkbox.addEventListener('change', () => {
+      const item = cart[Number(checkbox.dataset.cartSelect)];
+      if (!item) return;
+      const key = marketplaceCartLineKey(item);
+      const selected = new Set(getSelectedKeys());
+      checkbox.checked ? selected.add(key) : selected.delete(key);
+      localStorage.setItem(marketplaceCartSelectionKey, JSON.stringify([...selected]));
+      render({ preserveScroll: true });
+    }));
+    document.querySelector('[data-cart-select-all]')?.addEventListener('change', (event) => {
+      localStorage.setItem(marketplaceCartSelectionKey, JSON.stringify(event.currentTarget.checked ? allKeys : []));
+      render({ preserveScroll: true });
+    });
+    document.querySelector('[data-selected-checkout]')?.addEventListener('click', () => {
+      const selectedKeys = getSelectedKeys().filter((key) => allKeys.includes(key));
+      if (!selectedKeys.length) return;
+      localStorage.setItem(marketplaceCheckoutSelectionKey, JSON.stringify(selectedKeys));
+      window.location.hash = '#checkout';
+    });
+  }
+
   const form = document.querySelector('[data-market-checkout]');
   if (form) {
     const addressSelect = form.querySelector('[data-saved-address]');
     const manualAddress = form.querySelector('[data-manual-address]');
     const transferUpload = form.querySelector('[data-transfer-upload]');
-    const lines = loadMarketplaceCart().map((item) => marketplaceLine(item)).filter(Boolean);
+    const cartAtCheckout = loadMarketplaceCart();
+    let checkoutSelection = null;
+    try {
+      const saved = JSON.parse(localStorage.getItem(marketplaceCheckoutSelectionKey) || 'null');
+      checkoutSelection = Array.isArray(saved) ? saved : null;
+    } catch { checkoutSelection = null; }
+    const lines = cartAtCheckout.filter((item) => !checkoutSelection || checkoutSelection.includes(marketplaceCartLineKey(item))).map((item) => marketplaceLine(item)).filter(Boolean);
     const subtotal = lines.reduce((sum, item) => sum + item.total, 0);
     const offerSettings = loadMarketplaceOfferSettings();
     const furgoVouchers = Array.isArray(offerSettings.furgoVouchers) ? offerSettings.furgoVouchers : [offerSettings.voucher].filter(Boolean);
@@ -1354,7 +2025,9 @@ function setupMarketplaceInteractions() {
     };
     const lineTotals = lines.map((line) => Math.max(0, Number(line.total) || 0));
     const allocatedShippingBase = allocateCents(shipping, lineTotals);
-    const lineMatchesSupplier = (line, supplierName) => String(line.variant.supplierId || line.variant.supplier || '').trim().toLowerCase() === String(supplierName || '').trim().toLowerCase();
+    const lineSupplierName = (line) => String(line.variant.supplierId || line.variant.supplier || '').trim();
+    const lineMatchesSupplier = (line, supplierName) => lineSupplierName(line).toLowerCase() === String(supplierName || '').trim().toLowerCase();
+    const cartSupplierNames = new Set(lines.map(lineSupplierName).filter(Boolean).map((name) => name.toLowerCase()));
     const shopEligibleSubtotal = (voucher) => lines.reduce((sum, line) => sum + (lineMatchesSupplier(line, voucher.supplier_name) ? Number(line.total) || 0 : 0), 0);
     const currentFurgoDiscount = () => Number(form.dataset.furgoDiscount || 0);
     const currentFurgoShippingDiscount = () => form.dataset.furgoFreeShipping === 'true' ? shipping : 0;
@@ -1419,7 +2092,7 @@ function setupMarketplaceInteractions() {
     if (shopVoucherTarget) {
       void supabase.rpc('get_marketplace_shop_vouchers').then(({ data, error }) => {
         if (error) throw error;
-        shopVouchers = data || [];
+        shopVouchers = (data || []).filter((voucher) => cartSupplierNames.has(String(voucher.supplier_name || '').trim().toLowerCase()));
         shopVoucherTarget.innerHTML = shopVouchers.length ? shopVouchers.map((voucher) => {
           const expiry = voucher.expires_at ? ` · Expires ${new Date(`${voucher.expires_at}T00:00:00`).toLocaleDateString()}` : '';
           const discountLabel = voucher.discount_type === 'free_shipping' ? 'Free shipping' : voucher.discount_type === 'percent' ? `${Number(voucher.discount_value)}% off` : `MYR ${Number(voucher.discount_value).toFixed(2)} off`;
@@ -1506,7 +2179,6 @@ function setupMarketplaceInteractions() {
           const link = document.createElement('a'); link.href = '#credit?from=checkout'; link.className = 'market-credit-link'; link.textContent = 'Go to My Furgo Credit'; feedback.append(link);
           return;
         }
-        localStorage.setItem('furgo-demo-credit-balance', (balance - total).toFixed(2));
       }
       let transferSlip = null;
       if (payment === 'bank-transfer') {
@@ -1542,19 +2214,39 @@ function setupMarketplaceInteractions() {
       const awaitingOnlinePayment = payment === 'gateway';
       const status = payment === 'bank-transfer' ? 'Pending Payment Verification' : awaitingOnlinePayment ? 'Pending Payment' : 'Paid / Processing';
       const orders = loadMarketplaceOrders();
+      const orderDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+      const order = { id: `order-${Date.now()}`, userId: profile.id || '', reference, date: orderDate, createdAt: now.toISOString(), customerEmail: profile.email || '', customerName: profile.name || address.name, customerPhone: profile.phone || address.phone, deliveryPhone: address.phone, address: { name: address.name, phone: address.phone, street: address.street, postcode: address.postcode, city: address.city, state: address.state }, items, subtotal, shipping, shippingDiscount, discount, furgoVoucherDiscount: furgoDiscount, furgoShippingDiscount, furgoVoucherId: appliedFurgoVoucher?.id || '', shopVoucherDiscount: shopDiscount, shopShippingDiscount, shopVoucher: appliedShopVoucher ? { id: appliedShopVoucher.id, code: appliedShopVoucher.code, supplierName: appliedShopVoucher.supplier_name } : null, total, paymentMethod: payment === 'wallet' ? 'Furgo Credit' : payment === 'gateway' ? 'Online Payment' : 'Manual bank transfer', paymentStatus: payment === 'bank-transfer' ? 'Pending Payment Verification' : awaitingOnlinePayment ? 'Pending Payment' : 'Paid', paymentDeadlineAt: awaitingOnlinePayment ? new Date(now.getTime() + 60 * 60 * 1000).toISOString() : '', transferSlip, status, coupon: appliedFurgoVoucher && (furgoDiscount || furgoShippingDiscount) ? String(appliedFurgoVoucher.code || '').toUpperCase() : '', trackingNumber: '', courier: '', trackingUrl: '' };
+      orders.unshift(order);
+      const placeOrderButton = form.querySelector('[type="submit"]');
+      if (placeOrderButton) { placeOrderButton.disabled = true; placeOrderButton.textContent = 'Saving Order…'; }
+      feedback.classList.remove('visible', 'is-error');
+      try {
+        await saveMarketplaceOrder(order, orders);
+      } catch (error) {
+        orders.shift();
+        if (placeOrderButton) { placeOrderButton.disabled = false; placeOrderButton.textContent = 'Place Order'; }
+        feedback.textContent = `Your order was not placed because it could not be saved online. ${error?.message || 'Please try again.'}`;
+        feedback.classList.add('visible', 'is-error');
+        return;
+      }
       if (payment === 'wallet') {
+        const balance = Number(localStorage.getItem('furgo-demo-credit-balance') || 0);
+        localStorage.setItem('furgo-demo-credit-balance', Math.max(0, balance - total).toFixed(2));
         const transactions = JSON.parse(localStorage.getItem('furgo-demo-credit-transactions') || '[]');
         transactions.unshift({ label: `Marketplace order ${reference}`, amount: -total, date: new Date().toLocaleDateString() });
         localStorage.setItem('furgo-demo-credit-transactions', JSON.stringify(transactions));
       }
-      orders.unshift({ id: `order-${Date.now()}`, userId: profile.id || '', reference, date: now.toLocaleDateString(), createdAt: now.toISOString(), customerEmail: profile.email || '', customerName: profile.name || address.name, customerPhone: profile.phone || address.phone, deliveryPhone: address.phone, address: { name: address.name, phone: address.phone, street: address.street, postcode: address.postcode, city: address.city, state: address.state }, items, subtotal, shipping, shippingDiscount, discount, furgoVoucherDiscount: furgoDiscount, furgoShippingDiscount, furgoVoucherId: appliedFurgoVoucher?.id || '', shopVoucherDiscount: shopDiscount, shopShippingDiscount, shopVoucher: appliedShopVoucher ? { id: appliedShopVoucher.id, code: appliedShopVoucher.code, supplierName: appliedShopVoucher.supplier_name } : null, total, paymentMethod: payment === 'wallet' ? 'Furgo Credit' : payment === 'gateway' ? 'Online Payment' : 'Manual bank transfer', paymentStatus: payment === 'bank-transfer' ? 'Pending Payment Verification' : awaitingOnlinePayment ? 'Pending Payment' : 'Paid', paymentDeadlineAt: awaitingOnlinePayment ? new Date(now.getTime() + 60 * 60 * 1000).toISOString() : '', transferSlip, status, coupon: appliedFurgoVoucher && (furgoDiscount || furgoShippingDiscount) ? String(appliedFurgoVoucher.code || '').toUpperCase() : '', trackingNumber: '', courier: '', trackingUrl: '' });
-      localStorage.setItem(marketplaceOrdersKey, JSON.stringify(orders));
       if (!awaitingOnlinePayment) items.forEach((item) => {
         const variant = products.find((product) => product.id === item.productId)?.variants.find((entry) => entry.id === item.variantId);
         if (variant) variant.stock = Math.max(0, Number(variant.stock) - item.quantity);
       });
       localStorage.setItem(marketplaceProductsKey, JSON.stringify(products));
-      localStorage.setItem(marketplaceCartKey, '[]');
+      const purchasedKeys = new Set(checkoutSelection || cartAtCheckout.map(marketplaceCartLineKey));
+      const remainingCart = loadMarketplaceCart().filter((item) => !purchasedKeys.has(marketplaceCartLineKey(item)));
+      localStorage.setItem(marketplaceCartKey, JSON.stringify(remainingCart));
+      const previousSelection = loadMarketplaceCartSelection();
+      if (previousSelection) localStorage.setItem(marketplaceCartSelectionKey, JSON.stringify(previousSelection.filter((key) => !purchasedKeys.has(key))));
+      localStorage.removeItem(marketplaceCheckoutSelectionKey);
       // Return to the Marketplace when a customer opens their new order from checkout.
       window.location.hash = '#orders?from=marketplace';
     });
@@ -1968,7 +2660,7 @@ function setupAdminMarketplace() {
     const recipientName = order.address?.name || order.customerName || 'Not provided';
     const recipientPhone = order.deliveryPhone || order.address?.phone || order.customerPhone || 'Not provided';
     const recipientAddress = [order.address?.street, order.address?.postcode, order.address?.city, order.address?.state].filter(Boolean).join(', ') || 'Not provided';
-    const orderDate = order.date || (order.createdAt ? new Date(order.createdAt).toLocaleDateString('en-MY') : 'Not provided');
+    const orderDate = order.createdAt ? new Date(order.createdAt).toLocaleDateString('en-MY') : order.date || 'Not provided';
     const text = [
       'FURGO ORDER DETAILS',
       `Supplier : ${supplierName}`,
@@ -2005,7 +2697,7 @@ function setupAdminMarketplace() {
     const order = orders.find((item) => item.id === button.dataset.completeOrder);
     if (order) { order.status = 'Delivered'; order.deliveredAt = new Date().toISOString(); localStorage.setItem(marketplaceOrdersKey, JSON.stringify(orders)); void recordAdminAction('order_status_updated', 'marketplace_order', order.reference || order.id, { status: order.status }); render(); }
   }));
-  document.querySelectorAll('[data-approve-payment], [data-reject-payment]').forEach((button) => button.addEventListener('click', () => {
+  document.querySelectorAll('[data-approve-payment], [data-reject-payment]').forEach((button) => button.addEventListener('click', async () => {
     const orders = loadMarketplaceOrders();
     const orderId = button.dataset.approvePayment || button.dataset.rejectPayment;
     const order = orders.find((item) => item.id === orderId);
@@ -2027,7 +2719,8 @@ function setupAdminMarketplace() {
       }
       order.paymentStatus = 'Paid'; order.status = 'Paid / Processing';
     }
-    localStorage.setItem(marketplaceOrdersKey, JSON.stringify(orders));
+    try { await saveOrderRecords(marketplaceOrdersKey, order, orders); }
+    catch (error) { toastAdmin(`Payment decision could not be saved online: ${error.message || 'Please try again.'}`); return; }
     void recordAdminAction(button.hasAttribute('data-reject-payment') ? 'marketplace_payment_rejected' : 'marketplace_payment_approved', 'marketplace_order', order.reference || order.id, { status: order.paymentStatus });
     render();
   }));
@@ -2038,7 +2731,16 @@ function setupAdminMarketplace() {
     const data = await new Promise((resolve) => { const reader = new FileReader(); reader.onload = () => resolve(reader.result); reader.onerror = () => resolve(''); reader.readAsDataURL(file); });
     const orders = loadMarketplaceOrders();
     const order = orders.find((item) => item.id === input.dataset.orderReceipt);
-    if (order && data) { order.receipt = { name: file.name, data }; localStorage.setItem(marketplaceOrdersKey, JSON.stringify(orders)); void recordAdminAction('receipt_uploaded', 'marketplace_order', order.reference || order.id); render(); }
+    if (order && data) {
+      order.receipt = { name: file.name, data };
+      order.status = 'In Progress';
+      order.adminStatus = 'In Progress';
+      order.adminReceiptUploadedAt = new Date().toISOString();
+      try { await saveOrderRecords(marketplaceOrdersKey, order, orders); }
+      catch (error) { toastAdmin(`Receipt could not be saved online: ${error.message || 'Please try again.'}`); return; }
+      void recordAdminAction('receipt_uploaded', 'marketplace_order', order.reference || order.id);
+      render();
+    }
   }));
   document.querySelector('[data-export-market-csv]')?.addEventListener('click', () => {
     const supplier = document.querySelector('[data-market-export-supplier]').value;
@@ -2327,8 +3029,27 @@ function setupMarketplaceSupplierPortal() {
       const image = tab.querySelector('img');
       if (image && icons) image.src = `Image/Icon/${active ? icons[1] : icons[0]}`;
     });
+    window.history.replaceState(null, '', `#supplier?tab=${encodeURIComponent(target)}`);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }));
+  document.querySelectorAll('[data-supplier-order-filter-open]').forEach((card) => {
+    const openOrders = () => {
+      const status = card.dataset.supplierOrderFilterOpen;
+      window.location.hash = `supplier?tab=orders&status=${encodeURIComponent(status)}`;
+    };
+    card.addEventListener('click', (event) => { event.stopPropagation(); openOrders(); });
+    card.addEventListener('keydown', (event) => {
+      if (event.key !== 'Enter' && event.key !== ' ') return;
+      event.preventDefault();
+      event.stopPropagation();
+      openOrders();
+    });
+  });
+  document.querySelector('[data-supplier-dashboard-stats]')?.addEventListener('keydown', (event) => {
+    if (event.key !== 'Enter' && event.key !== ' ') return;
+    event.preventDefault();
+    event.currentTarget.click();
+  });
   const supplierVoucherForm = document.querySelector('[data-supplier-voucher-form]');
   const supplierVoucherList = document.querySelector('[data-supplier-voucher-list]');
   const supplierVoucherFeedback = document.querySelector('[data-supplier-voucher-feedback]');
@@ -2439,7 +3160,9 @@ function setupMarketplaceSupplierPortal() {
 
   let supplierCatalog = [];
   let supplierSubmissions = [];
-  let supplierOrderStatusFilter = 'new';
+  const supplierRouteParams = new URLSearchParams(window.location.hash.split('?')[1] || '');
+  const requestedSupplierOrderFilter = supplierRouteParams.get('status');
+  let supplierOrderStatusFilter = requestedSupplierOrderFilter === 'progressing' ? 'shipped' : ['new', 'shipped', 'delivered', 'cancelled', 'returns'].includes(requestedSupplierOrderFilter) ? requestedSupplierOrderFilter : 'new';
   const applySupplierOrderStatusFilter = () => {
     const ordersTarget = document.querySelector('[data-supplier-orders]');
     if (!ordersTarget) return;
@@ -2455,7 +3178,7 @@ function setupMarketplaceSupplierPortal() {
       const notice = empty || document.createElement('p');
       notice.className = 'supplier-empty';
       notice.dataset.supplierFilterEmpty = '';
-      notice.textContent = `No orders in ${({ new: 'New Order', progressing: 'Progressing Order', completed: 'Completed', cancelled: 'Cancelled', returns: 'Return or Refund' })[supplierOrderStatusFilter]}.`;
+      notice.textContent = `No orders in ${({ new: 'New Order', shipped: 'Shipped', delivered: 'Delivered', cancelled: 'Cancelled', returns: 'Return or Refund' })[supplierOrderStatusFilter]}.`;
       if (!empty) ordersTarget.append(notice);
     } else empty?.remove();
     document.querySelectorAll('[data-supplier-order-status-filter]').forEach((button) => {
@@ -2464,6 +3187,7 @@ function setupMarketplaceSupplierPortal() {
       button.setAttribute('aria-pressed', String(active));
     });
   };
+  applySupplierOrderStatusFilter();
   document.querySelector('[data-supplier-order-status-tabs]')?.addEventListener('click', (event) => {
     const button = event.target.closest('[data-supplier-order-status-filter]');
     if (!button) return;
@@ -2596,12 +3320,12 @@ function setupMarketplaceSupplierPortal() {
       if (count) count.textContent = `${shopProducts.length} ${shopProducts.length === 1 ? 'product' : 'products'}`;
     }
     const supplierOrders = (ordersResult.data || []).map((row) => row.order_details || row);
-    const newOrderCount = supplierOrders.filter((order) => adminOrderStage({ ...order, serviceId: 'marketplace' }) === 'new').length;
-    const progressingOrderCount = supplierOrders.filter((order) => adminOrderStage({ ...order, serviceId: 'marketplace' }) === 'progressing').length;
+    const newOrderCount = supplierOrders.filter((order) => matchesSupplierOrderStatus(order, 'new')).length;
+    const shippedOrderCount = supplierOrders.filter((order) => matchesSupplierOrderStatus(order, 'shipped')).length;
     const newOrderCountTarget = document.querySelector('[data-supplier-new-order-count]');
-    const progressingOrderCountTarget = document.querySelector('[data-supplier-progressing-order-count]');
+    const shippedOrderCountTarget = document.querySelector('[data-supplier-shipped-order-count]');
     if (newOrderCountTarget) newOrderCountTarget.textContent = String(newOrderCount);
-    if (progressingOrderCountTarget) progressingOrderCountTarget.textContent = String(progressingOrderCount);
+    if (shippedOrderCountTarget) shippedOrderCountTarget.textContent = String(shippedOrderCount);
     if (submissionsTarget) submissionsTarget.innerHTML = supplierProductRows(supplierCatalog, supplierSubmissions);
     if (ordersTarget) {
       ordersTarget.innerHTML = supplierOrderRows(supplierOrders);
@@ -2640,7 +3364,7 @@ function setupMarketplaceSupplierPortal() {
     const editingProductId = fields.productId.value.trim();
     const pendingSubmissionId = fields.pendingSubmissionId.value.trim();
     const action = pendingSubmissionId ? 'pending_edit' : editingProductId ? 'edit' : 'add';
-    setSupplierFeedback(action === 'edit' ? 'Saving product details…' : action === 'pending_edit' ? 'Updating pending product request…' : 'Submitting product for Director review…');
+    setSupplierFeedback(action === 'edit' ? 'Saving product details…' : action === 'pending_edit' ? 'Updating pending product request…' : 'Submitting product for Furgo approval…');
     try {
       const submissionId = crypto.randomUUID();
       const existingProduct = supplierCatalog.find((entry) => entry.id === editingProductId);
@@ -2675,17 +3399,17 @@ function setupMarketplaceSupplierPortal() {
       if (action === 'pending_edit') {
         const { error } = await supabase.rpc('update_marketplace_pending_product_request', { p_submission_id: pendingSubmissionId, p_product_data: product });
         if (error) throw error;
-        feedbackMessage = 'Product request updated and resubmitted. It is waiting for Director approval.';
+        feedbackMessage = 'Product request updated and resubmitted. It is waiting for Furgo approval.';
       } else if (action === 'edit') {
         const { data, error } = await supabase.rpc('edit_marketplace_supplier_product', { p_product_id: editingProductId, p_product_data: product });
         if (error) throw error;
         feedbackMessage = data?.variant_change_pending
-          ? 'Product details saved. Price or variant changes are pending Director approval.'
+          ? 'Product details saved. Price or variant changes are pending Furgo approval.'
           : 'Product details saved and are now live in the Marketplace.';
       } else {
         const { error } = await supabase.rpc('submit_marketplace_supplier_product', { p_action: 'add', p_product_id: null, p_product_data: product });
         if (error) throw error;
-        feedbackMessage = 'Product submitted. It will appear in the Marketplace after Director approval.';
+        feedbackMessage = 'Product submitted. It will appear in the Marketplace after Furgo approval.';
       }
       supplierForm.reset();
       resetSupplierEditor();
@@ -2708,6 +3432,25 @@ function setupMarketplaceSupplierPortal() {
     const actionButton = event.target.closest('[data-supplier-product-action]');
     const editRequestButton = event.target.closest('[data-supplier-edit-request]');
     const deleteRequestButton = event.target.closest('[data-supplier-delete-request]');
+    const keepLiveVersionButton = event.target.closest('[data-supplier-keep-live-version]');
+    if (keepLiveVersionButton) {
+      const submission = supplierSubmissions.find((entry) => entry.id === keepLiveVersionButton.dataset.supplierKeepLiveVersion && ['edit', 'edit_variant'].includes(entry.action) && entry.status === 'Rejected');
+      if (!submission) return;
+      const productName = submission.product_data?.name || supplierCatalog.find((entry) => entry.id === submission.product_id)?.name || 'this product';
+      if (!window.confirm(`Keep the current live version of “${productName}”? The rejected changes will be withdrawn, and the existing listing will remain unchanged.`)) return;
+      keepLiveVersionButton.disabled = true;
+      setSupplierListFeedback('Keeping the current live version…');
+      const { error } = await supabase.rpc('withdraw_rejected_marketplace_product_edit', { p_submission_id: submission.id });
+      if (error) {
+        keepLiveVersionButton.disabled = false;
+        setSupplierListFeedback(error.message || 'The rejected changes could not be withdrawn.', true);
+        return;
+      }
+      setSupplierListFeedback('Rejected changes withdrawn. The current listing remains live.');
+      try { await refreshSupplierPortal(); }
+      catch (refreshError) { setSupplierListFeedback(refreshError.message || 'The rejected changes were withdrawn, but the product list could not refresh.', true); }
+      return;
+    }
     if (editRequestButton) {
       const submission = supplierSubmissions.find((entry) => entry.id === editRequestButton.dataset.supplierEditRequest && entry.action === 'add' && ['Pending Review', 'Rejected'].includes(entry.status));
       if (!submission) return;
@@ -2764,11 +3507,11 @@ function setupMarketplaceSupplierPortal() {
     const button = event.target.closest('[data-supplier-return-action]');
     if (!button) return;
     const action = button.dataset.supplierReturnAction;
-    const reason = action === 'reject' ? window.prompt('Why are you rejecting this return? The reason will be sent to a Manager or Director for review.') : '';
+    const reason = action === 'reject' ? window.prompt('Why are you rejecting this return? Furgo will review the case.') : '';
     if (action === 'reject' && !reason?.trim()) return;
     if (action !== 'reject' && !window.confirm(action === 'approve' ? 'Approve this return request? The customer will be asked to send the product back to you.' : 'Confirm that you received the returned product?')) return;
     button.disabled = true;
-    setShipmentFeedback(action === 'reject' ? 'Sending the case for Manager / Director review…' : 'Updating return status…');
+    setShipmentFeedback(action === 'reject' ? 'Sending the case to Furgo for review…' : 'Updating return status…');
     const rpc = action === 'received' ? 'mark_marketplace_item_return_received' : 'respond_marketplace_item_return';
     const args = action === 'received'
       ? { p_return_id: button.dataset.returnId }
@@ -2779,7 +3522,7 @@ function setupMarketplaceSupplierPortal() {
       setShipmentFeedback(error.message || 'The return status could not be updated.', true);
       return;
     }
-    setShipmentFeedback(action === 'reject' ? 'The case has been sent to a Manager or Director for review.' : action === 'approve' ? 'Return approved. Coordinate the return shipment with the customer.' : 'The returned product is recorded as received. A Manager or Director can now record the refund after it is sent through the original payment method.');
+      setShipmentFeedback(action === 'reject' ? 'The case has been sent to Furgo for review.' : action === 'approve' ? 'Return approved. Coordinate the return shipment with the customer.' : 'The returned product is recorded as received. Furgo can now record the refund after it is sent through the original payment method.');
     try { await refreshSupplierPortal(); }
     catch (refreshError) { setShipmentFeedback(refreshError.message || 'The return was updated, but the order list could not refresh.', true); }
   });
@@ -2819,9 +3562,10 @@ function setupMarketplaceSupplierPortal() {
     const submit = form.querySelector('[type="submit"]');
     submit.disabled = true;
     setShipmentFeedback('Saving shipment details…');
+    const shipmentAction = form.dataset.shipmentAction || 'ship';
     const { error } = await supabase.rpc('update_marketplace_supplier_shipment', {
       p_order_id: form.dataset.supplierShippingForm,
-      p_action: 'ship',
+      p_action: shipmentAction,
       p_courier: form.elements.courier.value.trim(),
       p_tracking_number: form.elements.trackingNumber.value.trim(),
       p_tracking_url: form.elements.trackingUrl.value.trim(),
@@ -2831,30 +3575,123 @@ function setupMarketplaceSupplierPortal() {
       setShipmentFeedback(error.message || 'Shipment details could not be saved.', true);
       return;
     }
-    setShipmentFeedback('Tracking saved. The order has been marked as shipped.');
+    setShipmentFeedback(shipmentAction === 'edit_tracking' ? 'Corrected tracking details saved.' : 'Tracking saved. The order has been marked as shipped.');
     try { await refreshSupplierPortal(); }
     catch (refreshError) { setShipmentFeedback(refreshError.message || 'Shipment saved, but the order list could not refresh.', true); }
   });
   ordersTarget?.addEventListener('click', async (event) => {
-    const button = event.target.closest('[data-supplier-mark-delivered]');
-    if (!button || !window.confirm('Mark this supplier shipment as delivered?')) return;
-    button.disabled = true;
-    setShipmentFeedback('Updating delivery status…');
-    const { error } = await supabase.rpc('update_marketplace_supplier_shipment', {
-      p_order_id: button.dataset.supplierMarkDelivered,
-      p_action: 'delivered',
-      p_courier: '',
-      p_tracking_number: '',
-      p_tracking_url: '',
-    });
-    if (error) {
-      button.disabled = false;
-      setShipmentFeedback(error.message || 'Delivery status could not be updated.', true);
+    const cancelUndoDelivery = event.target.closest('[data-supplier-cancel-undo-delivery]');
+    if (cancelUndoDelivery) {
+      const summary = cancelUndoDelivery.closest('.supplier-shipment-summary');
+      const confirmation = cancelUndoDelivery.closest('[data-supplier-undo-delivery-confirmation]');
+      const undoButton = summary?.querySelector('[data-supplier-undo-delivered]');
+      if (confirmation) confirmation.hidden = true;
+      if (undoButton) undoButton.hidden = false;
+      setShipmentFeedback('');
       return;
     }
-    setShipmentFeedback('The shipment has been marked as delivered.');
-    try { await refreshSupplierPortal(); }
-    catch (refreshError) { setShipmentFeedback(refreshError.message || 'Delivery status saved, but the order list could not refresh.', true); }
+    const undoDeliveredButton = event.target.closest('[data-supplier-undo-delivered]');
+    if (undoDeliveredButton) {
+      const summary = undoDeliveredButton.closest('.supplier-shipment-summary');
+      const confirmation = summary?.querySelector('[data-supplier-undo-delivery-confirmation]');
+      if (confirmation) {
+        undoDeliveredButton.hidden = true;
+        confirmation.hidden = false;
+      }
+      return;
+    }
+    const confirmUndoButton = event.target.closest('[data-supplier-confirm-undo-delivered]');
+    if (confirmUndoButton) {
+      const confirmation = confirmUndoButton.closest('[data-supplier-undo-delivery-confirmation]');
+      const cancelButton = confirmation?.querySelector('[data-supplier-cancel-undo-delivery]');
+      confirmUndoButton.disabled = true;
+      if (cancelButton) cancelButton.disabled = true;
+      setShipmentFeedback('Reverting delivery status…');
+      const { error } = await supabase.rpc('update_marketplace_supplier_shipment', {
+        p_order_id: confirmUndoButton.dataset.supplierConfirmUndoDelivered,
+        p_action: 'undo_delivered',
+        p_courier: '',
+        p_tracking_number: '',
+        p_tracking_url: '',
+      });
+      if (error) {
+        confirmUndoButton.disabled = false;
+        if (cancelButton) cancelButton.disabled = false;
+        setShipmentFeedback(error.message || 'Delivery status could not be reverted.', true);
+        return;
+      }
+      setShipmentFeedback('The shipment status has been changed back to Shipped.');
+      try { await refreshSupplierPortal(); }
+      catch (refreshError) { setShipmentFeedback(refreshError.message || 'Shipment status saved, but the order list could not refresh.', true); }
+      return;
+    }
+    const cancelDelivery = event.target.closest('[data-supplier-cancel-delivery]');
+    if (cancelDelivery) {
+      const summary = cancelDelivery.closest('.supplier-shipment-summary');
+      const confirmation = cancelDelivery.closest('[data-supplier-delivery-confirmation]');
+      const markDeliveredButton = summary?.querySelector('[data-supplier-mark-delivered]');
+      if (confirmation) confirmation.hidden = true;
+      if (markDeliveredButton) markDeliveredButton.hidden = false;
+      setShipmentFeedback('');
+      return;
+    }
+    const markDeliveredButton = event.target.closest('[data-supplier-mark-delivered]');
+    if (markDeliveredButton) {
+      const summary = markDeliveredButton.closest('.supplier-shipment-summary');
+      const confirmation = summary?.querySelector('[data-supplier-delivery-confirmation]');
+      if (confirmation) {
+        markDeliveredButton.hidden = true;
+        confirmation.hidden = false;
+      }
+      return;
+    }
+    const confirmDeliveryButton = event.target.closest('[data-supplier-confirm-delivered]');
+    if (confirmDeliveryButton) {
+      const confirmation = confirmDeliveryButton.closest('[data-supplier-delivery-confirmation]');
+      const cancelButton = confirmation?.querySelector('[data-supplier-cancel-delivery]');
+      confirmDeliveryButton.disabled = true;
+      if (cancelButton) cancelButton.disabled = true;
+      setShipmentFeedback('Updating delivery status…');
+      const { error } = await supabase.rpc('update_marketplace_supplier_shipment', {
+        p_order_id: confirmDeliveryButton.dataset.supplierConfirmDelivered,
+        p_action: 'delivered',
+        p_courier: '',
+        p_tracking_number: '',
+        p_tracking_url: '',
+      });
+      if (error) {
+        confirmDeliveryButton.disabled = false;
+        if (cancelButton) cancelButton.disabled = false;
+        setShipmentFeedback(error.message || 'Delivery status could not be updated.', true);
+        return;
+      }
+      setShipmentFeedback('The shipment has been marked as delivered.');
+      try { await refreshSupplierPortal(); }
+      catch (refreshError) { setShipmentFeedback(refreshError.message || 'Delivery status saved, but the order list could not refresh.', true); }
+      return;
+    }
+    const editTrackingButton = event.target.closest('[data-supplier-edit-tracking]');
+    if (editTrackingButton) {
+      const orderCard = editTrackingButton.closest('.supplier-market-order');
+      const form = orderCard?.querySelector('[data-shipment-action="edit_tracking"]');
+      if (form) {
+        form.hidden = false;
+        editTrackingButton.hidden = true;
+        form.elements.courier.focus();
+      }
+      return;
+    }
+    const cancelTrackingEdit = event.target.closest('[data-supplier-cancel-tracking-edit]');
+    if (cancelTrackingEdit) {
+      const form = cancelTrackingEdit.closest('[data-shipment-action="edit_tracking"]');
+      if (form) {
+        form.hidden = true;
+        const orderCard = form.closest('.supplier-market-order');
+        const editButton = orderCard?.querySelector('[data-supplier-edit-tracking]');
+        if (editButton) editButton.hidden = false;
+      }
+      return;
+    }
   });
   if (supplierForm || document.querySelector('[data-supplier-orders]')) {
     void refreshSupplierPortal().catch((error) => {
@@ -2900,7 +3737,7 @@ function setupMarketplaceSupplierPortal() {
       const summary = summaryForSupplier(entry.supplier_name);
       const sales = summary.supplierItems.reduce((total, item) => total + (Number(item.unitPrice ?? item.price ?? 0) * (Number(item.quantity) || 0)), 0);
       const phone = String(account.supplier_contact_phone || account.phone_e164 || '').replace(/^\+60/, '0');
-      const avatarUrl = account.avatar_path ? supabase.storage.from('supplier-profile-photos').getPublicUrl(account.avatar_path).data.publicUrl : 'Image/Icon/Supplier%20Profile%20Picture.png';
+      const avatarUrl = account.avatar_path ? supabase.storage.from('supplier-profile-photos').getPublicUrl(account.avatar_path).data.publicUrl : 'Image/Other%20Image/Supplier%20Profile%20Picture.png';
       const linkedDate = entry.created_at ? new Intl.DateTimeFormat('en-MY', { dateStyle: 'medium' }).format(new Date(entry.created_at)) : '—';
       const productList = summary.uniqueProducts.map((product) => {
         const variants = summary.supplierProducts.filter((item) => item.product.id === product.id);
@@ -2917,28 +3754,99 @@ function setupMarketplaceSupplierPortal() {
   const reviewsTarget = document.querySelector('[data-marketplace-product-reviews]');
   const loadProductReviews = async () => {
     if (!reviewsTarget) return;
-    const { data, error } = await supabase.from('marketplace_product_submissions').select('*').eq('status', 'Pending Review').order('submitted_at', { ascending: true });
+    const [{ data, error }, { data: catalogRecord }] = await Promise.all([
+      supabase.from('marketplace_product_submissions').select('*').eq('status', 'Pending Review').order('submitted_at', { ascending: true }),
+      supabase.from('app_data').select('payload').eq('record_id', 'shared:furgo-demo-marketplace-products:shared').maybeSingle(),
+    ]);
     if (error) throw error;
+    const reviewCatalog = Array.isArray(catalogRecord?.payload) ? catalogRecord.payload : loadMarketplaceProducts();
     const countBadge = document.querySelector('[data-marketplace-review-count]');
     if (countBadge) countBadge.textContent = String(data?.length || 0);
     if (!data?.length) { reviewsTarget.innerHTML = '<p>No product submissions are awaiting review.</p>'; return; }
     reviewsTarget.innerHTML = data.map((submission) => {
       const product = submission.product_data || {};
+      const action = submission.action || 'add';
+      const currentProduct = reviewCatalog.find((entry) => String(entry.id) === String(submission.product_id || product.id));
+      const proposedVariant = product.variants?.[0] || {};
+      const currentVariant = currentProduct?.variants?.find((variant) => String(variant.id) === String(proposedVariant.id)) || (currentProduct?.variants?.length === 1 ? currentProduct.variants[0] : null);
+      const changes = [];
+      const normalizeChangeValue = (value) => {
+        if (Array.isArray(value)) return value.map(normalizeChangeValue);
+        if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).sort(([a], [b]) => a.localeCompare(b)).map(([key, item]) => [key, normalizeChangeValue(item)]));
+        if (typeof value === 'string') return value.trim();
+        return value ?? '';
+      };
+      const addChange = (label, before, after, format = (value) => {
+        if (Array.isArray(value)) return value.map((item) => typeof item === 'object' ? JSON.stringify(item) : String(item)).join(', ') || '—';
+        if (value && typeof value === 'object') return JSON.stringify(value);
+        return String(value ?? '').trim() || '—';
+      }, normalize = normalizeChangeValue) => {
+        const normalizedBefore = JSON.stringify(normalize(before));
+        const normalizedAfter = JSON.stringify(normalize(after));
+        if (normalizedBefore === normalizedAfter) return;
+        const beforeNumber = before == null || before === '' ? NaN : Number(before);
+        const afterNumber = after == null || after === '' ? NaN : Number(after);
+        let trend = '';
+        if (Number.isFinite(beforeNumber) && Number.isFinite(afterNumber) && beforeNumber !== afterNumber) {
+          if (label === 'Price') trend = afterNumber > beforeNumber ? 'is-negative' : 'is-positive';
+          if (label === 'Stock') trend = afterNumber < beforeNumber ? 'is-negative' : 'is-positive';
+        }
+        changes.push({ label, before: format(before), after: format(after), trend });
+      };
+      const formatPrice = (value) => value === '' || value == null || !Number.isFinite(Number(value)) ? '—' : `MYR ${Number(value).toFixed(2)}`;
+      const formatStock = (value) => value === '' || value == null || !Number.isFinite(Number(value)) ? '—' : String(Number(value));
+      const normalizeNumber = (value) => value === '' || value == null ? '' : (Number.isFinite(Number(value)) ? Number(value) : String(value).trim());
+      if (action === 'edit_variant' || action === 'edit') {
+        if (currentProduct) {
+          if (action === 'edit') {
+            for (const [key, label] of [['name', 'Product name'], ['category', 'Category'], ['description', 'Description'], ['petTypes', 'Types of pets'], ['suitableBreeds', 'Suitable breeds'], ['issues', 'Pet concerns'], ['ingredients', 'Ingredients'], ['nutrition', 'Nutrition / product information']]) {
+              addChange(label, currentProduct[key], product[key]);
+            }
+          }
+          if (currentVariant && proposedVariant) {
+            addChange('Variant / package', currentVariant.label, proposedVariant.label);
+            addChange('Price', currentVariant.price, proposedVariant.price, formatPrice, normalizeNumber);
+            addChange('Stock', currentVariant.stock, proposedVariant.stock, formatStock, normalizeNumber);
+            addChange('SKU', currentVariant.sku, proposedVariant.sku);
+            addChange('Supplier SKU', currentVariant.supplierSku, proposedVariant.supplierSku);
+          }
+        }
+      }
+      const changesMarkup = action === 'add'
+        ? '<p class="marketplace-review-new-listing">New listing · no previous values</p>'
+        : changes.length
+          ? `<section class="marketplace-review-changes" aria-label="Changes requested"><h4>Before and proposed</h4><div class="marketplace-review-change-list">${changes.map((change) => `<div class="marketplace-review-change"><strong>${escapeHTML(change.label)}</strong><span><small>Before</small>${escapeHTML(change.before)}</span><span class="${change.trend}"><small>Proposed</small>${escapeHTML(change.after)}</span></div>`).join('')}</div></section>`
+          : `<p class="marketplace-review-new-listing">${!currentProduct ? 'Current listing values are unavailable for comparison.' : (action === 'edit_variant' && !currentVariant) ? 'Current variant values are unavailable for comparison.' : 'No field changes detected.'}</p>`;
       const images = (product.images || []).map((url) => `<img src="${escapeHTML(url)}" alt="${escapeHTML(product.name || 'Product')}" />`).join('');
       const variants = (product.variants || []).map((variant) => `<li>${escapeHTML(variant.label || 'Variant')} · MYR ${Number(variant.price || 0).toFixed(2)} · Stock ${Number(variant.stock) || 0}</li>`).join('');
-      const action = submission.action || 'add';
       const actionLabel = { add: 'New product', edit: 'Product edit', edit_variant: 'Price / variant change', hide: 'Hide request', delete: 'Delete request' }[action] || 'Product change';
       const approveLabel = { add: 'Approve & Publish', edit: 'Approve Changes', edit_variant: 'Approve Price / Variant', hide: 'Approve Hide', delete: 'Approve Delete' }[action] || 'Approve Request';
-      return `<article class="marketplace-product-review-card" data-marketplace-review="${escapeHTML(submission.id)}"><div class="marketplace-review-images">${images}</div><div class="marketplace-review-copy"><span>${escapeHTML(submission.supplier_name)} · ${actionLabel}</span><h3>${escapeHTML(product.name || 'Product')}</h3><p>${escapeHTML(product.description || (action === 'hide' ? 'Supplier requests to hide this active listing.' : action === 'delete' ? 'Supplier requests to delete this active listing.' : ''))}</p><p><strong>${escapeHTML(product.category || 'Other')}</strong> · ${escapeHTML(product.ingredients || '')}</p><ul>${variants}</ul><label>Rejection reason<textarea rows="2" maxlength="1000" data-rejection-reason placeholder="Required when rejecting"></textarea></label><div class="admin-market-form-actions"><button type="button" class="button button-primary" data-review-product="approve">${approveLabel}</button><button type="button" class="button button-light" data-review-product="reject">Reject Request</button></div></div></article>`;
+      return `<article class="marketplace-product-review-card" data-marketplace-review="${escapeHTML(submission.id)}"><div class="marketplace-review-images">${images}</div><div class="marketplace-review-copy"><span>${escapeHTML(submission.supplier_name)} · ${actionLabel}</span><h3>${escapeHTML(product.name || 'Product')}</h3>${changesMarkup}<p>${escapeHTML(product.description || (action === 'hide' ? 'Supplier requests to hide this active listing.' : action === 'delete' ? 'Supplier requests to delete this active listing.' : ''))}</p><p><strong>${escapeHTML(product.category || 'Other')}</strong> · ${escapeHTML(product.ingredients || '')}</p><ul>${variants}</ul><label>Rejection reason<textarea rows="2" maxlength="1000" required data-rejection-reason aria-describedby="marketplace-review-reason-hint-${escapeHTML(submission.id)}" placeholder="Required when rejecting"></textarea></label><small class="marketplace-review-reason-hint" id="marketplace-review-reason-hint-${escapeHTML(submission.id)}" data-review-reason-hint aria-live="polite">A reason is required to reject this request.</small><div class="admin-market-form-actions"><button type="button" class="button button-primary" data-review-product="approve">${approveLabel}</button><button type="button" class="button button-light" data-review-product="reject">Reject Request</button></div></div></article>`;
     }).join('');
   };
+  reviewsTarget?.addEventListener('input', (event) => {
+    const reasonField = event.target.closest('[data-rejection-reason]');
+    const card = reasonField?.closest('[data-marketplace-review]');
+    if (!reasonField || !card) return;
+    const hasReason = Boolean(reasonField.value.trim());
+    const approveButton = card.querySelector('[data-review-product="approve"]');
+    const hint = card.querySelector('[data-review-reason-hint]');
+    if (approveButton) approveButton.disabled = hasReason;
+    if (hint) hint.textContent = hasReason ? 'To approve this request, remove the rejection reason.' : 'A reason is required to reject this request.';
+  });
   reviewsTarget?.addEventListener('click', async (event) => {
     const button = event.target.closest('[data-review-product]');
     const card = button?.closest('[data-marketplace-review]');
     if (!button || !card) return;
     const decision = button.dataset.reviewProduct;
-    const reason = card.querySelector('[data-rejection-reason]').value.trim();
-    if (decision === 'reject' && !reason) { card.querySelector('[data-rejection-reason]').setCustomValidity('Enter a reason so the supplier knows what to change.'); card.querySelector('[data-rejection-reason]').reportValidity(); card.querySelector('[data-rejection-reason]').setCustomValidity(''); return; }
+    const reasonField = card.querySelector('[data-rejection-reason]');
+    const reason = reasonField.value.trim();
+    if (decision === 'approve' && reason) {
+      card.querySelector('[data-review-reason-hint]').textContent = 'To approve this request, remove the rejection reason.';
+      reasonField.focus();
+      return;
+    }
+    if (decision === 'reject' && !reason) { reasonField.setCustomValidity('Enter a reason so the supplier knows what to change.'); reasonField.reportValidity(); reasonField.setCustomValidity(''); return; }
     button.disabled = true;
     const { data, error } = await supabase.rpc('review_marketplace_product_submission', { p_submission_id: card.dataset.marketplaceReview, p_decision: decision, p_reason: reason });
     if (error) { button.disabled = false; window.alert(error.message); return; }
@@ -3088,7 +3996,7 @@ function setupAdminPromotionsForm() {
     });
   });
 
-  document.querySelector('.admin-promotions-page')?.addEventListener('click', (event) => {
+  document.querySelector('.admin-promotions-page, .admin-local-finder-page')?.addEventListener('click', (event) => {
     const deleteButton = event.target.closest('[data-delete-promotion], [data-delete-announcement]');
     if (!deleteButton) return;
     const isAnnouncement = deleteButton.hasAttribute('data-delete-announcement');
@@ -3835,7 +4743,16 @@ function setupDedicatedSearchPage() {
   };
   let currentMatches = [];
   let currentResultCount = 0;
+  let localFinderIndex = [];
+  let localFinderIndexReady = false;
   const normalize = (value) => String(value || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
+  const localFinderIndexPromise = supabase
+    ? supabase.from('local_finder_places').select('id,name,category,address,city,state,allowed_area,pet_allowed,pet_size,conditions').eq('status', 'approved').eq('is_hidden', false)
+      .then(({ data, error }) => {
+        if (error) { console.warn('Local Finder search results could not be loaded:', error.message); return []; }
+        return data || [];
+      }).catch((error) => { console.warn('Local Finder search results could not be loaded:', error.message); return []; })
+    : Promise.resolve([]);
   const readRecents = () => {
     try {
       const stored = JSON.parse(localStorage.getItem(recentSearchesKey) || '[]');
@@ -3905,7 +4822,21 @@ function setupDedicatedSearchPage() {
       };
     }).filter(Boolean);
     const serviceMatches = serviceEntries.filter((entry) => normalize(`${entry.title} ${entry.detail} ${entry.keywords}`).includes(normalizedQuery)).map((entry) => ({ ...entry, searchText: normalize(`${entry.title} ${entry.detail} ${entry.keywords}`) }));
-    const allMatches = [...productMatches, ...serviceMatches].sort((a, b) => {
+    const normalizedTerms = normalizedQuery.split(/\s+/).filter(Boolean);
+    const placeMatches = localFinderIndexReady ? localFinderIndex.map((place) => {
+      const searchText = normalize([place.name, place.address, place.city, place.state, place.allowed_area, place.pet_allowed, place.pet_size, place.conditions].filter(Boolean).join(' '));
+      if (!normalizedTerms.every((term) => searchText.includes(term))) return null;
+      const category = String(place.category || 'cafe').toLowerCase();
+      return {
+        title: place.name,
+        detail: `${[place.city, place.state].filter(Boolean).join(', ') || place.address || 'Local Finder'} · Local Finder`,
+        href: `#local-finder-place?category=${encodeURIComponent(category)}&id=${encodeURIComponent(place.id)}`,
+        searchText,
+        selectedType: 'local_finder',
+        selectedKey: place.id,
+      };
+    }).filter(Boolean) : [];
+    const allMatches = [...productMatches, ...serviceMatches, ...placeMatches].sort((a, b) => {
       const aStarts = a.searchText.startsWith(normalizedQuery) || normalize(a.title).startsWith(normalizedQuery) ? 0 : 1;
       const bStarts = b.searchText.startsWith(normalizedQuery) || normalize(b.title).startsWith(normalizedQuery) ? 0 : 1;
       return aStarts - bStarts;
@@ -3940,6 +4871,12 @@ function setupDedicatedSearchPage() {
     input.setAttribute('aria-expanded', 'true');
   };
 
+  void localFinderIndexPromise.then((places) => {
+    localFinderIndex = places;
+    localFinderIndexReady = true;
+    if (input.value.trim()) renderResults(input.value);
+  });
+
   displayRecents();
   input.addEventListener('input', () => renderResults(input.value));
   input.addEventListener('keydown', (event) => {
@@ -3952,8 +4889,13 @@ function setupDedicatedSearchPage() {
       results.querySelector('a')?.focus();
     }
   });
-  form.addEventListener('submit', (event) => {
+  form.addEventListener('submit', async (event) => {
     event.preventDefault();
+    if (!localFinderIndexReady) {
+      localFinderIndex = await localFinderIndexPromise;
+      localFinderIndexReady = true;
+      renderResults(input.value);
+    }
     if (input.value.trim()) saveRecent(input.value);
     if (!currentMatches.length) {
       void recordSearchEvent(input.value, 0);
@@ -4036,6 +4978,28 @@ async function setupCustomerEnquiryHistory() {
   }).join('') : '<p>No enquiries yet. Use Share Feedback to send a message to Furgo.</p>';
 }
 
+function fitHomeBalanceValues() {
+  document.querySelectorAll('[data-fit-balance]').forEach((element) => {
+    element.style.fontSize = '';
+    let fontSize = Number.parseFloat(window.getComputedStyle(element).fontSize) || 12;
+    const availableWidth = element.clientWidth || element.parentElement?.clientWidth || 0;
+    if (!availableWidth) return;
+    element.style.fontSize = `${fontSize}px`;
+    while (element.scrollWidth > availableWidth + 1 && fontSize > 8) {
+      fontSize -= 1;
+      element.style.fontSize = `${fontSize}px`;
+    }
+  });
+}
+
+function setupHomeBalanceValueFit() {
+  window.requestAnimationFrame(fitHomeBalanceValues);
+  if (window.furgoHomeBalanceFitResizeInstalled) return;
+  window.addEventListener('resize', () => window.requestAnimationFrame(fitHomeBalanceValues));
+  document.addEventListener('furgo-coins-balance-updated', () => window.requestAnimationFrame(fitHomeBalanceValues));
+  window.furgoHomeBalanceFitResizeInstalled = true;
+}
+
 function wireForms() {
   if (!groomingQrSyncListenerInstalled) {
     document.addEventListener('furgo-order-status-updated', async (event) => {
@@ -4060,7 +5024,14 @@ function wireForms() {
     groomingQrSyncListenerInstalled = true;
   }
   setupHomePetProfiles();
+  setupHomeBalanceValueFit();
+  setupHomeShortcutLiveRefresh();
+  setupPetOverviewMedia();
+  setupPetAvatarPage();
+  setupPetProfileSwipe();
+  setupPetProfileDelete();
   setupPetProfileForm();
+  setupPetVaccinationPage();
   setupAdminPromotionsForm();
   setupMarketplaceInteractions();
   setupAdminMarketplace();
@@ -4077,7 +5048,11 @@ function wireForms() {
   setupAdminOrders();
   setupMyOrders();
   setupCheckInInteractions();
+  setupTokensPage(supabase);
+  void refreshFurgoCoinBalance(supabase);
   setupAdminAccess();
+  setupAdminSuppliers();
+  setupRoleApplication();
   setupAdminAuditPage();
   setupAdminEnquiries();
   setupAdminCustomers();
@@ -4089,6 +5064,8 @@ function wireForms() {
   setupDriverPortal();
   setupDedicatedSearchPage();
   setupLocalFinder(supabase);
+  setupPetAssistant(supabase);
+  setupAiNutritionist(supabase);
   void setupAdminSearchAnalytics();
   const toast = document.querySelector('.home-toast');
   if (toast) {
@@ -4261,6 +5238,7 @@ function wireForms() {
     event.preventDefault();
     void supabase.auth.signOut().finally(() => {
       sessionStorage.removeItem('furgo-demo-auth');
+      sessionStorage.removeItem('furgo-customer-portal-view');
       sessionStorage.removeItem('furgo-demo-profile-complete');
       sessionStorage.removeItem('furgo-demo-user-role');
       sessionStorage.removeItem('furgo-demo-user-profile');
@@ -4385,13 +5363,16 @@ async function render({ preserveScroll = false } = {}) {
   const previousScrollY = window.scrollY;
   const requestedHash = window.location.hash;
   const requestedPage = requestedHash.slice(1).split('?')[0];
-  if (['grooming', 'hotel', 'daycare', 'admin-access', 'admin-grooming', 'admin-hotel', 'admin-daycare', 'admin-pet-taxi'].includes(requestedPage)) {
+  if (['grooming', 'hotel', 'daycare', 'admin-access', 'admin-outlets', 'admin-users', 'admin-suppliers', 'admin-grooming', 'admin-hotel', 'admin-daycare', 'admin-pet-taxi'].includes(requestedPage)) {
     await refreshSharedOutlets();
     if (window.location.hash !== requestedHash) return render();
   }
   const [routeName = '', routeQuery = ''] = window.location.hash.slice(1).split('?');
   const page = routeName || 'home';
   const routeParams = new URLSearchParams(routeQuery);
+  if (page === 'home' && routeParams.get('portal') === 'customer') sessionStorage.setItem('furgo-customer-portal-view', 'true');
+  if (['supplier', 'driver', 'admin', 'admin-orders', 'admin-access', 'admin-enquiries', 'admin-audit', 'admin-customers', 'admin-product-insights', 'admin-home-mvp', 'admin-outlets', 'admin-users', 'admin-suppliers', 'admin-promotions', 'admin-pet-taxi', 'admin-marketplace-manage', 'admin-marketplace-products', 'admin-local-finder', 'admin-marketplace', 'admin-grooming', 'admin-hotel', 'admin-daycare', 'login'].includes(page)) sessionStorage.removeItem('furgo-customer-portal-view');
+  const isCustomerPortalView = sessionStorage.getItem('furgo-customer-portal-view') === 'true';
   const hasDemoSession = sessionStorage.getItem('furgo-demo-auth') === 'true';
   if (hasDemoSession && sessionStorage.getItem('furgo-demo-user-role') === 'customer') {
     try {
@@ -4399,7 +5380,7 @@ async function render({ preserveScroll = false } = {}) {
       saveCustomerRecord(currentCustomer);
     } catch { /* Keep the current page usable if local demo profile data is malformed. */ }
   }
-  const directorPages = ['admin-customers', 'admin-product-insights'];
+  const directorPages = ['admin-customers', 'admin-product-insights', 'admin-home-mvp', 'admin-outlets', 'admin-users', 'admin-suppliers'];
   const managerPages = ['admin-promotions', 'admin-pet-taxi', 'admin-marketplace-manage', 'admin-marketplace-products', 'admin-local-finder'];
   const serviceAdminPages = ['admin-marketplace', 'admin-grooming', 'admin-hotel', 'admin-daycare'];
   const portalPages = ['admin', 'admin-orders', 'admin-access', 'admin-enquiries', 'admin-audit', ...managerPages, ...serviceAdminPages, ...directorPages];
@@ -4439,17 +5420,21 @@ async function render({ preserveScroll = false } = {}) {
     window.location.hash = '#login';
     return;
   }
-  if (hasDemoSession && currentRole === 'supplier' && !supplierPages.includes(page) && page !== 'login') {
+  if (hasDemoSession && currentRole === 'supplier' && !isCustomerPortalView && !supplierPages.includes(page) && !['login', 'notification-settings'].includes(page)) {
     window.location.hash = '#supplier';
+    return;
+  }
+  if (page === 'notification-settings' && !hasDemoSession) {
+    window.location.hash = '#login';
     return;
   }
   if (driverPages.includes(page) && (!hasDemoSession || sessionStorage.getItem('furgo-demo-user-role') !== 'driver')) {
     window.location.hash = '#login';
     return;
   }
-  const protectedPages = ['home', 'search', 'services', 'about', 'profile', 'edit-profile', 'help-center', 'feedback', 'pet-profile', 'address', 'payment-method', 'credit', 'marketplace', 'local-finder', 'local-finder-list', 'local-finder-place', 'local-finder-favourites', 'product', 'seller', 'cart', 'checkout', 'orders', 'check-in', 'favourites', 'subscriptions', 'grooming', 'grooming-orders', 'hotel', 'daycare'];
-  const driverAllowedPages = ['driver', 'profile', 'edit-profile', 'help-center', 'feedback', 'login'];
-  if (hasDemoSession && sessionStorage.getItem('furgo-demo-user-role') === 'driver' && !driverAllowedPages.includes(page)) {
+  const protectedPages = ['home', 'search', 'services', 'about', 'profile', 'edit-profile', 'help-center', 'feedback', 'pet-profile', 'pet-profile-edit', 'pet-reminder', 'pet-vaccination', 'pet-record', 'pet-data', 'pet-avatar', 'pet-assistant', 'ai-nutritionist', 'address', 'payment-method', 'credit', 'tokens', 'marketplace', 'local-finder', 'local-finder-list', 'local-finder-search', 'local-finder-place', 'local-finder-favourites', 'product', 'seller', 'cart', 'checkout', 'orders', 'check-in', 'favourites', 'subscriptions', 'grooming', 'grooming-orders', 'hotel', 'daycare'];
+  const driverAllowedPages = ['driver', 'profile', 'edit-profile', 'help-center', 'feedback', 'notification-settings', 'login'];
+  if (hasDemoSession && sessionStorage.getItem('furgo-demo-user-role') === 'driver' && !isCustomerPortalView && !driverAllowedPages.includes(page)) {
     window.location.hash = '#driver';
     return;
   }
@@ -4458,6 +5443,7 @@ async function render({ preserveScroll = false } = {}) {
     try { customerProfile = JSON.parse(sessionStorage.getItem('furgo-demo-user-profile') || '{}'); } catch { customerProfile = {}; }
     if (getCustomerAccountStatus(customerProfile) === 'Blacklisted') {
       sessionStorage.removeItem('furgo-demo-auth');
+      sessionStorage.removeItem('furgo-customer-portal-view');
       sessionStorage.removeItem('furgo-demo-profile-complete');
       sessionStorage.removeItem('furgo-demo-user-role');
       window.location.hash = '#login';
@@ -4488,15 +5474,18 @@ async function render({ preserveScroll = false } = {}) {
     register: registerPage,
     onboarding: onboardingPage,
     profile: profilePage,
+    'notification-settings': () => notificationSettingsPage(routeParams.get('from') || ''),
     'edit-profile': () => editProfilePage(routeParams.get('from') || 'profile'),
     'help-center': () => helpCenterPage(routeParams.get('from') || 'profile'),
     feedback: () => feedbackPage(routeParams.get('from') || 'profile', routeParams.get('return') || 'profile'),
     address: () => addressPage(routeParams.get('from') || 'profile'),
     'payment-method': () => paymentMethodPage(routeParams.get('from') || 'profile'),
     credit: () => creditPage(routeParams.get('from') || 'profile'),
+    tokens: tokensPage,
     marketplace: () => marketplacePage(routeParams.get('category') || 'All'),
     'local-finder': localFinderPage,
     'local-finder-list': () => localFinderListPage(routeParams),
+    'local-finder-search': () => localFinderSearchPage(routeParams),
     'local-finder-place': () => localFinderPlacePage(routeParams),
     'local-finder-favourites': localFinderFavoritesPage,
     'admin-local-finder': () => adminLocalFinderPage(routeParams),
@@ -4512,15 +5501,23 @@ async function render({ preserveScroll = false } = {}) {
     'grooming-orders': groomingOrdersPage,
     hotel: petHotelPage,
     daycare: petDaycarePage,
-    'pet-profile': () => petProfilePage({ petId: routeParams.get('id') || '', mode: routeParams.get('mode') || '', returnTo: routeParams.get('from') || 'home' }),
+    'pet-profile': () => routeParams.get('mode') === 'add-card' ? petProfileAddCardPage() : routeParams.get('mode') === 'add' || !routeParams.get('id') ? petProfileEditPage({ petId: '', mode: 'add', returnTo: routeParams.get('from') || 'home' }) : petProfileOverviewPage(routeParams.get('id')),
+    'pet-profile-edit': () => petProfileEditPage({ petId: routeParams.get('id') || '', returnTo: routeParams.get('from') || 'pet-profile' }),
+    'pet-reminder': () => petReminderPage(routeParams.get('id') || ''),
+    'pet-vaccination': () => petVaccinationPage(routeParams.get('id') || ''),
+    'pet-record': () => petRecordPage(routeParams.get('id') || ''),
+    'pet-data': () => petDataPage(routeParams.get('id') || ''),
+    'pet-avatar': () => petAvatarPage(routeParams.get('id') || ''),
+    'pet-assistant': () => petAssistantPage(routeParams.get('pet') || ''),
+    'ai-nutritionist': aiNutritionistPage,
     admin: adminPortalPage,
     'admin-orders': () => adminOrdersPage(routeParams),
     'admin-promotions': adminPromotionsPage,
     'admin-marketplace': adminMarketplacePage,
     'admin-marketplace-manage': adminMarketplaceManagePage,
     'admin-marketplace-products': adminMarketplaceProductsPage,
-    supplier: marketplaceSupplierPage,
-    'supplier-product-edit': marketplaceSupplierProductEditPage,
+    supplier: () => marketplaceSupplierPage(routeParams),
+    'supplier-product-edit': () => marketplaceSupplierProductEditPage(routeParams),
     'admin-grooming': () => adminGroomingPage({ settingsOnly: routeParams.get('manage') === '1', stage: routeParams.get('stage') || 'new' }),
     'admin-hotel': () => adminHotelPage({ settingsOnly: routeParams.get('manage') === '1', stage: routeParams.get('stage') || 'new' }),
     'admin-daycare': () => adminDaycarePage({ settingsOnly: routeParams.get('manage') === '1', stage: routeParams.get('stage') || 'new' }),
@@ -4528,6 +5525,10 @@ async function render({ preserveScroll = false } = {}) {
     'admin-enquiries': adminEnquiriesPage,
     'admin-customers': () => adminCustomersPage(routeParams),
     'admin-access': adminAccessPage,
+    'admin-home-mvp': adminHomeMvpPage,
+    'admin-outlets': () => adminAccessPage('outlets'),
+    'admin-users': () => adminAccessPage('team'),
+    'admin-suppliers': adminSuppliersPage,
     'admin-audit': adminAuditPage,
     'admin-product-insights': adminProductServiceInsightsPage,
     driver: driverPortalPage,
@@ -4539,15 +5540,18 @@ async function render({ preserveScroll = false } = {}) {
     register: 'Create an account — Furgo',
     onboarding: 'Complete your profile — Furgo',
     profile: 'My Profile — Furgo',
+    'notification-settings': 'Notification — Furgo',
     'edit-profile': 'Edit Profile — Furgo',
     'help-center': 'Help Center — Furgo',
     feedback: 'Share Feedback — Furgo',
     address: 'Address — Furgo',
     'payment-method': 'Payment Method — Furgo',
     credit: 'My Furgo Credit — Furgo',
+    tokens: 'Furgo Coins — Furgo',
     marketplace: 'Marketplace — Furgo',
     'local-finder': 'Local Finder — Furgo',
     'local-finder-list': 'Nearby Places — Furgo',
+    'local-finder-search': 'Search Places — Furgo',
     'local-finder-place': 'Place Details — Furgo',
     'local-finder-favourites': 'Favourite Places — Furgo',
     'admin-local-finder': 'Local Finder Management — Furgo Admin',
@@ -4564,8 +5568,16 @@ async function render({ preserveScroll = false } = {}) {
     hotel: 'Pet Hotel — Furgo',
     daycare: 'Pet Daycare — Furgo',
     'pet-profile': 'Pet Profile — Furgo',
+    'pet-profile-edit': 'Edit Pet Profile — Furgo',
+    'pet-avatar': 'This Pet Avatar — Furgo',
+    'pet-reminder': 'Pet Reminder — Furgo',
+    'pet-vaccination': 'Pet Vaccination — Furgo',
+    'pet-record': 'Pet Record — Furgo',
+    'pet-data': 'Pet Data — Furgo',
+    'pet-assistant': 'Pet Assistant — Furgo',
+    'ai-nutritionist': 'AI Nutritionist — Furgo',
     admin: 'Admin Portal — Furgo',
-    'admin-promotions': 'Promotions & Announcements — Furgo Admin',
+    'admin-promotions': 'Manage Promotions — Furgo Admin',
     'admin-marketplace': 'Marketplace — Furgo Admin',
     'admin-marketplace-manage': 'Manage Marketplace — Furgo Admin',
     'admin-marketplace-products': 'Product And Supplier Mapping — Furgo Admin',
@@ -4577,6 +5589,10 @@ async function render({ preserveScroll = false } = {}) {
     'admin-enquiries': 'Customer Enquiries — Furgo Admin',
     'admin-customers': 'Customer Profiles — Furgo Admin',
     'admin-access': 'Admin Access — Furgo',
+    'admin-home-mvp': 'Manage Home MVP — Furgo Admin',
+    'admin-outlets': 'Manage Outlets — Furgo Admin',
+    'admin-users': 'Manage Admin — Furgo Admin',
+    'admin-suppliers': 'Manage Supplier — Furgo Admin',
     'admin-audit': 'Activity Log — Furgo',
     'admin-product-insights': 'Product & Service Insights — Furgo Admin',
     driver: 'Driver Portal — Furgo Pet Taxi',
@@ -4584,8 +5600,20 @@ async function render({ preserveScroll = false } = {}) {
   const renderPage = pageRenderers[page] || homePage;
   document.title = titles[page] || titles.home;
   document.querySelector('#app').innerHTML = renderPage();
+  if (['executive', 'manager', 'director'].includes(currentRole) && isCustomerPortalView && !portalPages.includes(page) && !supplierPages.includes(page) && !driverPages.includes(page) && page !== 'notification-settings') {
+    let adminProfile = {};
+    try { adminProfile = JSON.parse(sessionStorage.getItem('furgo-demo-user-profile') || '{}'); } catch { adminProfile = {}; }
+    const adminName = adminProfile.name || adminProfile.email || 'Admin';
+    document.querySelector('#app').insertAdjacentHTML('afterbegin', `<header class="admin-portal-header admin-customer-view-header"><a class="admin-portal-brand" href="#admin"><img src="Image/Icon/Logo.png" alt="Furgo" /><span>Admin Portal</span></a><div class="admin-portal-account"><span>${escapeHTML(adminName)}</span><a class="admin-customer-portal-link" href="#admin">Open Admin Portal</a></div></header>`);
+  }
   // Keep the Admin Portal navigation consistent across dashboard and management pages.
   if (portalPages.includes(page)) document.querySelector('#app').insertAdjacentHTML('beforeend', adminBottomNavigation(page === 'admin' ? 'admin' : page === 'admin-orders' ? 'orders' : page === 'admin-enquiries' ? 'enquiries' : page === 'admin-access' ? 'admin-access' : '', currentRole));
+  if (page === 'notification-settings') {
+    if (['executive', 'manager', 'director'].includes(currentRole)) document.querySelector('#app').insertAdjacentHTML('beforeend', adminBottomNavigation('admin-access', currentRole));
+    else if (currentRole === 'supplier') document.querySelector('#app').insertAdjacentHTML('beforeend', '<nav class="bottom-nav supplier-bottom-nav" aria-label="Supplier Portal navigation"><a class="bottom-item" href="#supplier?tab=home"><img src="Image/Icon/Icon-01.png" alt="" /><span>Home</span></a><a class="bottom-item" href="#supplier?tab=orders"><img src="Image/Icon/Icon-03.png" alt="" /><span>Order</span></a><a class="bottom-item" href="#supplier?tab=help"><img src="Image/Icon/Icon-05.png" alt="" /><span>Help</span></a><a class="bottom-item active" href="#supplier?tab=profile"><img src="Image/Icon/Icon-08.png" alt="" /><span>Profile</span></a></nav>');
+    else if (currentRole === 'driver') document.querySelector('#app').insertAdjacentHTML('beforeend', driverBottomNavigation('profile'));
+    else document.querySelector('#app').insertAdjacentHTML('beforeend', bottomNavigation('profile', (file) => `Image/Icon/${encodeURIComponent(file)}`));
+  }
   if (currentRole === 'driver' && ['driver', 'profile', 'help-center', 'feedback'].includes(page)) {
     const active = page === 'driver' ? (routeParams.get('view') === 'orders' ? 'orders' : 'driver') : page === 'profile' ? 'profile' : ['help-center', 'feedback'].includes(page) ? 'help' : '';
     document.querySelector('#app').insertAdjacentHTML('beforeend', driverBottomNavigation(active));
@@ -4596,6 +5624,10 @@ async function render({ preserveScroll = false } = {}) {
     sessionStorage.setItem('furgo-demo-registration-started', 'true');
   }
   wireForms();
+  if (page === 'pet-profile' && routeParams.get('createAvatar') === '1') {
+    window.requestAnimationFrame(() => document.querySelector('[data-profile-picture-dialog]')?.showModal());
+  }
+  setupPetCarePages();
   window.scrollTo(0, preserveScroll ? previousScrollY : 0);
   if (page === 'admin-orders' && routeParams.get('view') === 'scan') {
     window.requestAnimationFrame(() => document.querySelector('.admin-checkin-scan-panel')?.scrollIntoView({ behavior: 'smooth', block: 'center' }));

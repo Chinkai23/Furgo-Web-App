@@ -76,14 +76,17 @@ export function adminOrderProgressMarkup(order) {
   }).join('')}</ol>`;
 }
 
-export function adminOrderCardMarkup({ order, serviceLabel, title, summary, summaryMarkup, reference, date, total, details }) {
-  const status = customerOrderStatus(order);
+export function adminOrderCardMarkup({ order, serviceLabel, title, titleMarkup, summary, summaryMarkup, reference, date, total, details, statusLabel }) {
+  const status = statusLabel || customerOrderStatus(order);
   const category = statusCategory(status);
   const statusClass = category === 'canceled' ? 'is-canceled' : category === 'completed' ? 'is-complete' : category === 'no-show' ? 'is-no-show' : '';
   const formattedDate = date ? new Date(date).toLocaleDateString('en-MY', { day: 'numeric', month: 'short', year: 'numeric' }) : '';
   const amount = Number(total ?? order.totalAmount ?? order.total);
   const orderReference = reference || order.reference || order.id || '';
-  return `<details class="my-order-card admin-service-order-card"><summary class="my-order-card-summary"><div class="my-order-card-top"><span class="my-order-service-label">${escapeHTML(serviceLabel)}</span><div class="admin-order-summary-badges"><b class="my-order-status ${statusClass}">${escapeHTML(status)}</b>${adminOrderReceiptBadge(order)}</div></div><h2>${escapeHTML(title || 'Order')}</h2><p class="my-order-summary ${summaryMarkup ? 'admin-market-order-summary' : ''}">${summaryMarkup || escapeHTML(summary || 'Order details will appear here.')}</p><div class="my-order-card-bottom"><small>${[orderReference, formattedDate].filter(Boolean).map(escapeHTML).join(' · ')}</small><strong>MYR ${Number.isFinite(amount) ? amount.toFixed(2) : '0.00'}</strong></div><span class="my-order-expand-hint">View Order Details <span aria-hidden="true">⌄</span></span></summary><div class="my-order-expanded admin-service-order-details">${details}</div></details>`;
+  const previewMarkup = order.serviceId === 'marketplace' && titleMarkup
+    ? `<div class="marketplace-order-preview">${titleMarkup}</div>`
+    : `<h2>${escapeHTML(title || 'Order')}</h2>`;
+  return `<details class="my-order-card admin-service-order-card"><summary class="my-order-card-summary"><div class="my-order-card-top"><span class="my-order-service-label">${escapeHTML(serviceLabel)}</span><div class="admin-order-summary-badges"><b class="my-order-status ${statusClass}">${escapeHTML(status)}</b>${adminOrderReceiptBadge(order)}</div></div>${previewMarkup}<p class="my-order-summary ${summaryMarkup ? 'admin-market-order-summary' : ''}">${summaryMarkup || escapeHTML(summary || 'Order details will appear here.')}</p><div class="my-order-card-bottom"><small>${[orderReference, formattedDate].filter(Boolean).map(escapeHTML).join(' · ')}</small><strong>MYR ${Number.isFinite(amount) ? amount.toFixed(2) : '0.00'}</strong></div><span class="my-order-expand-hint">View Order Details <span aria-hidden="true">⌄</span></span></summary><div class="my-order-expanded admin-service-order-details">${details}</div></details>`;
 }
 
 export function adminOrderStatusControl(order, storageKey = order.storageKey || '') {

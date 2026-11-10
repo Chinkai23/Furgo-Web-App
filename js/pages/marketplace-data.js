@@ -8,6 +8,8 @@ if (localStorage.getItem(marketplaceTestCatalogResetKey) !== 'done') {
   localStorage.setItem(marketplaceTestCatalogResetKey, 'done');
 }
 export const marketplaceCartKey = 'furgo-demo-marketplace-cart';
+export const marketplaceCartSelectionKey = 'furgo-demo-marketplace-cart-selection';
+export const marketplaceCheckoutSelectionKey = 'furgo-demo-marketplace-checkout-selection';
 export const marketplaceSubscriptionCartKey = 'furgo-demo-marketplace-subscription-cart';
 export const marketplaceSubscriptionsKey = 'furgo-demo-marketplace-active-subscriptions';
 export const marketplaceFavoritesKey = 'furgo-demo-marketplace-favorites';
@@ -98,6 +100,17 @@ export function loadMarketplaceCart() {
     const saved = JSON.parse(localStorage.getItem(marketplaceCartKey) || '[]');
     return Array.isArray(saved) ? saved : [];
   } catch { return []; }
+}
+
+export function marketplaceCartLineKey(item) {
+  return `${String(item?.productId || '')}::${String(item?.variantId || '')}`;
+}
+
+export function loadMarketplaceCartSelection() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(marketplaceCartSelectionKey) || 'null');
+    return Array.isArray(saved) ? saved.filter((key) => typeof key === 'string') : null;
+  } catch { return null; }
 }
 
 // Reads subscription-cart selections; recurring billing is handled only after payment integration is added.

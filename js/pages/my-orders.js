@@ -1,5 +1,5 @@
 import { bottomNavigation, escapeHTML } from '../shared.js';
-import { loadMarketplaceOrders, loadMarketplaceProducts, marketplaceProductsKey } from './marketplace-data.js';
+import { loadMarketplaceOrders, loadMarketplaceProducts, loadMarketplaceSuppliers, marketplaceProductsKey, safeMarketplaceImage } from './marketplace-data.js';
 import { loadGroomingBookings } from './grooming-data.js';
 import { mountDriverLocation } from './driver-location.js';
 import { cacheSyncedRecords } from '../app-data-sync.js';
@@ -7,7 +7,7 @@ import { marketplaceOrdersKey } from './marketplace-data.js';
 import { groomingBookingsKey } from './grooming-data.js';
 import { hotelBookingsKey } from './hotel-data.js';
 import { daycareBookingsKey, daycarePassesKey } from './daycare-data.js';
-import { customerOrderStatus, statusCategory } from '../order-status.js';
+import { customerOrderStatus, marketplaceShipmentSummary, statusCategory } from '../order-status.js';
 import { petProfilesStorageKeyForCurrentUser } from './home.js';
 import { supabase } from '../supabase.js';
 
@@ -164,28 +164,91 @@ function openServiceCancelDialog(dialog, { order, serviceId, key }) {
   dialog.showModal();
 }
 
-function marketplaceReturnSection(order) {
+function marketplaceReturnSection(order, products = loadMarketplaceProducts(), receiptAction = '') {
   const grouped = new Map();
   (order.items || []).forEach((item) => {
-    const supplier = String(item.supplierId || item.supplier || 'Supplier').trim() || 'Supplier';
+    const product = products.find((entry) => String(entry.id) === String(item.productId || ''));
+    const variant = product?.variants?.find((entry) => String(entry.id) === String(item.variantId || ''));
+    const supplier = String(item.supplierId || item.supplier || item.shopName || variant?.supplierId || variant?.supplier || product?.supplierName || 'Shop details unavailable').trim();
     if (!grouped.has(supplier)) grouped.set(supplier, []);
     grouped.get(supplier).push(item);
   });
-  return `<section class="my-order-marketplace-lines"><h3>Products &amp; Delivery</h3>${[...grouped.entries()].map(([supplier, items]) => {
-    const shipment = order.supplierShipments?.[supplier.toLowerCase()] || Object.entries(order.supplierShipments || {}).find(([key]) => key.toLowerCase() === supplier.toLowerCase())?.[1] || {};
-    const trackingUrl = validTrackingUrl(shipment.trackingUrl);
+  return `<section class="my-order-marketplace-lines"><h3>Products Purchased &amp; Delivery</h3><div class="marketplace-order-reference-row"><p class="marketplace-order-reference">Order No: ${escapeHTML(order.reference || order.id || '')}</p><div class="marketplace-receipt-control">${receiptAction}</div></div>${[...grouped.entries()].map(([supplier, items]) => {
+    const shipment = order.supplierShipments?.[supplier.toLowerCase()] || Object.entries(order.supplierShipments || {}).find(([key, value]) => key.toLowerCase() === supplier.toLowerCase() || String(value?.supplierName || '').toLowerCase() === supplier.toLowerCase())?.[1] || {};
     const deliveredAt = shipment.deliveredAt ? new Date(shipment.deliveredAt) : null;
     const returnWindowOpen = shipment.status === 'Delivered' && deliveredAt && !Number.isNaN(deliveredAt.getTime()) && Date.now() <= deliveredAt.getTime() + 7 * 24 * 60 * 60 * 1000;
-    return `<section class="my-order-supplier-group"><header><strong>${escapeHTML(supplier)}</strong><span>${escapeHTML(shipment.status || 'Preparing order')}${shipment.trackingNumber ? ` · ${escapeHTML(shipment.courier || 'Courier')} ${escapeHTML(shipment.trackingNumber)}` : ''}${trackingUrl ? ` · <a href="${escapeHTML(trackingUrl)}" target="_blank" rel="noopener noreferrer">Track shipment</a>` : ''}</span></header>${items.map((item) => {
+    const trackingMarkup = marketplaceTrackingForSupplier(shipment);
+    return `<section class="my-order-supplier-group"><header><strong>Shop: ${escapeHTML(supplier)}</strong><span>${escapeHTML(shipment.status || 'Preparing order')}</span></header>${items.map((item) => {
       const line = Number(item.lineNumber);
       const returnRequest = item.returnRequest;
       const statusMarkup = returnRequest
         ? `<div class="my-order-return-status"><strong>Return status: ${escapeHTML(returnRequest.status)}</strong><span>Refund amount: MYR ${Number(returnRequest.refundAmount || 0).toFixed(2)} (product MYR ${Number(returnRequest.paidAmount || 0).toFixed(2)} + shipping MYR ${Number(returnRequest.shippingRefund || 0).toFixed(2)})</span>${returnRequest.supplierResponse ? `<span>${escapeHTML(returnRequest.supplierResponse)}</span>` : ''}${returnRequest.decisionReason ? `<span>Review decision: ${escapeHTML(returnRequest.decisionReason)}</span>` : ''}</div>`
         : returnWindowOpen && Number.isInteger(line) ? `<button class="button button-light my-order-return-open" type="button" data-open-marketplace-return data-order-id="${escapeHTML(order.id)}" data-line-number="${line}">Request Return &amp; Refund</button><form class="my-order-return-form" data-marketplace-return-form data-order-id="${escapeHTML(order.id)}" data-line-number="${line}" hidden><label>Reason for return<textarea name="reason" maxlength="2000" required></textarea></label><label>Product photo<input name="photo" type="file" accept="image/jpeg,image/png,image/webp" required /></label><small>One clear product photo, up to 5 MB. Your return request is available for 7 days after delivery.</small><button class="button button-primary" type="submit">Submit Return Request</button><span data-marketplace-return-feedback role="status" aria-live="polite"></span></form>`
         : shipment.status === 'Delivered' ? '<small class="my-order-return-expired">The 7-day return window has ended.</small>' : '';
-      return `<article class="my-order-marketplace-line"><div><strong>${escapeHTML(item.name || 'Product')}</strong><span>${escapeHTML(item.variantLabel || 'Variant')} × ${Number(item.quantity) || 1}</span></div><b>MYR ${Number(item.paidAmount ?? item.total ?? 0).toFixed(2)}</b>${statusMarkup}</article>`;
-    }).join('')}</section>`;
+      const product = products.find((entry) => String(entry.id) === String(item.productId || ''));
+      const imageSources = [
+        ...(Array.isArray(item.images) ? item.images : item.image ? [item.image] : []),
+        ...(Array.isArray(product?.images) ? product.images : []),
+        item.imageUrl,
+        product?.imageUrl,
+      ];
+      const productImage = imageSources.map(safeMarketplaceImage).find(Boolean);
+      const imageMarkup = productImage
+        ? `<img class="my-order-product-image" src="${escapeHTML(productImage)}" alt="${escapeHTML(item.name || 'Product')}" loading="lazy" />`
+        : `<span class="my-order-product-image is-placeholder" aria-hidden="true">${escapeHTML(product?.emoji || '🐾')}</span>`;
+      return `<article class="my-order-marketplace-line">${imageMarkup}<div class="my-order-marketplace-copy"><strong>${escapeHTML(item.name || product?.name || 'Product')}</strong><span>${escapeHTML(item.variantLabel || 'Variant')} × ${Number(item.quantity) || 1}</span><b>MYR ${Number(item.paidAmount ?? item.total ?? 0).toFixed(2)}</b></div>${statusMarkup}</article>`;
+    }).join('')}${trackingMarkup}</section>`;
   }).join('')}</section>`;
+}
+
+function marketplaceOrderPreview(order, products) {
+  const item = order.items?.[0];
+  if (!item) return '<div class="marketplace-order-preview">Marketplace order</div>';
+  const product = products.find((entry) => String(entry.id) === String(item.productId || ''));
+  const imageSources = [
+    ...(Array.isArray(item.images) ? item.images : item.image ? [item.image] : []),
+    ...(Array.isArray(product?.images) ? product.images : []),
+    item.imageUrl,
+    product?.imageUrl,
+  ];
+  const image = imageSources.map(safeMarketplaceImage).find(Boolean);
+  const imageMarkup = image
+    ? `<img class="marketplace-order-preview-image" src="${escapeHTML(image)}" alt="${escapeHTML(item.name || product?.name || 'Product')}" loading="lazy" />`
+    : `<span class="marketplace-order-preview-image is-placeholder" aria-hidden="true">${escapeHTML(product?.emoji || '🐾')}</span>`;
+  const additionalProducts = Math.max(0, order.items.length - 1);
+  const quantity = Number(item.quantity) || 1;
+  const amount = Number(item.paidAmount ?? item.total ?? (Number(item.unitPrice) || 0) * quantity);
+  return `<div class="marketplace-order-preview"><span>${imageMarkup}<span class="marketplace-order-preview-copy"><strong>${escapeHTML(item.name || product?.name || 'Product')}</strong><span class="marketplace-order-preview-detail"><span>${escapeHTML(item.variantLabel || 'Variant')} × ${quantity}</span><b>MYR ${amount.toFixed(2)}</b></span></span></span>${additionalProducts ? `<small class="marketplace-order-more">and ${additionalProducts} ${additionalProducts === 1 ? 'Product' : 'Products'} More</small>` : ''}</div>`;
+}
+
+function marketplaceTrackingForSupplier(shipment = {}) {
+  if (!shipment || typeof shipment !== 'object') shipment = {};
+  const isShipped = ['shipped', 'delivered'].includes(String(shipment.status || '').toLowerCase());
+  const supplierTrackingUrl = validTrackingUrl(shipment.trackingUrl);
+  const trackingUrl = supplierTrackingUrl || courierTrackingPage(shipment.courier);
+  const copyTrackingNumber = !supplierTrackingUrl && shipment.trackingNumber;
+  const courierDetails = `Courier: ${shipment.courier || '—'} · Tracking Number: ${shipment.trackingNumber || '—'}`;
+  const canTrack = isShipped && Boolean(trackingUrl);
+  const trackingMessage = isShipped ? courierDetails : 'Tracking details will appear after this shop ships the product.';
+  const button = canTrack
+    ? `<a class="marketplace-order-track-button" href="${escapeHTML(trackingUrl)}" data-track-order ${copyTrackingNumber ? `data-copy-tracking-number="${escapeHTML(shipment.trackingNumber)}"` : ''}>Track Order</a>`
+    : '<button class="marketplace-order-track-button" type="button" disabled>Track Order</button>';
+  return `<section class="marketplace-order-tracking ${canTrack ? '' : 'is-pending'}"><h3>Delivery Tracking</h3><div class="marketplace-order-tracking-row"><span>${escapeHTML(trackingMessage)}</span>${button}</div></section>`;
+}
+
+function courierTrackingPage(courier) {
+  const name = String(courier || '').toLowerCase().replace(/[^a-z0-9]+/g, '');
+  if (name.includes('spx') || name.includes('shopeeexpress')) return 'https://spx.com.my/en';
+  if (name.includes('jtexpress') || name === 'jt') return 'https://jtexpress.my/tracking/';
+  if (name.includes('poslaju') || name.includes('posmalaysia')) return 'https://tracking.pos.com.my/tracking';
+  if (name.includes('ninjavan')) return 'https://www.ninjavan.co/en-my/tracking';
+  if (name.includes('gdex') || name.includes('gdexpress')) return 'https://gdexpress.com/tracking/';
+  if (name.includes('citylink')) return 'https://www.citylinkexpress.com/track-your-shipment/';
+  if (name.includes('abx')) return 'https://www.abxexpress.com.my/tracking';
+  if (name.includes('bestexpress') || name.includes('bestcargo')) return 'https://www.best-inc.my/track';
+  if (name.includes('dhl')) return 'https://www.dhl.com/my-en/home/tracking.html';
+  if (name.includes('fedex')) return 'https://www.fedex.com/en-my/tracking.html';
+  return name ? 'https://www.tracking.my/' : '';
 }
 
 function validTrackingUrl(value) {
@@ -198,9 +261,26 @@ function validTrackingUrl(value) {
 // Formats saved ISO timestamps and prototype date strings for compact order cards.
 function formatOrderDate(value = '') {
   if (!value) return '';
+  const dateOnly = String(value).match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (dateOnly) {
+    const [, year, month, day] = dateOnly;
+    return new Date(Number(year), Number(month) - 1, Number(day)).toLocaleDateString('en-MY', { day: 'numeric', month: 'short', year: 'numeric' });
+  }
+  const dayFirstDate = String(value).match(/^(\d{1,2})[/.](\d{1,2})[/.](\d{4})$/);
+  if (dayFirstDate) {
+    const [, day, month, year] = dayFirstDate;
+    return new Date(Number(year), Number(month) - 1, Number(day)).toLocaleDateString('en-MY', { day: 'numeric', month: 'short', year: 'numeric' });
+  }
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) return String(value);
   return parsed.toLocaleDateString('en-MY', { day: 'numeric', month: 'short', year: 'numeric' });
+}
+
+function formatOrderDateTime(value = '') {
+  if (!value) return '';
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return formatOrderDate(value);
+  return parsed.toLocaleString('en-MY', { day: 'numeric', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit' });
 }
 
 function orderPetCards(order) {
@@ -246,17 +326,14 @@ function orderDetailRows(order) {
   const appointment = order.serviceId === 'hotel'
     ? [order.roomName, order.checkIn || order.startDate, order.checkOut || order.endDate, order.outlet].filter(Boolean).join(' · ')
     : [order.packageName || order.planName, order.date || order.bookingDate, order.time, order.dropoffTime && `Drop-off ${order.dropoffTime}`, order.pickupTime && `Pick-up ${order.pickupTime}`, order.outlet].filter(Boolean).join(' · ');
-  const items = Array.isArray(order.items)
-    ? order.items.map((item) => `${item.name || item.productName || 'Product'} × ${Number(item.quantity) || 1}`).join(', ')
-    : '';
   const addOns = Array.isArray(order.addOns)
     ? order.addOns.map((item) => typeof item === 'string' ? item : item.name).filter(Boolean).join(', ')
     : '';
   const payment = [order.paymentStatus, order.paymentMethod, order.paymentReference && `Ref ${order.paymentReference}`].filter(Boolean).join(' · ');
   const total = Number(order.totalAmount ?? order.total);
   const rows = [
-    ['Service', order.serviceLabel],
-    [order.serviceId === 'marketplace' ? 'Items' : 'Appointment', order.serviceId === 'marketplace' ? items || order.summary : appointment || order.summary],
+    [order.serviceId === 'marketplace' ? '' : 'Service', order.serviceId === 'marketplace' ? '' : order.serviceLabel],
+    [order.serviceId === 'marketplace' ? '' : 'Appointment', order.serviceId === 'marketplace' ? '' : appointment || order.summary],
     ['Add-On Services', addOns],
     ['Pet Taxi', order.includeTaxi || order.taxi?.pickup || order.taxi?.dropoff ? [order.taxiSchedule, order.taxi?.pickup, order.taxi?.dropoff].filter(Boolean).join(' · ') || 'Included' : ''],
     ['Payment', payment],
@@ -273,7 +350,10 @@ export function myOrdersPage(routeParams = new URLSearchParams()) {
   let profile = {};
   try { profile = JSON.parse(sessionStorage.getItem('furgo-demo-user-profile') || '{}'); } catch { profile = {}; }
 
-  const service = orderServices.some((item) => item.id === routeParams.get('service')) ? routeParams.get('service') : 'all';
+  const requestedServices = (routeParams.get('service') || 'all').split(',').filter((id) => orderServices.some((item) => item.id === id && id !== 'all'));
+  const selectedServices = requestedServices.length ? [...new Set(requestedServices)] : [];
+  const service = selectedServices.length ? selectedServices.join(',') : 'all';
+  const serviceName = selectedServices.length ? selectedServices.map((id) => orderServices.find((item) => item.id === id)?.label).filter(Boolean).join(', ') : 'All';
   const status = orderStatuses.some((item) => item.id === routeParams.get('status')) ? routeParams.get('status') : 'new';
   const returnTo = ['home', 'marketplace', 'grooming', 'hotel', 'daycare', 'profile'].includes(routeParams.get('from')) ? routeParams.get('from') : 'home';
   const marketplace = loadMarketplaceOrders().filter((order) => belongsToCurrentUser(order, profile)).map((order) => ({
@@ -283,9 +363,11 @@ export function myOrdersPage(routeParams = new URLSearchParams()) {
     serviceLabel: 'Marketplace',
     title: order.reference ? `Order ${order.reference}` : 'Marketplace order',
     summary: (order.items || []).map((item) => `${item.name || 'Product'} × ${Number(item.quantity) || 1}`).join(', ') || 'Marketplace purchase',
-    dateLabel: order.date || order.createdAt || '',
+    dateLabel: order.createdAt || order.date || '',
     totalAmount: Number(order.total) || 0,
   }));
+  const marketplaceProducts = loadMarketplaceProducts();
+  const marketplaceSuppliers = loadMarketplaceSuppliers(marketplaceProducts);
   const grooming = loadGroomingBookings().filter((order) => belongsToCurrentUser(order, profile)).map((order) => ({
     ...order,
     serviceId: 'grooming',
@@ -316,14 +398,14 @@ export function myOrdersPage(routeParams = new URLSearchParams()) {
     return Number.isFinite(timestamp) ? timestamp : 0;
   };
   const allOrders = [...marketplace, ...grooming, ...hotels, ...daycare].sort((a, b) => orderCreatedAt(b) - orderCreatedAt(a));
-  const serviceOrders = allOrders.filter((order) => service === 'all' || order.serviceId === service);
+  const serviceOrders = allOrders.filter((order) => !selectedServices.length || selectedServices.includes(order.serviceId));
   const visibleOrders = serviceOrders.filter((order) => matchesOrderStatusTab(order, status));
   const icon = (file) => `Image/Icon/${encodeURIComponent(file)}`;
   const tabHref = (nextService, nextStatus) => `#orders?service=${encodeURIComponent(nextService)}&status=${encodeURIComponent(nextStatus)}&from=${encodeURIComponent(returnTo)}`;
-  const serviceTabs = orderServices.map((item) => {
-    return `<a class="my-orders-tab ${service === item.id ? 'is-active' : ''}" href="${tabHref(item.id, status)}" ${service === item.id ? 'aria-current="page"' : ''}>${item.label}</a>`;
-  }).join('');
+  const serviceFilter = `<div class="my-orders-service-filter"><button class="my-orders-service-filter-trigger" type="button" data-my-orders-filter-toggle aria-expanded="false" aria-controls="my-orders-service-filter-panel" aria-label="Filter orders by service"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M7 12h10m-7 6h4" /></svg><span class="my-orders-filter-badge" data-my-orders-filter-badge ${selectedServices.length ? '' : 'hidden'}>${selectedServices.length}</span></button><div class="my-orders-service-filter-panel" id="my-orders-service-filter-panel" data-my-orders-filter-panel hidden><strong>Filter by service</strong><label><input type="checkbox" data-order-service-option="all" ${selectedServices.length ? '' : 'checked'} />All</label>${orderServices.filter((item) => item.id !== 'all').map((item) => `<label><input type="checkbox" data-order-service-option="${item.id}" ${selectedServices.includes(item.id) ? 'checked' : ''} />${item.label}</label>`).join('')}<button class="button button-primary" type="button" data-my-orders-filter-apply>Apply Filters</button></div></div>`;
   const statusTabs = orderStatuses.map((item) => `<a class="my-orders-status-tab ${status === item.id ? 'is-active' : ''}" href="${tabHref(service, item.id)}" ${status === item.id ? 'aria-current="page"' : ''}>${item.label}</a>`).join('');
+  const orderCount = `${visibleOrders.length} ${visibleOrders.length === 1 ? 'order' : 'orders'}`;
+  const orderCountSummary = `${serviceName} Orders - ${orderCount}`;
 
   const orderCard = (order) => {
     const serviceName = order.serviceLabel;
@@ -333,7 +415,7 @@ export function myOrdersPage(routeParams = new URLSearchParams()) {
     const isNoShow = statusCategory(statusLabel) === 'no-show';
     const summary = order.summary || order.description || 'Order details will appear here.';
     const supplierShipments = Object.values(order.supplierShipments || {}).filter((shipment) => shipment && typeof shipment === 'object');
-    const marketplaceDetails = order.serviceId === 'marketplace' ? marketplaceReturnSection(order) : '';
+    let marketplaceDetails = '';
     const groomingDetails = order.serviceId === 'grooming' && order.includeTaxi
       ? `<p class="my-order-extra">Pet taxi: ${escapeHTML(order.taxiSchedule || 'Pickup time pending')} · MYR ${Number(order.taxiTotal || 0).toFixed(2)}</p>` : '';
     const hotelDetails = order.serviceId === 'hotel'
@@ -350,7 +432,13 @@ export function myOrdersPage(routeParams = new URLSearchParams()) {
     const taxiTracking = taxiEnabled ? `<section class="my-order-taxi-tracking"><strong>Pet Taxi · ${escapeHTML(taxiProgress)}</strong>${taxiLocationContent}${taxiProgress !== 'Completed' ? `<a href="${taxiCheckInHref}">Open Pet Taxi QR code</a>` : ''}</section>` : '';
     const reference = order.reference || order.id || '';
     const date = formatOrderDate(order.dateLabel);
+    const orderDateDisplay = order.serviceId === 'marketplace'
+      ? formatOrderDateTime(order.createdAt || order.dateLabel || order.date)
+      : date;
     const orderDetails = orderDetailRows(order);
+    const orderDetailsMarkup = order.serviceId === 'marketplace'
+      ? `<section class="marketplace-order-info">${orderDetails ? `<dl class="my-order-detail-list">${orderDetails}</dl>` : ''}</section>`
+      : `<dl class="my-order-detail-list">${orderDetails}</dl>`;
     const petsDetails = orderPetCards(order);
     const orderActions = onlinePaymentActions(order);
     const serviceCancelControl = order.serviceId !== 'marketplace' && canCancelServiceOrder(order)
@@ -359,16 +447,37 @@ export function myOrdersPage(routeParams = new URLSearchParams()) {
     const receiptAction = order.receipt?.data
       ? `<a class="button button-primary my-order-receipt-button" href="${escapeHTML(order.receipt.data)}" download="${escapeHTML(order.receipt.name || 'receipt')}">Download Receipt</a>`
       : `<button class="button button-light my-order-receipt-button" type="button" data-show-receipt-message>Download Receipt</button><p class="my-order-receipt-empty" data-receipt-unavailable-message hidden>Your receipt will be available to download once the outlet has received your order.</p>`;
-    const orderControlRow = `<div class="marketplace-order-actions-row"><div class="marketplace-receipt-control">${receiptAction}</div>${order.serviceId === 'marketplace' ? marketplaceCancelControl(order) : serviceCancelControl}</div>`;
+    if (order.serviceId === 'marketplace') marketplaceDetails = marketplaceReturnSection(order, marketplaceProducts, receiptAction);
+    const firstItem = order.items?.[0];
+    const firstProduct = marketplaceProducts.find((product) => String(product.id) === String(firstItem?.productId || ''));
+    const firstVariant = firstProduct?.variants?.find((variant) => String(variant.id) === String(firstItem?.variantId || ''));
+    const sellerName = String(firstItem?.supplierId || firstItem?.supplier || firstItem?.shopName || firstVariant?.supplierId || firstVariant?.supplier || firstProduct?.supplierName || '').trim();
+    const seller = marketplaceSuppliers.find((entry) => entry.name.toLowerCase() === sellerName.toLowerCase());
+    const sellerLink = validTrackingUrl(seller?.orderLink);
+    const sellerPhone = String(seller?.phone || '').replace(/[^\d+]/g, '');
+    const contactSellerHref = sellerLink || (sellerPhone ? `tel:${sellerPhone}` : `#seller?name=${encodeURIComponent(sellerName)}`);
+    const contactSellerTarget = sellerLink ? ' target="_blank" rel="noopener noreferrer"' : '';
+    const sellerContactAction = order.serviceId === 'marketplace'
+      ? `<a class="button my-order-support-button my-order-contact-seller-button" href="${escapeHTML(contactSellerHref)}"${contactSellerTarget}>Contact Seller</a>`
+      : '';
+    const customerServiceAction = `<a class="button my-order-support-button my-order-customer-service-button" href="#help-center?from=orders">Customer Service</a>`;
+    const orderCancelControl = order.serviceId === 'marketplace' ? marketplaceCancelControl(order) : serviceCancelControl;
+    const orderSupportActions = order.serviceId === 'marketplace'
+      ? `<div class="marketplace-order-support-actions">${sellerContactAction}${customerServiceAction}</div>`
+      : `<div class="marketplace-order-support-actions"><div class="marketplace-receipt-control">${receiptAction}</div>${customerServiceAction}</div>`;
+    const orderControlRow = `<div class="marketplace-order-actions-row${order.serviceId === 'marketplace' ? ' is-marketplace' : ''}">${orderCancelControl}${orderSupportActions}</div>`;
     const legacyTrackingUrl = !supplierShipments.length ? validTrackingUrl(order.trackingUrl) : '';
-    return `<details class="my-order-card"><summary class="my-order-card-summary"><div class="my-order-card-top"><span class="my-order-service-label">${serviceIcon ? `<img src="${serviceIcon}" alt="" />` : ''}${escapeHTML(serviceName)}</span><b class="my-order-status ${isCanceled ? 'is-canceled' : isNoShow ? 'is-no-show' : statusCategory(statusLabel) === 'completed' ? 'is-complete' : ''}">${escapeHTML(statusLabel)}</b></div><h2>${escapeHTML(order.title)}</h2><p class="my-order-summary">${escapeHTML(summary)}</p><div class="my-order-card-bottom"><small>${[reference, date].filter(Boolean).map(escapeHTML).join(' · ')}</small><strong>MYR ${order.totalAmount.toFixed(2)}</strong></div><span class="my-order-expand-hint">View Order Details <span aria-hidden="true">⌄</span></span></summary><div class="my-order-expanded"><dl class="my-order-detail-list">${orderDetails}</dl>${petsDetails}${marketplaceDetails}${groomingDetails}${hotelDetails}${daycareDetails}${taxiTracking}${order.serviceId === 'marketplace' ? orderActions : ''}${orderControlRow}${legacyTrackingUrl ? `<a class="my-order-tracking" href="${escapeHTML(legacyTrackingUrl)}" target="_blank" rel="noopener noreferrer">Track Delivery</a>` : ''}</div></details>`;
+    const marketplacePreview = order.serviceId === 'marketplace' ? marketplaceOrderPreview(order, marketplaceProducts) : `<h2>${escapeHTML(order.title)}</h2>`;
+    const marketplaceShipment = order.serviceId === 'marketplace' ? marketplaceShipmentSummary(order, order.items, marketplaceProducts) : summary;
+    const collapsedReference = order.serviceId === 'marketplace' ? '' : reference;
+    return `<details class="my-order-card"><summary class="my-order-card-summary"><div class="my-order-card-top"><span class="my-order-service-label">${serviceIcon ? `<img src="${serviceIcon}" alt="" />` : ''}${escapeHTML(serviceName)}</span><b class="my-order-status ${isCanceled ? 'is-canceled' : isNoShow ? 'is-no-show' : statusCategory(statusLabel) === 'completed' ? 'is-complete' : ''}">${escapeHTML(statusLabel)}</b></div>${marketplacePreview}<p class="my-order-summary">${escapeHTML(marketplaceShipment)}</p><div class="my-order-card-bottom"><small>${[collapsedReference, orderDateDisplay].filter(Boolean).map(escapeHTML).join(' · ')}</small><strong>MYR ${order.totalAmount.toFixed(2)}</strong></div><span class="my-order-expand-hint">View Order Details <span aria-hidden="true">⌄</span></span></summary><div class="my-order-expanded">${marketplaceDetails}${orderDetailsMarkup}${petsDetails}${groomingDetails}${hotelDetails}${daycareDetails}${taxiTracking}${order.serviceId === 'marketplace' ? orderActions : ''}${orderControlRow}${legacyTrackingUrl ? `<a class="my-order-tracking" href="${escapeHTML(legacyTrackingUrl)}" target="_blank" rel="noopener noreferrer">Track Delivery</a>` : ''}</div></details>`;
   };
 
-  const groups = service === 'all'
+  const groups = !selectedServices.length
     ? visibleOrders.length ? visibleOrders.map(orderCard).join('') : `<section class="my-orders-empty"><h2>No Orders Found</h2><p>Your orders will appear here.</p></section>`
-    : visibleOrders.length ? visibleOrders.map(orderCard).join('') : `<section class="my-orders-empty"><h2>No ${orderServices.find((item) => item.id === service)?.label || ''} Orders Found</h2><p>Try another service or status filter.</p></section>`;
+    : visibleOrders.length ? visibleOrders.map(orderCard).join('') : `<section class="my-orders-empty"><h2>No ${escapeHTML(serviceName)} Orders Found</h2><p>Try another service or status filter.</p></section>`;
 
-  return `<main class="my-orders-page"><header class="my-orders-header"><a href="#${encodeURIComponent(returnTo)}" aria-label="Back">‹</a><h1>My Orders</h1><span aria-hidden="true"></span></header><nav class="my-orders-tabs" aria-label="Filter orders by service">${serviceTabs}</nav><nav class="my-orders-status-tabs" aria-label="Filter orders by status">${statusTabs}</nav><p class="my-orders-count">${visibleOrders.length} ${visibleOrders.length === 1 ? 'order' : 'orders'}</p><div class="my-orders-content">${groups}</div>${bottomNavigation('activity', icon)}${marketplaceCancelDialog()}</main>`;
+  return `<main class="my-orders-page"><header class="my-orders-header"><a href="#${encodeURIComponent(returnTo)}" aria-label="Back">‹</a><h1>My Orders</h1><span aria-hidden="true"></span></header><div class="my-orders-filter-row">${serviceFilter}<nav class="my-orders-status-tabs" aria-label="Filter orders by status">${statusTabs}</nav></div><p class="my-orders-count">${escapeHTML(orderCountSummary)}</p><div class="my-orders-content">${groups}</div>${bottomNavigation('activity', icon)}${marketplaceCancelDialog()}</main>`;
 }
 
 // Customer cancellations are limited to orders that have not reached Received Order.
@@ -384,6 +493,52 @@ export function setupMyOrders() {
     node.textContent = `${String(Math.floor(seconds / 3600)).padStart(2, '0')}:${String(Math.floor((seconds % 3600) / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`;
   });
   refreshCountdowns();
+  if (document.documentElement.dataset.customerOrderServiceFilterReady !== 'true') {
+    document.documentElement.dataset.customerOrderServiceFilterReady = 'true';
+    document.addEventListener('click', (event) => {
+      const toggle = event.target.closest('[data-my-orders-filter-toggle]');
+      const panel = document.querySelector('[data-my-orders-filter-panel]');
+      const filter = document.querySelector('.my-orders-service-filter');
+      if (toggle) {
+        const shouldOpen = panel?.hidden;
+        if (panel) {
+          panel.hidden = !shouldOpen;
+          if (shouldOpen) {
+            const bounds = toggle.getBoundingClientRect();
+            panel.style.position = 'fixed';
+            panel.style.left = `${Math.max(12, Math.min(bounds.left, window.innerWidth - 272))}px`;
+            panel.style.top = `${Math.max(12, bounds.bottom + 8)}px`;
+          }
+        }
+        toggle.setAttribute('aria-expanded', String(Boolean(shouldOpen)));
+        return;
+      }
+      if (panel && filter && !filter.contains(event.target)) {
+        panel.hidden = true;
+        filter.querySelector('[data-my-orders-filter-toggle]')?.setAttribute('aria-expanded', 'false');
+      }
+      const apply = event.target.closest('[data-my-orders-filter-apply]');
+      if (!apply) return;
+      const selected = [...(panel?.querySelectorAll('[data-order-service-option]:checked') || [])]
+        .map((input) => input.dataset.orderServiceOption)
+        .filter((id) => orderServices.some((item) => item.id === id && id !== 'all'));
+      const currentParams = new URLSearchParams(window.location.hash.split('?')[1] || '');
+      const nextService = selected.length ? selected.join(',') : 'all';
+      const nextStatus = orderStatuses.some((item) => item.id === currentParams.get('status')) ? currentParams.get('status') : 'new';
+      const nextReturn = ['home', 'marketplace', 'grooming', 'hotel', 'daycare', 'profile'].includes(currentParams.get('from')) ? currentParams.get('from') : 'home';
+      window.location.hash = `#orders?service=${encodeURIComponent(nextService)}&status=${encodeURIComponent(nextStatus)}&from=${encodeURIComponent(nextReturn)}`;
+    });
+    document.addEventListener('change', (event) => {
+      const option = event.target.closest('[data-order-service-option]');
+      if (!option) return;
+      const panel = option.closest('[data-my-orders-filter-panel]');
+      const all = panel?.querySelector('[data-order-service-option="all"]');
+      const specific = [...(panel?.querySelectorAll('[data-order-service-option]:not([data-order-service-option="all"])') || [])];
+      if (option.dataset.orderServiceOption === 'all' && option.checked) specific.forEach((input) => { input.checked = false; });
+      else if (option.dataset.orderServiceOption !== 'all' && option.checked && all) all.checked = false;
+      if (!specific.some((input) => input.checked) && all) all.checked = true;
+    });
+  }
   if (document.querySelector('.my-orders-page') && document.documentElement.dataset.customerPaymentTimers !== 'true') {
     document.documentElement.dataset.customerPaymentTimers = 'true';
     window.setInterval(refreshCountdowns, 1000);
@@ -425,6 +580,48 @@ export function setupMyOrders() {
   if (document.documentElement.dataset.customerOrderCancellationReady === 'true') return;
   document.documentElement.dataset.customerOrderCancellationReady = 'true';
   document.addEventListener('click', async (event) => {
+    const trackingLink = event.target.closest('[data-track-order]');
+    if (trackingLink) {
+      event.preventDefault();
+      if (trackingLink.dataset.redirectPending === 'true') return;
+      trackingLink.dataset.redirectPending = 'true';
+      const trackingNumber = trackingLink.dataset.copyTrackingNumber || '';
+      let copied = false;
+      if (trackingNumber) {
+        try {
+          if (!navigator.clipboard?.writeText) throw new Error('Clipboard API unavailable.');
+          await navigator.clipboard.writeText(trackingNumber);
+          copied = true;
+        } catch {
+          const field = document.createElement('textarea');
+          field.value = trackingNumber;
+          field.setAttribute('readonly', '');
+          field.style.position = 'fixed';
+          field.style.opacity = '0';
+          document.body.append(field);
+          field.select();
+          copied = document.execCommand('copy');
+          field.remove();
+        }
+      }
+      let toast = document.querySelector('[data-tracking-copy-toast]');
+      if (!toast) {
+        toast = document.createElement('div');
+        toast.className = 'tracking-copy-toast';
+        toast.dataset.trackingCopyToast = '';
+        toast.setAttribute('role', 'status');
+        toast.setAttribute('aria-live', 'polite');
+        document.body.append(toast);
+      }
+      toast.textContent = trackingNumber
+        ? (copied ? 'Tracking number copied. Opening courier tracking…' : 'Could not copy the tracking number. Opening courier tracking…')
+        : 'Opening courier tracking…';
+      toast.classList.add('is-visible');
+      window.clearTimeout(toast.hideTimer);
+      toast.hideTimer = window.setTimeout(() => toast.classList.remove('is-visible'), 2800);
+      window.setTimeout(() => window.location.assign(trackingLink.href), 2000);
+      return;
+    }
     const openReturn = event.target.closest('[data-open-marketplace-return]');
     if (openReturn) {
       const form = openReturn.parentElement?.querySelector('[data-marketplace-return-form]');

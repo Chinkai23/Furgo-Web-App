@@ -709,6 +709,7 @@ export function localFinderPage() {
   return `<main class="local-finder-page">
     <header class="local-finder-header"><a href="#home" aria-label="Back to Home">‹</a><h1>Pet Local Finder</h1><span aria-hidden="true"></span></header>
     <section class="local-finder-content">
+      ${localFinderSearchForm()}
       <section class="local-finder-share-card" aria-labelledby="local-finder-share-title">
         <img class="local-finder-share-art" src="${icon('MVP Icon-06.png')}" alt="Furgo dog pointing out places on a map" />
         <div><h2 id="local-finder-share-title">Share Your Places</h2><p>Share your favourite pet-friendly places and shops with us!</p><button class="button button-primary" type="button" data-open-place-suggestion>Share Now</button></div>
@@ -717,8 +718,8 @@ export function localFinderPage() {
         <h2 id="local-finder-nearby-title">Find The Places Near Me:</h2>
         <div class="local-finder-categories">${placeTypes.map((place) => `<a class="local-finder-category" href="#local-finder-list?category=${place.key}"><img src="${icon(place.icon)}" alt="" /><span>${escapeHTML(place.label)}</span></a>`).join('')}</div>
       </section>
-      <a class="local-finder-favorites-banner" href="#local-finder-favourites"><span><strong>Favourite Places</strong><small>Save places you love and find them here anytime.</small></span><span class="local-finder-favorites-count">${loadLocalFinderFavorites().length} saved</span><b aria-hidden="true">›</b></a>
       ${localFinderAnnouncementsMarkup()}
+      <a class="local-finder-favorites-banner" href="#local-finder-favourites"><span><strong>Favourite Places</strong><small>Save places you love and find them here anytime.</small></span><span class="local-finder-favorites-count">${loadLocalFinderFavorites().length} saved</span><b aria-hidden="true">›</b></a>
     </section>
     <dialog class="local-finder-share-dialog" data-place-suggestion-dialog aria-labelledby="place-suggestion-title">
       <form class="local-finder-suggestion-form" data-place-suggestion-form>
@@ -733,6 +734,15 @@ export function localFinderPage() {
     <dialog class="local-finder-limit-dialog" data-local-finder-limit-dialog aria-labelledby="local-finder-limit-title"><div><h2 id="local-finder-limit-title">Monthly place search limit reached</h2><p data-local-finder-limit-message>Sorry, this month’s 2,000 place-sharing search limit has been reached. Please try again next month.</p><button class="button button-primary" type="button" data-close-local-finder-limit>Got it</button></div></dialog>
     ${bottomNavigation('home', icon)}
   </main>`;
+}
+
+function localFinderSearchForm(query = '') {
+  return `<form class="local-finder-search" role="search" data-local-finder-search-form><span class="search-symbol" aria-hidden="true"></span><input type="search" name="query" value="${escapeHTML(query)}" placeholder="Search places, addresses, or pet notes" aria-label="Search Local Finder places" autocomplete="off" /><button type="submit" aria-label="Search places">Search</button></form>`;
+}
+
+export function localFinderSearchPage(params = new URLSearchParams()) {
+  const query = params.get('q') || '';
+  return `<main class="local-finder-page local-finder-subpage local-finder-list-page local-finder-search-page"><header class="local-finder-header"><a href="#local-finder" aria-label="Back to Local Finder">‹</a><h1>Search Places</h1><span aria-hidden="true"></span></header><section class="local-finder-content local-finder-list-content">${localFinderSearchForm(query)}<p class="local-finder-results-location" data-finder-search-status>${query ? `Searching for “${escapeHTML(query)}”…` : 'Search approved Local Finder places by name, address, or pet notes.'}</p><div class="local-finder-place-list" data-finder-search-results aria-live="polite"><p class="local-finder-loading">${query ? 'Searching places…' : 'Enter a search to find places.'}</p></div></section>${bottomNavigation('home', iconPath)}</main>`;
 }
 
 export function localFinderFavoritesPage() {
@@ -766,6 +776,10 @@ export function setupLocalFinder(supabase) {
   if (supabase) Promise.resolve(supabase.rpc('expire_local_finder_google_coordinates')).catch(() => {});
   const route = window.location.hash.slice(1).split('?')[0];
   const routeParams = new URLSearchParams(window.location.hash.split('?')[1] || '');
+  if (route === 'local-finder-search') {
+    setupLocalFinderSearch(supabase, routeParams);
+    return;
+  }
   if (route === 'local-finder-list') {
     loadLocalFinderList(routeParams, supabase);
     return;
@@ -779,6 +793,11 @@ export function setupLocalFinder(supabase) {
     return;
   }
   if (route !== 'local-finder') return;
+  document.querySelector('[data-local-finder-search-form]')?.addEventListener('submit', (event) => {
+    event.preventDefault();
+    const query = event.currentTarget.querySelector('input[name="query"]')?.value.trim() || '';
+    window.location.hash = `#local-finder-search?q=${encodeURIComponent(query)}`;
+  });
   const dialog = document.querySelector('[data-place-suggestion-dialog]');
   const suggestionForm = document.querySelector('[data-place-suggestion-form]');
   const suggestionFeedback = suggestionForm?.querySelector('[data-place-suggestion-feedback]');
@@ -831,6 +850,50 @@ export function setupLocalFinder(supabase) {
     }
   });
 
+}
+
+function setupLocalFinderSearch(supabase, routeParams) {
+  const form = document.querySelector('[data-local-finder-search-form]');
+  const input = form?.querySelector('input[name="query"]');
+  const results = document.querySelector('[data-finder-search-results]');
+  const status = document.querySelector('[data-finder-search-status]');
+  if (!form || !input || !results) return;
+  const render = async (query) => {
+    const normalizedQuery = normalizePlaceDuplicateValue(query);
+    if (!normalizedQuery) {
+      results.innerHTML = '<p class="local-finder-empty">Enter a place name, address, or pet note to search.</p>';
+      if (status) status.textContent = 'Search approved Local Finder places by name, address, or pet notes.';
+      return;
+    }
+    results.innerHTML = '<p class="local-finder-loading">Searching places…</p>';
+    try {
+      const [{ data: places, error }, { data: recommendations, error: recommendationError }] = await Promise.all([
+        supabase.from('local_finder_places').select('*').eq('status', 'approved').eq('is_hidden', false),
+        supabase.rpc('get_local_finder_recommendation_counts'),
+      ]);
+      if (error || recommendationError) throw new Error(error?.message || recommendationError?.message || 'Places could not be searched.');
+      const terms = normalizedQuery.split(' ').filter(Boolean);
+      const matches = normalizeLocalFinderPlaces(places || [], recommendations || [], null).filter((place) => {
+        const searchable = normalizePlaceDuplicateValue([place.name, place.address, place.city, place.state, place.allowed_area, place.pet_allowed, place.pet_size, place.conditions].filter(Boolean).join(' '));
+        return terms.every((term) => searchable.includes(term));
+      });
+      if (status) status.textContent = `${matches.length} ${matches.length === 1 ? 'place' : 'places'} found`;
+      results.innerHTML = matches.length
+        ? matches.map((place) => placeCard(place, placeCategory(place.category), { showDistance: false })).join('')
+        : '<p class="local-finder-empty">No places matched. Try a place name, area, address, or pet note.</p>';
+    } catch (error) {
+      if (status) status.textContent = 'Search unavailable';
+      results.innerHTML = `<p class="local-finder-empty">${escapeHTML(error.message || 'Places could not be searched.')}</p>`;
+    }
+  };
+  form.addEventListener('submit', (event) => {
+    event.preventDefault();
+    const query = input.value.trim();
+    window.location.hash = `#local-finder-search?q=${encodeURIComponent(query)}`;
+  });
+  const query = routeParams.get('q') || '';
+  input.value = query;
+  void render(query);
 }
 
 async function getCurrentLocation() {
@@ -905,11 +968,13 @@ async function loadLocalFinderFavoritesPage(supabase) {
 
 function placeCard(place, category, { showDistance = true } = {}) {
   const petRules = [place.allowed_area, place.pet_allowed, place.pet_size, place.conditions].filter(Boolean);
+  const remarkTitle = petRules.join(' · ');
+  const remarks = petRules.length ? `<div class="local-finder-place-card-remarks" title="${escapeHTML(remarkTitle)}">${petRules.map((rule) => `<span>${escapeHTML(rule)}</span>`).join('')}</div>` : '';
   const photo = place.image ? `<img src="${escapeHTML(place.image)}" alt="" loading="lazy" />` : `<div class="local-finder-place-no-photo">No Photo Uploaded</div>`;
   const area = [place.city, place.state].filter(Boolean).join(', ') || place.address;
   const detailsRoute = `#local-finder-place?category=${category.key}&id=${encodeURIComponent(place.id)}`;
   return `<a class="local-finder-place-card" href="${detailsRoute}">
-    <div class="local-finder-place-card-copy"><span>${escapeHTML(area)}</span>${showDistance ? `<span>${place.distance === null ? 'Approx. distance unavailable' : `Approx. distance: ${place.distance.toFixed(1)}km`}</span>` : ''}<h2>${escapeHTML(place.name)}</h2><p>${place.recommendationCount} Furgomate Recommended ${place.is_verified ? verifiedBadge() : ''}</p></div>
+    <div class="local-finder-place-card-copy"><span>${escapeHTML(area)}</span>${showDistance ? `<span>${place.distance === null ? 'Approx. distance unavailable' : `Approx. distance: ${place.distance.toFixed(1)}km`}</span>` : ''}<h2>${escapeHTML(place.name)}</h2><p>${place.recommendationCount} Furgomate Recommended ${place.is_verified ? verifiedBadge() : ''}</p>${remarks}</div>
     <div class="local-finder-place-card-photo">${photo}</div>
   </a>`;
 }

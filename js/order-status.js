@@ -32,3 +32,22 @@ export function customerOrderStatus(order = {}) {
   if (/delivered/.test(normalized)) return 'Completed';
   return rawStatus || 'Pending Payment';
 }
+
+export function marketplaceShipmentSummary(order = {}, items = order.items || [], products = []) {
+  const lines = Array.isArray(items) ? items : [];
+  const supplierShipment = order.supplierShipment;
+  const shippedStatus = (value) => ['shipped', 'delivered'].includes(String(value || '').toLowerCase());
+  const shippedCount = lines.filter((item) => {
+    if (supplierShipment) return shippedStatus(supplierShipment.status);
+    const product = products.find((entry) => String(entry.id) === String(item.productId || ''));
+    const variant = product?.variants?.find((entry) => String(entry.id) === String(item.variantId || ''));
+    const supplier = String(item.supplierId || item.supplier || item.shopName || variant?.supplierId || variant?.supplier || product?.supplierName || '').trim().toLowerCase();
+    const shipment = Object.entries(order.supplierShipments || {}).find(([key, value]) =>
+      key.trim().toLowerCase() === supplier || String(value?.supplierName || '').trim().toLowerCase() === supplier
+    )?.[1];
+    return Boolean(supplier && shippedStatus(shipment?.status));
+  }).length;
+  if (!shippedCount) return 'No products shipped out';
+  if (shippedCount === lines.length) return 'All products shipped out';
+  return `${shippedCount}/${lines.length} products shipped out`;
+}

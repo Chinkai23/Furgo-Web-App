@@ -11,6 +11,7 @@ const sharedKeys = new Set([
   'furgo-demo-marketplace-offers',
   'furgo-demo-promotions',
   'furgo-demo-help-center-details',
+  'furgo-demo-home-service-shortcuts',
 ]);
 
 const customerKeys = new Set([
@@ -22,6 +23,12 @@ const customerKeys = new Set([
   'furgo-demo-credit-balance',
   'furgo-demo-credit-transactions',
   'furgo-demo-daycare-passes',
+  'furgo-demo-pet-assistant-preferences',
+  'furgo-demo-pet-reminders',
+  'furgo-demo-pet-records',
+  'furgo-pet-assistant-preview-history',
+  'furgo-demo-marketplace-subscription-cart',
+  'furgo-demo-marketplace-active-subscriptions',
 ]);
 
 const operationKeys = new Set([
@@ -54,6 +61,15 @@ const updateOnlyOrderRoles = new Set(['staff', 'executive', 'manager']);
 const staffLegacyOrderKeys = new Set(['furgo-demo-marketplace-orders', 'furgo-demo-hotel-bookings', 'furgo-demo-daycare-bookings', 'furgo-demo-daycare-orders']);
 
 const allSyncedKeys = new Set([...sharedKeys, ...customerKeys, ...operationKeys]);
+const marketplaceSupplierContactsKey = 'furgo-demo-marketplace-suppliers';
+const personalCustomerKeys = new Set([
+  'furgo-demo-pet-assistant-preferences',
+  'furgo-demo-pet-reminders',
+  'furgo-demo-pet-records',
+  'furgo-pet-assistant-preview-history',
+  'furgo-demo-marketplace-subscription-cart',
+  'furgo-demo-marketplace-active-subscriptions',
+]);
 let originalSetItem;
 let originalRemoveItem;
 let activeUserId = '';
@@ -89,7 +105,7 @@ async function writeRemote(key, value) {
   const scope = getScope(key);
   if (!scope || !activeUserId) return;
   if (scope === 'shared' && !canManageSharedKey(activeRole, key)) return;
-  if (scope !== 'shared' && fullAdminRoles.has(activeRole) && scope === 'customer') return;
+  if (scope === 'customer' && fullAdminRoles.has(activeRole) && !personalCustomerKeys.has(key)) return;
 
   if (dedicatedTablesReady && dedicatedOperationKeys.has(key)) {
     await writeDedicatedOperations(key, value);
@@ -147,8 +163,14 @@ async function writeDedicatedRecord(key, record, ownerId) {
     if (activeRole === 'customer') {
       const { data: existing, error: lookupError } = await supabase.from('marketplace_orders').select('id').eq('id', id).maybeSingle();
       if (lookupError) throw lookupError;
-      if (existing) return; // Marketplace orders become immutable to customers after checkout.
-      writeResult = await supabase.from('marketplace_orders').insert(payload);
+      if (existing) {
+        const { data: existingItems, error: itemLookupError } = await supabase.from('marketplace_order_items').select('line_number').eq('order_id', id).limit(1);
+        if (itemLookupError) throw itemLookupError;
+        // A previous attempt may have inserted the order header but failed before
+        // its item rows. Recreate those rows so the supplier RPC can see the order.
+        if (existingItems?.length) return;
+        writeResult = { error: null };
+      } else writeResult = await supabase.from('marketplace_orders').insert(payload);
     } else if (updateOnlyOrderRoles.has(activeRole)) {
       writeResult = await supabase.from('marketplace_orders').update(payload).eq('id', id);
     } else {
@@ -157,8 +179,10 @@ async function writeDedicatedRecord(key, record, ownerId) {
     const { error } = writeResult;
     if (error) throw error;
     if (updateOnlyOrderRoles.has(activeRole)) return;
-    const { error: removeItemsError } = await supabase.from('marketplace_order_items').delete().eq('order_id', id);
-    if (removeItemsError) throw removeItemsError;
+    if (activeRole !== 'customer') {
+      const { error: removeItemsError } = await supabase.from('marketplace_order_items').delete().eq('order_id', id);
+      if (removeItemsError) throw removeItemsError;
+    }
     if (Array.isArray(items) && items.length) {
       const { error: itemError } = await supabase.from('marketplace_order_items').insert(items.map((item, index) => ({
         order_id: id,
@@ -237,6 +261,30 @@ export async function saveDedicatedBooking(key, booking, records) {
     applyingRemoteData = false;
   }
   window.dispatchEvent(new StorageEvent('storage', { key }));
+}
+
+// Marketplace checkout must commit to the dedicated order tables before it
+// reports success. The legacy app_data mirror cannot feed supplier order RPCs.
+export async function saveMarketplaceOrder(order, records) {
+  if (!order?.id || !Array.isArray(records)) throw new Error('This Marketplace order could not be saved.');
+  if (!activeUserId) throw new Error('Please sign in again before placing your order.');
+  if (!Array.isArray(order.items) || order.items.length === 0) throw new Error('Your cart has no products to save. Please return to your cart and try again.');
+  const { error } = await supabase.rpc('create_marketplace_order', {
+    p_order: { ...order, userId: activeUserId },
+  });
+  if (error) throw error;
+
+  const nextRecords = records.map((record) => String(record.id) === String(order.id)
+    ? { ...order, userId: activeUserId }
+    : record);
+  if (!nextRecords.some((record) => String(record.id) === String(order.id))) {
+    nextRecords.unshift({ ...order, userId: activeUserId });
+  }
+  if (!originalSetItem) originalSetItem = Storage.prototype.setItem;
+  applyingRemoteData = true;
+  try { originalSetItem.call(localStorage, 'furgo-demo-marketplace-orders', JSON.stringify(nextRecords)); }
+  finally { applyingRemoteData = false; }
+  window.dispatchEvent(new StorageEvent('storage', { key: 'furgo-demo-marketplace-orders' }));
 }
 
 // Writes order status/receipt changes to the shared order source before refreshing this browser's cache.
@@ -432,6 +480,14 @@ function installStorageMirror(userId, role) {
   if (!originalRemoveItem) originalRemoveItem = Storage.prototype.removeItem;
   Storage.prototype.setItem = function(key, value) {
     originalSetItem.call(this, key, value);
+    if (this === localStorage && key === marketplaceSupplierContactsKey) {
+      if (['manager', 'director', 'admin'].includes(activeRole)) {
+        let contacts = value;
+        try { contacts = JSON.parse(value); } catch { /* Invalid JSON is rejected by Supabase. */ }
+        void writeMarketplaceSupplierContacts(contacts).catch((error) => console.warn('Could not sync marketplace supplier contacts to Supabase:', error));
+      }
+      return;
+    }
     if (this !== localStorage || !allSyncedKeys.has(key)) return;
     let parsed = value;
     try { parsed = JSON.parse(value); } catch { /* Keep ordinary string values as strings. */ }
@@ -439,6 +495,10 @@ function installStorageMirror(userId, role) {
   };
   Storage.prototype.removeItem = function(key) {
     originalRemoveItem.call(this, key);
+    if (this === localStorage && key === marketplaceSupplierContactsKey && ['manager', 'director', 'admin'].includes(activeRole) && activeUserId) {
+      void writeMarketplaceSupplierContacts([]).catch((error) => console.warn('Could not clear marketplace supplier contacts in Supabase:', error));
+      return;
+    }
     if (this !== localStorage || !allSyncedKeys.has(key) || !activeUserId || applyingRemoteData) return;
     if (dedicatedTablesReady && dedicatedOperationKeys.has(key)) return;
     const scope = getScope(key);
@@ -447,6 +507,32 @@ function installStorageMirror(userId, role) {
     void supabase.from('app_data').delete().eq('record_id', rowId(scope, key, ownerId))
       .then(({ error }) => { if (error) console.warn(`Could not remove ${key} from Supabase:`, error); });
   };
+}
+
+async function writeMarketplaceSupplierContacts(contacts) {
+  if (!activeUserId || !['manager', 'director', 'admin'].includes(activeRole)) return;
+  const normalized = Array.isArray(contacts) ? contacts : [];
+  const { error } = await supabase.from('marketplace_supplier_contacts').upsert({
+    id: true,
+    contacts: normalized,
+    updated_by: activeUserId,
+    updated_at: new Date().toISOString(),
+  }, { onConflict: 'id' });
+  if (error) throw error;
+}
+
+async function loadMarketplaceSupplierContacts(role) {
+  if (!['executive', 'manager', 'director', 'admin'].includes(role)) return;
+  const { data, error } = await supabase.from('marketplace_supplier_contacts').select('contacts').eq('id', true).maybeSingle();
+  if (error) throw error;
+  if (Array.isArray(data?.contacts)) {
+    originalSetItem.call(localStorage, marketplaceSupplierContactsKey, JSON.stringify(data.contacts));
+    return;
+  }
+  if (['manager', 'director', 'admin'].includes(role)) {
+    const existing = readLocal(marketplaceSupplierContactsKey);
+    if (Array.isArray(existing) && existing.length) await writeMarketplaceSupplierContacts(existing);
+  }
 }
 
 function applyRealtimeRow(row, removed = false) {
@@ -461,7 +547,7 @@ function applyRealtimeRow(row, removed = false) {
     window.dispatchEvent(new StorageEvent('storage', { key }));
     return;
   }
-  if (row.owner_id === activeUserId && !fullAdminRoles.has(activeRole)) {
+  if (row.owner_id === activeUserId && (!fullAdminRoles.has(activeRole) || personalCustomerKeys.has(key))) {
     applyingRemoteData = true;
     if (removed) originalRemoveItem.call(localStorage, key);
     else originalSetItem.call(localStorage, key, JSON.stringify(row.payload));
@@ -511,6 +597,16 @@ export async function loadCloudAppData(userId, role) {
   activeUserId = userId;
   activeRole = role;
   dedicatedTablesReady = false;
+  const cacheOwnerKey = 'furgo-demo-app-data-cache-owner';
+  const previousCacheOwner = localStorage.getItem(cacheOwnerKey);
+  if (previousCacheOwner && previousCacheOwner !== userId) {
+    // Customer-scope keys share browser storage; clear the prior account's
+    // cache before loading this account so it cannot be seeded into the wrong row.
+    for (const key of customerKeys) originalRemoveItem.call(localStorage, key);
+  }
+  if (!['executive', 'manager', 'director', 'admin'].includes(role)) {
+    originalRemoveItem.call(localStorage, marketplaceSupplierContactsKey);
+  }
   const { data, error } = await supabase.from('app_data').select('record_id,scope,storage_key,owner_id,payload');
   if (error) throw error;
   const rows = data || [];
@@ -545,7 +641,7 @@ export async function loadCloudAppData(userId, role) {
             ? row.payload.map((item) => ({ ...item, userId: row.owner_id, _cloudOwnerId: row.owner_id }))
             : []);
         originalSetItem.call(localStorage, key, JSON.stringify(merged));
-      } else if (!fullAdminRoles.has(role)) {
+      } else if (!fullAdminRoles.has(role) || personalCustomerKeys.has(key)) {
         const own = byRecordId.get(rowId(scope, key, userId));
         if (own) originalSetItem.call(localStorage, key, JSON.stringify(own.payload));
         else {
@@ -557,6 +653,9 @@ export async function loadCloudAppData(userId, role) {
   } finally {
     applyingRemoteData = false;
   }
+  try { await loadMarketplaceSupplierContacts(role); }
+  catch (error) { console.warn('Supabase marketplace supplier contacts are not ready yet:', error); }
+  originalSetItem.call(localStorage, cacheOwnerKey, userId);
   installStorageMirror(userId, role);
   if (realtimeChannel) await supabase.removeChannel(realtimeChannel);
   realtimeChannel = supabase.channel(`app-data:${userId}:${role}`)
@@ -568,6 +667,16 @@ export async function loadCloudAppData(userId, role) {
       const row = change.new?.id ? change.new : change.old;
       if (row) applyGroomingRealtimeRow(row, change.eventType === 'DELETE');
     });
+  if (['executive', 'manager', 'director', 'admin'].includes(role)) {
+    realtimeChannel.on('postgres_changes', { event: '*', schema: 'public', table: 'marketplace_supplier_contacts' }, (change) => {
+      const row = change.new?.id ? change.new : change.old;
+      if (!row) return;
+      applyingRemoteData = true;
+      originalSetItem.call(localStorage, marketplaceSupplierContactsKey, JSON.stringify(row.contacts || []));
+      applyingRemoteData = false;
+      window.dispatchEvent(new StorageEvent('storage', { key: marketplaceSupplierContactsKey }));
+    });
+  }
   if (dedicatedDataReady) {
     realtimeChannel
       .on('postgres_changes', { event: '*', schema: 'public', table: 'marketplace_orders' }, (change) => {
