@@ -242,7 +242,6 @@ export function petRecordPage(petId = '') {
   const today = localPetDate();
   const records = loadPetRecords(pet.id);
   const todayRecord = records.find((item) => item.date === today) || {};
-  const entries = records.map((record) => `<li><div><strong>${escapeHTML(formatPetDate(record.date))}</strong><span>Food ${Number(record.foodCount) || 0}× · Water ${Number(record.waterCount) || 0}× · Exercise ${escapeHTML(record.exerciseKm || '0')} km</span></div>${record.notes ? `<p>${escapeHTML(record.notes)}</p>` : ''}</li>`).join('');
   return `<main class="pet-profile-page pet-care-page">
     ${pageHeader(petSettingTitle(pet, 'Record'), pet)}
     <section class="pet-care-panel pet-intake-panel" aria-labelledby="pet-intake-heading">
@@ -259,7 +258,6 @@ export function petRecordPage(petId = '') {
       <div class="profile-menu-group"><h2 id="pet-exercise-heading">Exercise</h2><p>Keep this pet’s activity record up to date.</p></div>
       <section class="pet-exercise-tracker" data-exercise-tracker data-pet-id="${escapeHTML(pet.id)}" aria-label="Exercise route tracker">
         <div class="pet-exercise-summary">
-          <button class="pet-exercise-history-link" type="button" data-exercise-history>History</button>
           <strong data-exercise-distance>0.00 km</strong>
           <span>Time: <b data-exercise-duration>--:--</b></span>
         </div>
@@ -274,9 +272,6 @@ export function petRecordPage(petId = '') {
         <label>Notes<input name="notes" maxlength="240" value="${escapeHTML(todayRecord.notes || '')}" placeholder="Add a note about today" /></label>
         <div class="form-feedback" role="status" aria-live="polite"></div><button class="button button-primary" type="submit">Save Exercise Record</button>
       </form>
-    </section>
-    <section class="pet-care-panel pet-record-log-panel"><div class="profile-menu-group"><h2>Recent Pet Records</h2></div>
-      <ul class="pet-record-history">${entries || '<li class="pet-care-empty">No daily records yet.</li>'}</ul>
     </section>
     ${bottomNavigation('home', icon)}
   </main>`;
@@ -329,10 +324,6 @@ function updatePetIntakeChart(records) {
   if (!panel) return;
   const chart = panel.querySelector('.pet-intake-chart');
   if (chart) chart.outerHTML = petIntakeChart(records, localPetDate());
-}
-
-function petRecordHistoryMarkup(records) {
-  return records.map((item) => `<li><div><strong>${escapeHTML(formatPetDate(item.date))}</strong><span>Food ${Number(item.foodCount) || 0}× · Water ${Number(item.waterCount) || 0}× · Exercise ${escapeHTML(item.exerciseKm || '0')} km</span></div>${item.notes ? `<p>${escapeHTML(item.notes)}</p>` : ''}</li>`).join('') || '<li class="pet-care-empty">No daily records yet.</li>';
 }
 
 export function setupPetCarePages() {
@@ -434,8 +425,6 @@ export function setupPetCarePages() {
     updatePetIntakeChart(records);
     const feedback = document.querySelector('[data-intake-feedback]');
     if (feedback) feedback.textContent = addButton ? `${kind === 'food' ? 'Food' : 'Water'} intake added.` : `${kind === 'food' ? 'Food' : 'Water'} intake removed.`;
-    const history = document.querySelector('.pet-record-history');
-    if (history) history.innerHTML = petRecordHistoryMarkup(records);
   });
   recordForm?.addEventListener('submit', (event) => {
     event.preventDefault();
@@ -445,9 +434,7 @@ export function setupPetCarePages() {
       exerciseKm: recordForm.elements.exerciseKm.value || '0',
       notes: recordForm.elements.notes.value.trim(),
     };
-    const records = savePetRecord(recordForm.dataset.petId, record);
-    const history = document.querySelector('.pet-record-history');
-    if (history) history.innerHTML = petRecordHistoryMarkup(records);
+    savePetRecord(recordForm.dataset.petId, record);
     feedback.textContent = 'Today’s exercise record saved.';
     feedback.classList.add('visible');
   });
@@ -463,8 +450,6 @@ function setupPetExerciseTracker() {
   const status = tracker.querySelector('[data-exercise-status]');
   const startButton = tracker.querySelector('[data-exercise-start]');
   const petId = tracker.dataset.petId;
-  const historyButton = tracker.querySelector('[data-exercise-history]');
-  const historyPanel = document.querySelector('.pet-record-log-panel');
   let map = null;
   let routeLine = null;
   let currentMarker = null;
@@ -477,7 +462,6 @@ function setupPetExerciseTracker() {
   let wasHidden = false;
   let hasFix = false;
 
-  historyButton?.addEventListener('click', () => historyPanel?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
 
   const setStatus = (message, kind = '') => {
     status.textContent = message;
@@ -571,14 +555,12 @@ function setupPetExerciseTracker() {
         distanceKm: Number((distanceMeters / 1000).toFixed(3)),
         route: route.slice(0, 300),
       };
-      const records = savePetRecord(petId, {
+      savePetRecord(petId, {
         ...current,
         date: today,
         exerciseKm: (priorDistance + distanceMeters / 1000).toFixed(2),
         exerciseSessions: [...(Array.isArray(current.exerciseSessions) ? current.exerciseSessions : []), session].slice(-5),
       });
-      const history = document.querySelector('.pet-record-history');
-      if (history) history.innerHTML = petRecordHistoryMarkup(records);
       const exerciseInput = document.querySelector('[data-pet-record-form] input[name="exerciseKm"]');
       if (exerciseInput) exerciseInput.value = (priorDistance + distanceMeters / 1000).toFixed(2);
       setStatus(`Exercise saved: ${(distanceMeters / 1000).toFixed(2)} km in ${formatDuration(durationMs)}.`);
