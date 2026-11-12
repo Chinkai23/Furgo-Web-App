@@ -20,8 +20,8 @@ export function aiNutritionistPage() {
       </section>
     </div>
     <section class="pet-assistant-chat" aria-label="AI Nutritionist chat">
-      <div class="pet-assistant-chat-header"><div class="pet-assistant-chat-header-copy"><strong>AI CHAT SYSTEM</strong><span>AI can make mistakes. Confirm nutrition advice with your veterinarian.</span></div></div>
-      <div class="pet-assistant-messages" role="log" aria-live="polite"><article class="pet-assistant-message is-assistant"><img class="pet-assistant-message-avatar" src="${nutritionistImage}" alt="AI Nutritionist" /><div class="pet-assistant-message-content"><span class="pet-assistant-message-name">AI Nutritionist</span><div class="pet-assistant-message-bubble"><p>Hi! I’m your AI Nutritionist. Nutrition guidance will be available here soon.</p></div></div></article></div>
+      <div class="pet-assistant-chat-header"><div class="pet-assistant-chat-header-copy"><strong>AI CHAT SYSTEM</strong><span>AI can make mistakes. Check important info.</span></div></div>
+      <div class="pet-assistant-messages" role="log" aria-live="polite"><article class="pet-assistant-message is-assistant"><img class="pet-assistant-message-avatar" src="${nutritionistImage}" alt="Furgo AI Nutritionist" /><div class="pet-assistant-message-content"><span class="pet-assistant-message-name">Furgo AI Nutritionist</span><div class="pet-assistant-message-bubble"><p>Hi! I’m your AI Nutritionist. Nutrition guidance will be available here soon.</p></div></div></article></div>
       <form class="pet-assistant-composer ai-nutritionist-composer" aria-label="Nutritionist message composer"><textarea aria-label="Write a message" rows="1" placeholder="AI Nutritionist chat is coming soon…" disabled></textarea><button type="button" aria-label="Send message" disabled>➤</button></form>
     </section>
   </main>`;

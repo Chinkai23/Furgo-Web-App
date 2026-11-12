@@ -49,8 +49,10 @@ export function loadPetRecords(petId) {
 }
 
 export function savePetRecord(petId, record) {
+  const previous = loadPetRecords(petId).find((item) => item.date === record.date) || {};
+  const merged = { ...previous, ...record };
   const records = loadPetRecords(petId).filter((item) => item.date !== record.date);
-  records.unshift(record);
+  records.unshift(merged);
   const all = safePetCollection(petRecordsCloudKey);
   all[String(petId || '')] = records.slice(0, 60);
   localStorage.setItem(petRecordsCloudKey, JSON.stringify(all));

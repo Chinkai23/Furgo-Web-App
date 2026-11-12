@@ -1,5 +1,5 @@
 // Main app controller: routes between the individual page files and wires shared interactions.
-import { defaultPetAvatarPath, fitPetCardRemarks, freePetAssistantAvatars, homeAssistantBubbleMessages, homePage, loadPetProfiles, petAvatarUrl, petCustomAvatarLibrary, petProfilePictureUrl, petCarouselMarkup, petProfilesStorageKeyForCurrentUser, savePetAssistantIds, saveSelectedPetAssistantId, selectedHomeAssistantPet, selectedHomeAssistantPets, selectedPetAssistantIds } from './pages/home.js';
+import { defaultPetAvatarPath, fitPetCardRemarks, freePetAssistantAvatars, freePetCatAvatars, homeAssistantBubbleMessages, homePage, loadPetProfiles, petAvatarUrl, petCustomAvatarLibrary, petProfilePictureUrl, petCarouselMarkup, petProfilesStorageKeyForCurrentUser, savePetAssistantIds, saveSelectedPetAssistantId, selectedHomeAssistantPet, selectedHomeAssistantPets, selectedPetAssistantIds } from './pages/home.js';
 import { petAssistantPage, setupPetAssistant } from './pages/pet-assistant.js';
 import { aiNutritionistPage, setupAiNutritionist } from './pages/ai-nutritionist.js';
 import { adminHomeMvpPage, setupHomeShortcutLiveRefresh } from './pages/home-shortcuts.js';
@@ -8,13 +8,13 @@ import { registerPage } from './pages/register.js';
 import { onboardingPage } from './pages/onboarding.js';
 import { profilePage } from './pages/profile.js';
 import { notificationSettingsPage } from './pages/notification-settings.js';
-import { editProfilePage } from './pages/edit-profile.js';
+import { changePasswordPage, editProfilePage } from './pages/edit-profile.js';
 import { helpCenterPage, setupRoleApplication } from './pages/help-center.js';
 import { feedbackPage } from './pages/feedback.js';
 import { addressPage } from './pages/address.js';
 import { paymentMethodPage } from './pages/payment-method.js';
 import { creditPage } from './pages/credit.js';
-import { setupTokensPage, tokensPage } from './pages/tokens.js';
+import { coinTopupPage, setupTokensPage, tokensPage } from './pages/tokens.js';
 import { marketplaceFavoritesPage, marketplacePage, marketplaceProductPage, marketplaceSellerPage } from './pages/marketplace.js';
 import { marketplaceCartPage, marketplaceCheckoutPage } from './pages/cart.js';
 import { adminMarketplaceManagePage, adminMarketplacePage, adminMarketplaceProductsPage } from './pages/admin-marketplace.js';
@@ -49,6 +49,7 @@ import { adminCustomersPage, getCustomerAccountStatus, getCustomerRecordId, save
 import { driverPortalPage, setupDriverPortal } from './pages/driver.js';
 import { adminAccessPage, adminAuditPage, setupAdminAccess, setupAdminAuditPage } from './pages/admin-access.js';
 import { adminSuppliersPage, setupAdminSuppliers } from './pages/admin-suppliers.js';
+import { adminCoinExchangePage, setupAdminCoinExchange } from './pages/admin-coin-exchange.js';
 import { adminProductServiceInsightsPage, setupAdminProductServiceInsights } from './pages/admin-product-insights.js';
 import { recordAdminAction } from './admin-audit.js';
 import { recentSearchesKey, searchPage } from './pages/search.js';
@@ -85,6 +86,7 @@ function petFromDatabase(row, photo = '', vaccinationCards = [], localPet = {}, 
     id: row.id,
     ownerId: row.user_id,
     name: row.name || '',
+    species: row.species || localPet.species || 'Dog',
     breed: row.breed || '',
     sex: row.sex || '',
     birthDate: row.birth_date || '',
@@ -94,7 +96,7 @@ function petFromDatabase(row, photo = '', vaccinationCards = [], localPet = {}, 
     remarks: Array.isArray(row.remarks) ? row.remarks : [],
     photo,
     avatar: avatar || localPet.avatar || '',
-    avatars: Array.isArray(localPet.avatars) ? localPet.avatars : (avatar || localPet.avatar ? [avatar || localPet.avatar] : []),
+    avatars: Array.isArray(localPet.avatars) ? localPet.avatars : [],
     activeAvatarIndex: Number.isInteger(localPet.activeAvatarIndex) ? localPet.activeAvatarIndex : null,
     avatarPath: row.avatar_path || localPet.avatarPath || '',
     profilePictureMode: row.profile_picture_mode || localPet.profilePictureMode || (photo ? 'photo' : 'default'),
@@ -170,8 +172,8 @@ async function loadCloudPetProfiles(userId) {
       : -1;
     return petFromDatabase(row, photo, vaccinationCards, {
       ...cachedPet,
-      avatars: avatars.length ? avatars : cachedPet.avatars,
-      activeAvatarIndex: avatars.length ? (cloudActiveAvatarIndex >= 0 ? cloudActiveAvatarIndex : null) : cachedPet.activeAvatarIndex,
+      avatars,
+      activeAvatarIndex: avatars.length ? (cloudActiveAvatarIndex >= 0 ? cloudActiveAvatarIndex : null) : null,
     }, avatar);
   }));
   localStorage.setItem(petProfilesStorageKeyForCurrentUser(), JSON.stringify(pets));
@@ -206,6 +208,7 @@ async function saveCloudPet(pet, userId) {
     id: petId,
     user_id: userId,
     name: pet.name,
+    species: pet.species === 'Cat' ? 'Cat' : 'Dog',
     breed: pet.breed || '',
     sex: pet.sex || '',
     birth_date: pet.birthDate || null,
@@ -234,6 +237,20 @@ async function saveCloudPet(pet, userId) {
   const avatar = data.avatar_path?.startsWith('builtin:') ? data.avatar_path.slice('builtin:'.length) : await signedPetFile(data.avatar_path);
   const vaccinationCards = await Promise.all(cards.map(async (card) => ({ ...card, data: await signedPetFile(card.path) })));
   return petFromDatabase(data, photo, vaccinationCards, pet, avatar);
+}
+
+// Persist only the assistant-avatar selection so avatar choice stays independent
+// from optional pet-profile fields such as species.
+async function saveCloudPetAssistantAvatar(petId, avatarPath, userId) {
+  const { data, error } = await supabase
+    .from('pet_profiles')
+    .update({ avatar_path: avatarPath || null })
+    .eq('id', petId)
+    .eq('user_id', userId)
+    .select('id, avatar_path')
+    .single();
+  if (error) throw error;
+  return data.avatar_path || '';
 }
 
 async function deleteCloudPet(petId, userId) {
@@ -1116,8 +1133,29 @@ function setupPetOverviewMedia() {
 function setupPetAvatarPage() {
   const page = document.querySelector('[data-pet-avatar-page]');
   if (!page) return;
-  const feedback = page.querySelector('[data-pet-avatar-feedback]');
   const preview = page.querySelector('[data-pet-avatar-current-preview]');
+  const feedback = page.querySelector('[data-pet-avatar-feedback]');
+  page.querySelectorAll('.pet-avatar-carousel-wrap').forEach((wrap) => {
+    const carousel = wrap.querySelector('.pet-avatar-carousel');
+    const controls = [...wrap.querySelectorAll('[data-avatar-scroll]')];
+    if (!carousel || !controls.length) return;
+    const syncControls = () => {
+      const maxScroll = Math.max(0, carousel.scrollWidth - carousel.clientWidth);
+      controls.forEach((control) => {
+        const atStart = carousel.scrollLeft <= 2;
+        const atEnd = carousel.scrollLeft >= maxScroll - 2;
+        control.disabled = maxScroll <= 2 || (control.dataset.avatarScroll === 'prev' ? atStart : atEnd);
+      });
+    };
+    controls.forEach((control) => control.addEventListener('click', () => {
+      const card = carousel.querySelector('.pet-avatar-choice');
+      const distance = Math.max(120, (card?.getBoundingClientRect().width || 142) * 2 + 12);
+      carousel.scrollBy({ left: control.dataset.avatarScroll === 'next' ? distance : -distance, behavior: 'smooth' });
+    }));
+    carousel.addEventListener('scroll', syncControls, { passive: true });
+    window.addEventListener('resize', syncControls, { passive: true });
+    requestAnimationFrame(syncControls);
+  });
   page.querySelectorAll('input[name="pet-avatar-choice"]').forEach((input) => input.addEventListener('change', () => {
     if (!input.checked || !preview) return;
     const card = input.closest('.pet-avatar-choice');
@@ -1143,22 +1181,25 @@ function setupPetAvatarPage() {
       avatar = selectedAvatar?.url || '';
       avatarPath = selectedAvatar?.path || (avatar === oldPet.avatar ? oldPet.avatarPath || '' : '');
     } else if (choice === 'free:furgo') avatar = defaultPetAvatarPath;
-    else if (choice.startsWith('free:')) avatar = freePetAssistantAvatars.find((item) => item.id === choice.slice('free:'.length))?.url || defaultPetAvatarPath;
+    else if (choice.startsWith('free:')) avatar = [...freePetAssistantAvatars, ...freePetCatAvatars].find((item) => item.id === choice.slice('free:'.length))?.url || defaultPetAvatarPath;
     if (choice.startsWith('free:')) avatarPath = `builtin:${avatar}`;
     const changes = { avatar, avatarPath, activeAvatarIndex };
     button.disabled = true;
-    if (feedback) feedback.textContent = 'Saving your choice…';
+    if (feedback) feedback.textContent = 'Saving your avatar…';
     try {
       let updatedPet = { ...oldPet, ...changes };
       const { data: authData } = await supabase.auth.getUser();
-      if (authData.user) updatedPet = await saveCloudPet(updatedPet, authData.user.id);
+      if (authData.user) {
+        updatedPet.avatarPath = await saveCloudPetAssistantAvatar(oldPet.id, avatarPath, authData.user.id);
+      }
       localStorage.setItem(petProfilesStorageKeyForCurrentUser(), JSON.stringify(pets.map((pet) => String(pet.id) === String(oldPet.id) ? updatedPet : pet)));
       const selected = selectedPetAssistantIds() || (selectedHomeAssistantPet(pets) ? [selectedHomeAssistantPet(pets).id] : []);
       savePetAssistantIds([...selected, String(oldPet.id)]);
       saveSelectedPetAssistantId(oldPet.id);
-      if (feedback) feedback.textContent = `${oldPet.name}’s avatar is saved and used by the home Pet Assistant.`;
+      if (feedback) feedback.textContent = `${oldPet.name}’s avatar is saved and active on the home page.`;
     } catch (error) {
-      if (feedback) feedback.textContent = error.message || 'This avatar could not be saved.';
+      console.error('Pet assistant avatar could not be saved:', error);
+      if (feedback) feedback.textContent = error.message || 'The avatar could not be saved. Please try again.';
     } finally { button.disabled = false; }
   });
 }
@@ -1395,6 +1436,7 @@ function setupPetProfileForm() {
   const remarkInput = form.querySelector('[data-remark-draft]');
   const breedInput = form.querySelector('[data-breed-input]');
   const breedListbox = form.querySelector('[data-breed-listbox]');
+  const speciesInput = form.querySelector('[data-pet-species]');
   const feedback = form.querySelector('.form-feedback');
   const petReturnContext = new URLSearchParams(window.location.hash.split('?')[1] || '').get('from') || 'home';
   const petReturnTo = petReturnContext === 'pet-profile' && form.dataset.petId ? `#pet-profile?id=${encodeURIComponent(form.dataset.petId)}` : petReturnContext === 'profile' ? '#profile' : petReturnContext === 'grooming' ? '#grooming' : petReturnContext === 'hotel' ? '#hotel' : '#home';
@@ -1415,9 +1457,10 @@ function setupPetProfileForm() {
   };
   const filterBreedOptions = () => {
     const query = breedInput.value.trim().toLocaleLowerCase();
+    const species = speciesInput.value || 'Dog';
     let matches = 0;
     breedListbox.querySelectorAll('[data-breed-option]').forEach((option) => {
-      option.hidden = !option.dataset.breedOption.toLocaleLowerCase().includes(query);
+      option.hidden = option.dataset.breedSpecies !== species || !option.dataset.breedOption.toLocaleLowerCase().includes(query);
       if (!option.hidden) matches += 1;
       option.setAttribute('aria-selected', 'false');
     });
@@ -1434,6 +1477,21 @@ function setupPetProfileForm() {
   };
   breedInput.addEventListener('focus', filterBreedOptions);
   breedInput.addEventListener('input', filterBreedOptions);
+  speciesInput.addEventListener('change', () => {
+    breedInput.value = '';
+    closeBreedOptions();
+    breedListbox.querySelectorAll('[data-breed-option]').forEach((option) => {
+      option.hidden = option.dataset.breedSpecies !== speciesInput.value;
+    });
+  });
+  form.querySelectorAll('[data-pet-species-choice]').forEach((choice) => choice.addEventListener('change', () => {
+    if (!choice.checked) return;
+    speciesInput.value = choice.value === 'Cat' ? 'Cat' : 'Dog';
+    form.querySelectorAll('[data-species-choice-card]').forEach((card) => {
+      card.dataset.selected = String(card.querySelector('[data-pet-species-choice]')?.checked === true);
+    });
+    speciesInput.dispatchEvent(new Event('change', { bubbles: true }));
+  }));
   breedInput.addEventListener('blur', () => window.setTimeout(closeBreedOptions, 180));
   breedInput.addEventListener('keydown', (event) => {
     const options = visibleBreedOptions();
@@ -1541,6 +1599,7 @@ function setupPetProfileForm() {
       ownerEmail: existingPet.ownerEmail || JSON.parse(sessionStorage.getItem('furgo-demo-user-profile') || '{}').email || '',
       ownerPhone: existingPet.ownerPhone || JSON.parse(sessionStorage.getItem('furgo-demo-user-profile') || '{}').phone || '',
       name: form.elements.name.value.trim(),
+      species: speciesInput.value === 'Cat' ? 'Cat' : 'Dog',
       breed: form.elements.breed.value.trim(),
       sex: form.elements.sex.value,
       birthDate: form.elements.birthDate.value,
@@ -1580,14 +1639,78 @@ function setupPetVaccinationPage() {
   if (!form) return;
   const petId = form.dataset.petId;
   const input = form.querySelector('[data-vaccination-upload]');
+  const dateInput = form.elements.vaccinationValidUntil;
   const list = form.querySelector('[data-vaccination-list]');
   const feedback = form.querySelector('.form-feedback');
   const pet = loadPetProfiles().find((item) => String(item.id) === String(petId));
   let cards = Array.isArray(pet?.vaccinationCards) ? [...pet.vaccinationCards] : [];
+  let knownCardPaths = new Set(cards.map((card) => card.path).filter(Boolean));
+  let cardRevision = 0;
+  let saveQueue = Promise.resolve();
   const showFeedback = (message, isError = false) => {
     feedback.textContent = message;
     feedback.classList.toggle('visible', Boolean(message));
     feedback.classList.toggle('is-error', isError);
+  };
+  const saveVaccinationDetails = () => {
+    if (!pet) { showFeedback('Pet profile not found.', true); return; }
+    saveQueue = saveQueue.catch(() => {}).then(async () => {
+      const cardsToSave = [...cards];
+      const savedCardRevision = cardRevision;
+      const vaccinationValidUntil = dateInput.value;
+      showFeedback('Saving changes…');
+      try {
+        const { data: authData } = await supabase.auth.getUser();
+        let savedCards = cardsToSave;
+        if (authData.user) {
+          const uploadedPaths = [];
+          try {
+            const storedCards = await Promise.all(cardsToSave.map(async (card) => {
+              const path = card.path || await uploadPetDataUrl(authData.user.id, petId, 'vaccination', card.data);
+              if (!card.path && path) uploadedPaths.push(path);
+              return { name: card.name || 'Vaccination record', path };
+            }));
+            const { data, error } = await supabase.from('pet_profiles')
+              .update({ vaccination_cards: storedCards, vaccination_valid_until: vaccinationValidUntil || null })
+              .eq('id', petId)
+              .eq('user_id', authData.user.id)
+              .select('vaccination_cards,vaccination_valid_until')
+              .single();
+            if (error) throw error;
+            const persistedCards = Array.isArray(data.vaccination_cards) ? data.vaccination_cards : [];
+            savedCards = await Promise.all(persistedCards.map(async (card) => ({
+              name: card.name || 'Vaccination record',
+              path: card.path || '',
+              data: card.path ? await signedPetFile(card.path) : '',
+            })));
+            const retainedPaths = new Set(persistedCards.map((card) => card.path).filter(Boolean));
+            const removedPaths = [...knownCardPaths].filter((path) => !retainedPaths.has(path));
+            knownCardPaths = retainedPaths;
+            if (removedPaths.length) {
+              const { error: removalError } = await supabase.storage.from('pet-records').remove(removedPaths);
+              if (removalError) console.warn('Removed vaccination files could not be deleted:', removalError);
+            }
+          } catch (error) {
+            if (uploadedPaths.length) await supabase.storage.from('pet-records').remove(uploadedPaths);
+            throw error;
+          }
+        } else {
+          savedCards = cardsToSave;
+        }
+        const savedPets = loadPetProfiles();
+        const currentPet = savedPets.find((item) => String(item.id) === String(petId)) || pet;
+        const updatedPet = { ...currentPet, vaccinationCards: savedCards, vaccinationValidUntil };
+        localStorage.setItem(petProfilesStorageKeyForCurrentUser(), JSON.stringify(savedPets.map((item) => String(item.id) === String(petId) ? updatedPet : item)));
+        savePetReminders(petId, { ...loadPetReminders(petId), vaccinationDate: vaccinationValidUntil });
+        if (cardRevision === savedCardRevision) {
+          cards = savedCards;
+          renderCards();
+        }
+        showFeedback('Changes saved automatically.');
+      } catch (error) {
+        showFeedback(`Could not save vaccination details: ${friendlyAuthError(error)}`, true);
+      }
+    });
   };
   const renderCards = () => {
     list.replaceChildren();
@@ -1619,9 +1742,12 @@ function setupPetVaccinationPage() {
     const remove = event.target.closest('[data-remove-vaccination-card]');
     if (!remove) return;
     cards.splice(Number(remove.dataset.removeVaccinationCard), 1);
+    cardRevision += 1;
     renderCards();
-    showFeedback('Card removed. Save Vaccination Details to confirm the change.');
+    saveVaccinationDetails();
   });
+  form.addEventListener('submit', (event) => event.preventDefault());
+  dateInput.addEventListener('change', saveVaccinationDetails);
   input.addEventListener('change', async () => {
     const files = Array.from(input.files || []);
     const existingBytes = cards.reduce((total, card) => total + (card.data?.startsWith('data:') ? Math.ceil(card.data.length * 0.75) : 0), 0);
@@ -1636,6 +1762,7 @@ function setupPetVaccinationPage() {
       return;
     }
     try {
+      const addedCards = [];
       for (const file of files) {
         if (file.size > 1.5 * 1024 * 1024) throw new Error(`${file.name} is larger than 1.5 MB.`);
         const isImage = file.type.startsWith('image/');
@@ -1647,37 +1774,16 @@ function setupPetVaccinationPage() {
           reader.onerror = () => reject(new Error(`Could not read ${file.name}.`));
           reader.readAsDataURL(file);
         });
-        cards.push({ name: file.name, type: isImage ? 'image/jpeg' : 'application/pdf', data });
+        addedCards.push({ name: file.name, type: isImage ? 'image/jpeg' : 'application/pdf', data });
       }
-      showFeedback('Cards added. Save Vaccination Details to confirm the changes.');
+      cards.push(...addedCards);
+      cardRevision += 1;
       renderCards();
+      saveVaccinationDetails();
     } catch (error) {
       showFeedback(error.message || 'That file could not be uploaded.', true);
     } finally {
       input.value = '';
-    }
-  });
-  form.addEventListener('submit', async (event) => {
-    event.preventDefault();
-    if (!pet) { showFeedback('Pet profile not found.', true); return; }
-    const saveButton = form.querySelector('[type="submit"]');
-    saveButton.disabled = true;
-    showFeedback('Saving vaccination details…');
-    try {
-      const { data: authData } = await supabase.auth.getUser();
-      const updatedPet = { ...pet, vaccinationCards: cards, vaccinationValidUntil: form.elements.vaccinationValidUntil.value };
-      const savedPet = authData.user ? await saveCloudPet(updatedPet, authData.user.id) : updatedPet;
-      const savedPets = loadPetProfiles();
-      const updatedPets = savedPets.map((item) => String(item.id) === String(petId) ? savedPet : item);
-      localStorage.setItem(petProfilesStorageKeyForCurrentUser(), JSON.stringify(updatedPets));
-      savePetReminders(petId, { ...loadPetReminders(petId), vaccinationDate: updatedPet.vaccinationValidUntil });
-      cards = Array.isArray(savedPet.vaccinationCards) ? [...savedPet.vaccinationCards] : [];
-      renderCards();
-      showFeedback('Vaccination details saved.');
-    } catch (error) {
-      showFeedback(`Could not save vaccination details: ${friendlyAuthError(error)}`, true);
-    } finally {
-      saveButton.disabled = false;
     }
   });
 }
@@ -1695,12 +1801,26 @@ function setupMarketplaceInteractions() {
   document.querySelectorAll('[data-toggle-favorite]').forEach((button) => button.addEventListener('click', (event) => {
     event.preventDefault();
     event.stopPropagation();
+    const previousScrollY = window.scrollY;
+    const restoreScrollPosition = () => {
+      if (Math.abs(window.scrollY - previousScrollY) > 1) window.scrollTo({ left: 0, top: previousScrollY, behavior: 'instant' });
+    };
     const productId = button.dataset.toggleFavorite;
     const favoriteIds = loadMarketplaceFavorites();
     const isSaved = favoriteIds.includes(productId);
     const updatedFavorites = isSaved ? favoriteIds.filter((id) => id !== productId) : [...favoriteIds, productId];
     localStorage.setItem(marketplaceFavoritesKey, JSON.stringify(updatedFavorites));
-    if (window.location.hash.split('?')[0] === '#favourites') { render(); return; }
+    if (window.location.hash.split('?')[0] === '#favourites') {
+      const removedCard = button.closest('.favorite-product-card');
+      const favoritesGrid = document.querySelector('.favorite-products-section .market-product-grid');
+      removedCard?.remove();
+      if (favoritesGrid && !favoritesGrid.querySelector('.favorite-product-card')) {
+        favoritesGrid.innerHTML = '<div class="market-empty favorite-empty"><h2>No Favourites Saved Yet</h2><p>Tap the heart on a product to keep it here for next time.</p><a class="button button-primary" href="#marketplace">Browse Marketplace</a></div>';
+      }
+      toast('Removed from your favourites.');
+      window.requestAnimationFrame(() => window.requestAnimationFrame(restoreScrollPosition));
+      return;
+    }
     document.querySelectorAll('[data-toggle-favorite]').forEach((toggle) => {
       if (toggle.dataset.toggleFavorite !== productId) return;
       const saved = !isSaved;
@@ -1713,6 +1833,7 @@ function setupMarketplaceInteractions() {
       if (label && (toggle.classList.contains('market-favorite-action') || toggle.classList.contains('market-pdp-inline-favorite'))) label.textContent = saved ? 'Saved to Favourites' : 'Save as Favourite';
     });
     toast(isSaved ? 'Removed from your favourites.' : 'Saved to your favourites.');
+    window.requestAnimationFrame(() => window.requestAnimationFrame(restoreScrollPosition));
   }));
   document.querySelectorAll('[data-favorite-repurchase]').forEach((button) => button.addEventListener('click', () => {
     const product = loadMarketplaceProducts().find((item) => item.id === button.dataset.favoriteRepurchase && !item.hidden && !item.frozenByAdmin);
@@ -5052,6 +5173,7 @@ function wireForms() {
   void refreshFurgoCoinBalance(supabase);
   setupAdminAccess();
   setupAdminSuppliers();
+  setupAdminCoinExchange();
   setupRoleApplication();
   setupAdminAuditPage();
   setupAdminEnquiries();
@@ -5362,6 +5484,7 @@ async function render({ preserveScroll = false } = {}) {
   if (!supabaseAuthReady) return;
   const previousScrollY = window.scrollY;
   const requestedHash = window.location.hash;
+  const shouldPreserveScroll = preserveScroll || requestedHash === lastRenderedHash;
   const requestedPage = requestedHash.slice(1).split('?')[0];
   if (['grooming', 'hotel', 'daycare', 'admin-access', 'admin-outlets', 'admin-users', 'admin-suppliers', 'admin-grooming', 'admin-hotel', 'admin-daycare', 'admin-pet-taxi'].includes(requestedPage)) {
     await refreshSharedOutlets();
@@ -5371,7 +5494,7 @@ async function render({ preserveScroll = false } = {}) {
   const page = routeName || 'home';
   const routeParams = new URLSearchParams(routeQuery);
   if (page === 'home' && routeParams.get('portal') === 'customer') sessionStorage.setItem('furgo-customer-portal-view', 'true');
-  if (['supplier', 'driver', 'admin', 'admin-orders', 'admin-access', 'admin-enquiries', 'admin-audit', 'admin-customers', 'admin-product-insights', 'admin-home-mvp', 'admin-outlets', 'admin-users', 'admin-suppliers', 'admin-promotions', 'admin-pet-taxi', 'admin-marketplace-manage', 'admin-marketplace-products', 'admin-local-finder', 'admin-marketplace', 'admin-grooming', 'admin-hotel', 'admin-daycare', 'login'].includes(page)) sessionStorage.removeItem('furgo-customer-portal-view');
+  if (['supplier', 'driver', 'admin', 'admin-orders', 'admin-access', 'admin-enquiries', 'admin-audit', 'admin-customers', 'admin-product-insights', 'admin-home-mvp', 'admin-outlets', 'admin-users', 'admin-suppliers', 'admin-coin-exchange', 'admin-promotions', 'admin-pet-taxi', 'admin-marketplace-manage', 'admin-marketplace-products', 'admin-local-finder', 'admin-marketplace', 'admin-grooming', 'admin-hotel', 'admin-daycare', 'login'].includes(page)) sessionStorage.removeItem('furgo-customer-portal-view');
   const isCustomerPortalView = sessionStorage.getItem('furgo-customer-portal-view') === 'true';
   const hasDemoSession = sessionStorage.getItem('furgo-demo-auth') === 'true';
   if (hasDemoSession && sessionStorage.getItem('furgo-demo-user-role') === 'customer') {
@@ -5381,7 +5504,7 @@ async function render({ preserveScroll = false } = {}) {
     } catch { /* Keep the current page usable if local demo profile data is malformed. */ }
   }
   const directorPages = ['admin-customers', 'admin-product-insights', 'admin-home-mvp', 'admin-outlets', 'admin-users', 'admin-suppliers'];
-  const managerPages = ['admin-promotions', 'admin-pet-taxi', 'admin-marketplace-manage', 'admin-marketplace-products', 'admin-local-finder'];
+  const managerPages = ['admin-promotions', 'admin-pet-taxi', 'admin-marketplace-manage', 'admin-marketplace-products', 'admin-local-finder', 'admin-coin-exchange'];
   const serviceAdminPages = ['admin-marketplace', 'admin-grooming', 'admin-hotel', 'admin-daycare'];
   const portalPages = ['admin', 'admin-orders', 'admin-access', 'admin-enquiries', 'admin-audit', ...managerPages, ...serviceAdminPages, ...directorPages];
   const supplierPages = ['supplier', 'supplier-product-edit'];
@@ -5397,6 +5520,10 @@ async function render({ preserveScroll = false } = {}) {
     } catch { /* Keep the portal usable if old session data is malformed. */ }
   }
   if (page === 'admin-local-finder' && !['manager', 'director'].includes(currentRole)) {
+    window.location.hash = currentRole === 'executive' ? '#admin' : '#login';
+    return;
+  }
+  if (page === 'admin-coin-exchange' && !['manager', 'director'].includes(currentRole)) {
     window.location.hash = currentRole === 'executive' ? '#admin' : '#login';
     return;
   }
@@ -5420,7 +5547,7 @@ async function render({ preserveScroll = false } = {}) {
     window.location.hash = '#login';
     return;
   }
-  if (hasDemoSession && currentRole === 'supplier' && !isCustomerPortalView && !supplierPages.includes(page) && !['login', 'notification-settings'].includes(page)) {
+  if (hasDemoSession && currentRole === 'supplier' && !isCustomerPortalView && !supplierPages.includes(page) && !['login', 'notification-settings', 'change-password'].includes(page)) {
     window.location.hash = '#supplier';
     return;
   }
@@ -5432,8 +5559,8 @@ async function render({ preserveScroll = false } = {}) {
     window.location.hash = '#login';
     return;
   }
-  const protectedPages = ['home', 'search', 'services', 'about', 'profile', 'edit-profile', 'help-center', 'feedback', 'pet-profile', 'pet-profile-edit', 'pet-reminder', 'pet-vaccination', 'pet-record', 'pet-data', 'pet-avatar', 'pet-assistant', 'ai-nutritionist', 'address', 'payment-method', 'credit', 'tokens', 'marketplace', 'local-finder', 'local-finder-list', 'local-finder-search', 'local-finder-place', 'local-finder-favourites', 'product', 'seller', 'cart', 'checkout', 'orders', 'check-in', 'favourites', 'subscriptions', 'grooming', 'grooming-orders', 'hotel', 'daycare'];
-  const driverAllowedPages = ['driver', 'profile', 'edit-profile', 'help-center', 'feedback', 'notification-settings', 'login'];
+  const protectedPages = ['home', 'search', 'services', 'about', 'profile', 'edit-profile', 'change-password', 'help-center', 'feedback', 'pet-profile', 'pet-profile-edit', 'pet-reminder', 'pet-vaccination', 'pet-record', 'pet-data', 'pet-avatar', 'pet-assistant', 'ai-nutritionist', 'address', 'payment-method', 'credit', 'tokens', 'marketplace', 'local-finder', 'local-finder-list', 'local-finder-search', 'local-finder-place', 'local-finder-favourites', 'product', 'seller', 'cart', 'checkout', 'orders', 'check-in', 'favourites', 'subscriptions', 'grooming', 'grooming-orders', 'hotel', 'daycare'];
+  const driverAllowedPages = ['driver', 'profile', 'edit-profile', 'change-password', 'help-center', 'feedback', 'notification-settings', 'login'];
   if (hasDemoSession && sessionStorage.getItem('furgo-demo-user-role') === 'driver' && !isCustomerPortalView && !driverAllowedPages.includes(page)) {
     window.location.hash = '#driver';
     return;
@@ -5476,12 +5603,14 @@ async function render({ preserveScroll = false } = {}) {
     profile: profilePage,
     'notification-settings': () => notificationSettingsPage(routeParams.get('from') || ''),
     'edit-profile': () => editProfilePage(routeParams.get('from') || 'profile'),
+    'change-password': () => changePasswordPage(routeParams.get('from') || 'profile'),
     'help-center': () => helpCenterPage(routeParams.get('from') || 'profile'),
     feedback: () => feedbackPage(routeParams.get('from') || 'profile', routeParams.get('return') || 'profile'),
     address: () => addressPage(routeParams.get('from') || 'profile'),
     'payment-method': () => paymentMethodPage(routeParams.get('from') || 'profile'),
     credit: () => creditPage(routeParams.get('from') || 'profile'),
     tokens: tokensPage,
+    'coin-topup': coinTopupPage,
     marketplace: () => marketplacePage(routeParams.get('category') || 'All'),
     'local-finder': localFinderPage,
     'local-finder-list': () => localFinderListPage(routeParams),
@@ -5529,6 +5658,7 @@ async function render({ preserveScroll = false } = {}) {
     'admin-outlets': () => adminAccessPage('outlets'),
     'admin-users': () => adminAccessPage('team'),
     'admin-suppliers': adminSuppliersPage,
+    'admin-coin-exchange': adminCoinExchangePage,
     'admin-audit': adminAuditPage,
     'admin-product-insights': adminProductServiceInsightsPage,
     driver: driverPortalPage,
@@ -5542,6 +5672,7 @@ async function render({ preserveScroll = false } = {}) {
     profile: 'My Profile — Furgo',
     'notification-settings': 'Notification — Furgo',
     'edit-profile': 'Edit Profile — Furgo',
+    'change-password': 'Change Password — Furgo',
     'help-center': 'Help Center — Furgo',
     feedback: 'Share Feedback — Furgo',
     address: 'Address — Furgo',
@@ -5593,6 +5724,8 @@ async function render({ preserveScroll = false } = {}) {
     'admin-outlets': 'Manage Outlets — Furgo Admin',
     'admin-users': 'Manage Admin — Furgo Admin',
     'admin-suppliers': 'Manage Supplier — Furgo Admin',
+    'admin-coin-exchange': 'Manage Coin Exchange — Furgo Admin',
+    'coin-topup': 'Top Up Furgo Coins — Furgo',
     'admin-audit': 'Activity Log — Furgo',
     'admin-product-insights': 'Product & Service Insights — Furgo Admin',
     driver: 'Driver Portal — Furgo Pet Taxi',
@@ -5600,7 +5733,7 @@ async function render({ preserveScroll = false } = {}) {
   const renderPage = pageRenderers[page] || homePage;
   document.title = titles[page] || titles.home;
   document.querySelector('#app').innerHTML = renderPage();
-  if (['executive', 'manager', 'director'].includes(currentRole) && isCustomerPortalView && !portalPages.includes(page) && !supplierPages.includes(page) && !driverPages.includes(page) && page !== 'notification-settings') {
+  if (['executive', 'manager', 'director'].includes(currentRole) && isCustomerPortalView && !portalPages.includes(page) && !supplierPages.includes(page) && !driverPages.includes(page) && !['notification-settings', 'change-password'].includes(page)) {
     let adminProfile = {};
     try { adminProfile = JSON.parse(sessionStorage.getItem('furgo-demo-user-profile') || '{}'); } catch { adminProfile = {}; }
     const adminName = adminProfile.name || adminProfile.email || 'Admin';
@@ -5608,7 +5741,7 @@ async function render({ preserveScroll = false } = {}) {
   }
   // Keep the Admin Portal navigation consistent across dashboard and management pages.
   if (portalPages.includes(page)) document.querySelector('#app').insertAdjacentHTML('beforeend', adminBottomNavigation(page === 'admin' ? 'admin' : page === 'admin-orders' ? 'orders' : page === 'admin-enquiries' ? 'enquiries' : page === 'admin-access' ? 'admin-access' : '', currentRole));
-  if (page === 'notification-settings') {
+  if (page === 'notification-settings' || page === 'change-password') {
     if (['executive', 'manager', 'director'].includes(currentRole)) document.querySelector('#app').insertAdjacentHTML('beforeend', adminBottomNavigation('admin-access', currentRole));
     else if (currentRole === 'supplier') document.querySelector('#app').insertAdjacentHTML('beforeend', '<nav class="bottom-nav supplier-bottom-nav" aria-label="Supplier Portal navigation"><a class="bottom-item" href="#supplier?tab=home"><img src="Image/Icon/Icon-01.png" alt="" /><span>Home</span></a><a class="bottom-item" href="#supplier?tab=orders"><img src="Image/Icon/Icon-03.png" alt="" /><span>Order</span></a><a class="bottom-item" href="#supplier?tab=help"><img src="Image/Icon/Icon-05.png" alt="" /><span>Help</span></a><a class="bottom-item active" href="#supplier?tab=profile"><img src="Image/Icon/Icon-08.png" alt="" /><span>Profile</span></a></nav>');
     else if (currentRole === 'driver') document.querySelector('#app').insertAdjacentHTML('beforeend', driverBottomNavigation('profile'));
@@ -5624,11 +5757,9 @@ async function render({ preserveScroll = false } = {}) {
     sessionStorage.setItem('furgo-demo-registration-started', 'true');
   }
   wireForms();
-  if (page === 'pet-profile' && routeParams.get('createAvatar') === '1') {
-    window.requestAnimationFrame(() => document.querySelector('[data-profile-picture-dialog]')?.showModal());
-  }
   setupPetCarePages();
-  window.scrollTo(0, preserveScroll ? previousScrollY : 0);
+  lastRenderedHash = requestedHash;
+  window.scrollTo(0, shouldPreserveScroll ? previousScrollY : 0);
   if (page === 'admin-orders' && routeParams.get('view') === 'scan') {
     window.requestAnimationFrame(() => document.querySelector('.admin-checkin-scan-panel')?.scrollIntoView({ behavior: 'smooth', block: 'center' }));
   }
@@ -5639,6 +5770,7 @@ async function render({ preserveScroll = false } = {}) {
 
 // Shows the Furgo brand splash briefly before the initial route.
 let splashTimer;
+let lastRenderedHash = null;
 function showSplash() {
   const logo = `Image/Icon/${encodeURIComponent('Logo 2.png')}`;
   document.title = 'Furgo — Better Care For Every Pet';

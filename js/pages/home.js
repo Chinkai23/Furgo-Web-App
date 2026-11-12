@@ -6,7 +6,7 @@ import { formatPetDate, localPetDate, loadPetRecords, loadPetReminders, petServi
 
 const petStorageKey = 'furgo-demo-pet-profiles';
 const anonymousPetStorageKey = `${petStorageKey}-anonymous`;
-export const defaultPetAvatarPath = 'Image/Pet%20Assistant%20Library/optimized/Furgo%20Assistant.png';
+export const defaultPetAvatarPath = 'Image/Pet%20Assistant%20Library/Furgo%20Assistant%20Dog.png';
 export const defaultPetProfilePicturePath = 'Image/Other%20Image/Pet%20Profile%20Picture.png';
 export const freePetAssistantAvatars = [
   { id: 'bulldog', label: 'Bulldog', image: 'Bulldog.png' },
@@ -20,22 +20,35 @@ export const freePetAssistantAvatars = [
   { id: 'poodle', label: 'Poodle', image: 'Poodle.png' },
   { id: 'schnauzer', label: 'Schnauzer', image: 'Schnauzer.png' },
   { id: 'shih-tzu', label: 'Shih Tzu', image: 'Shih Tzu.png' },
-].map((avatar) => ({ ...avatar, url: `Image/Pet%20Assistant%20Library/optimized/${encodeURIComponent(avatar.image)}` }));
+].map((avatar) => ({ ...avatar, url: `Image/Pet%20Assistant%20Library/${encodeURIComponent(avatar.image)}` }));
+export const freePetCatAvatars = [
+  { id: 'furgo-cat', label: 'Furgo Assistant Cat', image: 'Furgo Assistant Cat.png' },
+  { id: 'bengal', label: 'Bengal', image: 'Bengal.png' },
+  { id: 'british-shorthair', label: 'British Shorthair', image: 'British Shorthair.png' },
+  { id: 'domestic-longhair', label: 'Domestic Longhair', image: 'Domestic Longhair.png' },
+  { id: 'domestic-shorthair', label: 'Domestic Shorthair', image: 'Domestic Shorthair.png' },
+  { id: 'maine-coon', label: 'Maine Coon', image: 'Maine Coon.png' },
+  { id: 'munchkin', label: 'Munchkin', image: 'Munchkin.png' },
+  { id: 'persian', label: 'Persian', image: 'Persian.png' },
+  { id: 'ragdoll', label: 'Ragdoll', image: 'Ragdoll.png' },
+  { id: 'siamese', label: 'Siamese', image: 'Siamese.png' },
+  { id: 'sphynx', label: 'Sphynx', image: 'Sphynx.png' },
+].map((avatar) => ({ ...avatar, url: `Image/Pet%20Assistant%20Library/${encodeURIComponent(avatar.image)}` }));
 
 // Collect custom avatars only from the current account's loaded pet profiles.
 export function petCustomAvatarLibrary(pets = loadPetProfiles()) {
-  const builtInUrls = new Set([defaultPetAvatarPath, ...freePetAssistantAvatars.map((item) => item.url)]);
+  const builtInUrls = new Set([defaultPetAvatarPath, ...freePetAssistantAvatars, ...freePetCatAvatars].map((item) => typeof item === 'string' ? item : item.url));
   const library = new Map();
   pets.forEach((pet) => {
     const entries = Array.isArray(pet.avatars) ? pet.avatars : [];
     const normalized = entries.map((entry) => typeof entry === 'string'
       ? { url: entry, path: entry === pet.avatar ? pet.avatarPath || '' : '' }
       : { url: entry?.url || '', path: entry?.path || '' });
-    if (pet.avatar && !builtInUrls.has(pet.avatar) && !normalized.some((entry) => entry.url === pet.avatar || (pet.avatarPath && entry.path === pet.avatarPath))) {
-      normalized.push({ url: pet.avatar, path: pet.avatarPath || '' });
-    }
     normalized.forEach((entry) => {
-      if (!entry.url || builtInUrls.has(entry.url) || entry.path?.startsWith('builtin:')) return;
+      // A pet's current assistant/profile avatar is not proof that it was
+      // generated as a custom avatar. Only list files saved by the avatar
+      // creator in the pet-records avatar folder.
+      if (!entry.url || !/(^|\/)avatar-[^/]+\.[^/]+$/i.test(entry.path) || builtInUrls.has(entry.url) || entry.path?.startsWith('builtin:')) return;
       const key = entry.path || entry.url;
       if (!library.has(key)) library.set(key, { ...entry, petId: String(pet.id), petName: pet.name || 'My Pet' });
     });
