@@ -51,6 +51,16 @@ export function loadPetRecords(petId) {
 export function savePetRecord(petId, record) {
   const previous = loadPetRecords(petId).find((item) => item.date === record.date) || {};
   const merged = { ...previous, ...record };
+  if (record.weightKg !== undefined || record.weight !== undefined) {
+    const nextWeight = String(record.weightKg ?? record.weight);
+    const history = Array.isArray(previous.weightHistory)
+      ? previous.weightHistory.slice()
+      : previous.weightKg != null || previous.weight != null
+        ? [{ value: String(previous.weightKg ?? previous.weight), changedAt: `${record.date || previous.date || localPetDate()}T00:00:00` }]
+        : [];
+    if (history.at(-1)?.value !== nextWeight) history.push({ value: nextWeight, changedAt: new Date().toISOString() });
+    merged.weightHistory = history;
+  }
   const records = loadPetRecords(petId).filter((item) => item.date !== record.date);
   records.unshift(merged);
   const all = safePetCollection(petRecordsCloudKey);

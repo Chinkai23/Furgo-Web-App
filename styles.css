@@ -313,8 +313,8 @@ h1, h2, h3, p { margin-top: 0; }
 .pet-species-field { min-width: 0; grid-column: 1 / -1; display: grid; gap: 9px; margin: 0; padding: 0; border: 0; }
 .pet-species-field legend { margin-bottom: 9px; padding: 0; font-size: 17px; }
 .pet-species-options { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); width: 100%; gap: 14px; }
-.pet-species-choice { position: relative; aspect-ratio: 1.6 / 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 5px; overflow: hidden; padding: 9px; border: 2px solid #fff; border-radius: 20px; color: var(--ink); background: #ffffffb8; box-shadow: inset 0 2px 5px #fff9, inset 0 -3px 6px #dbbba533; cursor: pointer; transition: border-color .18s ease, background-color .18s ease, box-shadow .18s ease; }
-.pet-species-choice[data-selected="true"] { border-color: var(--orange); background: linear-gradient(145deg, #fffaf4 0%, #ffe9d6 100%); box-shadow: inset 0 1px 4px #fff, inset 0 -2px 6px #fe780126; }
+.pet-species-choice { position: relative; aspect-ratio: 1.6 / 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 5px; overflow: hidden; padding: 9px; border: 2px solid #fff; border-radius: 20px; color: var(--ink); background: #fdf2e6; box-shadow: inset 0 2px 5px #fff9, inset 0 -3px 6px #dbbba533; cursor: pointer; transition: border-color .18s ease, background-color .18s ease, box-shadow .18s ease, color .18s ease; }
+.pet-species-choice[data-selected="true"] { border-color: var(--orange); color: #fff; background: #fe7801; box-shadow: inset 0 1px 4px #ffffff4a, inset 0 -2px 6px #a9470038; }
 .pet-species-choice:focus-within { outline: 3px solid #fe780133; outline-offset: 2px; }
 .pet-species-choice input { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
 .pet-species-choice img { display: block; width: 72%; height: 70%; object-fit: contain; }
@@ -326,11 +326,20 @@ h1, h2, h3, p { margin-top: 0; }
 .pet-breed-listbox button[hidden] { display: none; }
 .pet-breed-listbox button:hover, .pet-breed-listbox button[aria-selected="true"] { background: #fff1e6; }
 .pet-name-field { grid-column: 1 / -1; }
+.pet-occasion-date-row { min-width: 0; grid-column: 1 / -1; display: grid; gap: 10px; margin: 0; padding: 0; border: 0; }
+.pet-occasion-date-row > legend { margin: 0; padding: 0; font-size: 17px; white-space: nowrap; }
+.pet-occasion-date-controls { min-width: 0; display: grid; grid-template-columns: minmax(0, .7fr) minmax(0, 1.3fr); align-items: stretch; gap: 14px; }
+.pet-occasion-buttons { display: grid; min-width: 0; }
+.pet-occasion-buttons select { width: 100%; height: 68px; min-width: 0; padding: 0 34px 0 14px; border: 1px solid #fff; border-radius: 16px; appearance: none; color: var(--ink); background-color: #fdf2e6; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='18' height='12' viewBox='0 0 18 12'%3E%3Cpath d='m2 2 7 7 7-7' fill='none' stroke='%2325262b' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 14px center; background-size: 14px 10px; box-shadow: inset 0 2px 5px #ffffffd9, inset 0 -3px 7px #e9d8cc70; font: 700 14px 'Avenir Next'; cursor: pointer; transition: background-color .18s ease, box-shadow .18s ease, color .18s ease; }
+.pet-occasion-buttons select[data-selected="true"] { color: #fff; background-color: var(--orange); background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='18' height='12' viewBox='0 0 18 12'%3E%3Cpath d='m2 2 7 7 7-7' fill='none' stroke='white' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"); box-shadow: inset 0 2px 4px #ffffff4d, inset 0 -4px 7px #b74a0055; }
+.pet-occasion-buttons select:focus-visible { outline: 2px solid #fe780155; outline-offset: 2px; }
+.pet-birth-date-field { min-width: 0; }
+.pet-birth-date-field.is-disabled { color: #99949a; }
+.pet-birth-date-selects select:disabled { color: #a5a1a3; background-color: #eee9e6; box-shadow: inset 0 2px 5px #aaa4a033; cursor: not-allowed; }
 .pet-form-field input, .pet-form-field select { width: 100%; height: 68px; min-width: 0; padding: 0 16px; border: 0; border-radius: 19px; outline: 0; color: var(--ink); background: #fff; font: 16px 'Avenir Next'; }
 .pet-form-field input[type="date"] { display: flex; align-items: center; width: 100%; height: 68px; min-width: 0; max-width: 100%; box-sizing: border-box; padding: 0 16px; line-height: normal; text-align: left !important; text-align-last: left; touch-action: manipulation; }
 .pet-form-field input[type="date"]::-webkit-date-and-time-value { display: flex; align-items: center; width: 100%; min-height: 1.2em; text-align: left; }
 .pet-form-field input[type="date"]::-webkit-calendar-picker-indicator { cursor: pointer; }
-.pet-birth-date-field { min-width: 0; grid-column: 1 / -1; }
 .pet-birth-date-selects { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; min-width: 0; }
 .pet-birth-date-selects select { width: 100%; height: 68px; min-width: 0; padding: 0 26px 0 10px !important; border: 0; border-radius: 19px; outline: 0; color: var(--ink); background-color: #fff; background-position: right 8px center !important; background-size: 11px 8px !important; font: 15px 'Avenir Next'; }
 .pet-form-field select { padding-right: 48px; appearance: none; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='18' height='12' viewBox='0 0 18 12'%3E%3Cpath d='m2 2 7 7 7-7' fill='none' stroke='%2325262b' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 20px center; background-size: 16px 11px; }
@@ -429,6 +438,55 @@ h1, h2, h3, p { margin-top: 0; }
 .pet-data-documents { margin-top: 20px; }
 .pet-data-documents h3 { margin: 0; font-size: 16px; }
 
+.pet-data-dashboard { width: min(100%, 980px); margin: 0 auto 30px; display: grid; gap: 16px; }
+.pet-data-section { min-width: 0; padding: 20px; border: 1px solid #f0dfd4; border-radius: 22px; background: #fff; box-shadow: inset 0 2px 7px #ffffffcc, inset 0 -4px 10px #e9d8cc45, 0 5px 14px #49301a0c; }
+.pet-data-section > header { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
+.pet-data-section h2 { margin: 0; color: var(--ink); font-size: 20px; }
+.pet-data-section > header > span { color: var(--muted); font-size: 14px; }
+.pet-data-weight-chart { width: 100%; overflow-x: scroll; overflow-y: hidden; scrollbar-gutter: stable; -webkit-overflow-scrolling: touch; touch-action: pan-x; }
+.pet-data-weight-chart svg { display: block; width: 100%; min-width: 0; height: 236px; overflow: visible; }
+.pet-data-weight-chart text { fill: var(--muted); font-family: inherit; }
+.pet-data-weight-chart .pet-data-chart-value { fill: var(--ink); font-weight: 700; }
+.pet-data-weight-chart .pet-data-chart-value.is-current { fill: #d95d00; font-weight: 800; }
+.pet-data-chart-axis { stroke: #ead8cb; stroke-width: 1.5; }
+.pet-data-chart-line { fill: none; stroke: #fe7801; stroke-width: 4; stroke-linecap: round; stroke-linejoin: round; }
+.pet-data-chart-point { fill: #fe7801; stroke: #fff; stroke-width: 3; }
+.pet-data-chart-point.is-current { fill: #fff; stroke: #fe7801; stroke-width: 4; }
+.pet-data-table-wrap { width: 100%; overflow-x: scroll; overflow-y: hidden; scrollbar-gutter: stable; -webkit-overflow-scrolling: touch; touch-action: pan-x; }
+.pet-data-table-wrap, .pet-data-weight-chart, .pet-intake-chart-scroll { scrollbar-width: auto; scrollbar-color: #fe7801 #f3e4d9; }
+.pet-data-table-wrap::-webkit-scrollbar, .pet-data-weight-chart::-webkit-scrollbar, .pet-intake-chart-scroll::-webkit-scrollbar { height: 9px; }
+.pet-data-table-wrap::-webkit-scrollbar-track, .pet-data-weight-chart::-webkit-scrollbar-track, .pet-intake-chart-scroll::-webkit-scrollbar-track { border-radius: 999px; background: #f3e4d9; }
+.pet-data-table-wrap::-webkit-scrollbar-thumb, .pet-data-weight-chart::-webkit-scrollbar-thumb, .pet-intake-chart-scroll::-webkit-scrollbar-thumb { border: 2px solid #f3e4d9; border-radius: 999px; background: #fe7801; }
+.pet-data-table-wrap table { width: 100%; border-collapse: collapse; text-align: left; font-size: 14px; }
+.pet-data-table-wrap th, .pet-data-table-wrap td { padding: 11px 10px; border-bottom: 1px solid #f0dfd4; vertical-align: top; }
+.pet-data-table-wrap th { color: var(--muted); font-size: 12px; font-weight: 700; white-space: nowrap; }
+.pet-data-table-wrap td:first-child { color: var(--ink); font-weight: 600; }
+.pet-data-table-wrap a { color: #d95d00; font-weight: 700; }
+.pet-data-empty, .pet-data-caption { margin: 8px 0 0; color: var(--muted); font-size: 14px; line-height: 1.5; }
+.pet-data-section[id] { scroll-margin-top: 18px; }
+.pet-data-dashboard .pet-data-empty, .pet-data-dashboard .pet-data-caption { font-size: 10px; }
+.pet-data-current-weight { color: var(--muted); font-size: 12px !important; white-space: nowrap; }
+.pet-data-section > header .pet-intake-history-toggle { min-height: 32px; padding: 6px 10px; font-size: 11px; }
+.pet-intake-chart-legend { display: flex; flex-wrap: wrap; gap: 8px 16px; margin: 0 0 12px; color: var(--muted); font-size: 12px; }
+.pet-intake-chart-legend span { display: inline-flex; align-items: center; gap: 6px; }
+.pet-intake-chart-legend i { width: 10px; height: 10px; display: inline-block; flex: 0 0 10px; border-radius: 50%; background: var(--intake-series-color, #fe7801); }
+.pet-intake-chart-scroll { width: 100%; overflow-x: scroll; overflow-y: hidden; scrollbar-gutter: stable; border-radius: 14px; background: #fffdfa; -webkit-overflow-scrolling: touch; overscroll-behavior-x: contain; touch-action: pan-x; }
+.pet-intake-chart-scroll svg { display: block; height: 230px; overflow: visible; }
+.pet-intake-chart-scroll rect[data-intake-bar] { cursor: pointer; }
+.pet-intake-chart-scroll rect[data-intake-bar]:hover, .pet-intake-chart-scroll rect[data-intake-bar].is-active { stroke: #fff; stroke-width: 2; }
+.pet-intake-chart-scroll rect[data-intake-bar]:focus-visible { outline: none; stroke: #25232a; stroke-width: 2; }
+.pet-intake-chart-gridline { stroke: #f0e3da; stroke-width: 1; }
+.pet-intake-chart-axis { stroke: #a99b91; stroke-width: 1.3; }
+.pet-intake-chart-axis-label, .pet-intake-chart-date { fill: var(--muted); font-family: inherit; font-size: 11px; }
+.pet-intake-chart-date { font-weight: 600; }
+.pet-intake-chart-detail { min-height: 22px; margin: 2px 0 0; color: #fe7801; font-size: 14.4px; font-weight: 600; }
+@media (max-width: 600px) {
+  .pet-data-dashboard { gap: 12px; }
+  .pet-data-section { padding: 16px 14px; border-radius: 18px; }
+  .pet-data-section h2 { font-size: 18px; }
+  .pet-data-table-wrap table { min-width: 560px; }
+}
+
 /* Override the Home carousel's fixed card width on the full-width Pet Profile page. */
 .pet-profile-page .pet-card.pet-profile-overview-card { width: min(100%, 760px); min-width: 0; height: auto; min-height: 0; aspect-ratio: 340 / 214; flex: 0 0 auto; grid-template-columns: 112px minmax(0, 1fr); grid-template-rows: auto auto; align-content: center; align-items: center; gap: 10px 12px; margin: 0 auto 25px; padding: 24px 26px 62px; }
 @media (min-width: 681px) {
@@ -443,23 +501,37 @@ h1, h2, h3, p { margin-top: 0; }
   .pet-profile-overview-card .pet-profile-button { min-height: 54px; font-size: 22px; }
 }
 .pet-care-panel { width: min(100%, 760px); margin: 0 auto; padding: 22px; border: 1px solid #f0dfd4; border-radius: 24px; background: #fff; }
+.pet-care-panel.pet-medicine-panel { box-shadow: inset 0 2px 8px #ffffffb8, inset 0 -5px 12px #e9d8cc70, 0 5px 14px #49301a12; }
+.pet-care-panel.pet-reminder-panel { box-shadow: inset 0 2px 8px #ffffffb8, inset 0 -5px 12px #e9d8cc70, 0 5px 14px #49301a12; }
 .pet-care-panel .profile-menu-group { margin-bottom: 15px; }
 .pet-care-form { display: grid; gap: 14px; }
 .pet-care-form label { display: grid; gap: 7px; color: var(--ink); font-size: 14px; font-weight: 600; }
 .pet-reminder-visibility { display: grid; gap: 8px; margin: 0; padding: 14px; border: 1px solid #f0dfd4; border-radius: 16px; background: #fffaf6; }
+.pet-reminder-panel .pet-reminder-visibility, .pet-reminder-panel .pet-custom-reminder-editor, .pet-reminder-panel .pet-custom-reminder-row { box-shadow: inset 0 2px 7px #ffffffd9, inset 0 -4px 8px #e9d8cc55; }
 .pet-reminder-visibility legend { padding: 0 5px; color: var(--ink); font-size: 14px; font-weight: 700; }
 .pet-care-form .pet-reminder-visibility label { min-height: 42px; display: flex; align-items: center; gap: 10px; margin: 0; padding: 8px 10px; border-radius: 11px; background: #fff; font-size: 13px; font-weight: 500; cursor: pointer; }
-.pet-reminder-visibility input[type="checkbox"] { width: 18px; height: 18px; flex: 0 0 18px; margin: 0; accent-color: var(--orange); }
+.pet-reminder-visibility input[type="checkbox"] { appearance: none; -webkit-appearance: none; width: 14px; height: 14px; flex: 0 0 14px; margin: 0; border: 1px solid var(--orange); border-radius: 4px; background: #fff; cursor: pointer; }
+.pet-reminder-visibility input[type="checkbox"]:checked { border-color: var(--orange); background: var(--orange) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='m3 8 3.2 3.2L13 4.5' fill='none' stroke='white' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center / 10px 10px no-repeat; }
+.pet-reminder-visibility input[type="checkbox"]:focus-visible { outline: 2px solid #fe780155; outline-offset: 2px; }
 .pet-care-form input { width: 100%; min-width: 0; height: 52px; padding: 0 14px; border: 1px solid #efe1d8; border-radius: 15px; color: var(--ink); background: #fffaf6; font: 15px 'Avenir Next'; }
 .pet-care-form select { width: 100%; min-width: 0; height: 52px; padding: 0 14px; border: 1px solid #efe1d8; border-radius: 15px; color: var(--ink); background: #fffaf6; font: 15px 'Avenir Next'; }
+.pet-medicine-panel .pet-care-form input[name="medicineName"], .pet-medicine-panel .pet-care-form input[name="medicineDosage"] { border-color: rgba(255,255,255,.9); color: var(--ink); background: #fff; box-shadow: inset 0 2px 6px rgba(89,58,35,.1), inset 0 -1px 2px rgba(255,255,255,.9); }
+.pet-intake-heading-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 15px; }
+.pet-intake-heading-row .profile-menu-group { min-width: 0; margin-bottom: 0; }
+.pet-intake-history-toggle { flex: 0 0 auto; min-height: 38px; display: inline-flex; align-items: center; justify-content: center; padding: 8px 13px; border: 1px solid #000; border-radius: 12px; color: #fff; background: #000; box-shadow: none; font: 700 12px 'Avenir Next'; text-decoration: none; cursor: pointer; }
+.pet-intake-history-toggle:hover { color: #fff; background: #000; }
+.pet-data-dashboard .pet-intake-history-toggle, .pet-data-dashboard .pet-intake-history-toggle:hover { border-color: #fe7801; color: #fff; background: #fe7801; }
 .pet-care-form input:focus { border-color: var(--orange); outline: 3px solid #fe780126; }
 .pet-care-form select:focus { border-color: var(--orange); outline: 3px solid #fe780126; }
 .pet-care-inline-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.pet-medicine-editor .pet-care-inline-fields { grid-template-columns: minmax(0, 3fr) minmax(0, 1fr); }
+.pet-medicine-editor { padding-top: 10px; }
 .pet-custom-reminder-editor { display: grid; gap: 12px; padding: 16px; border: 1px solid #f0dfd4; border-radius: 16px; background: #fffaf6; }
 .pet-custom-reminder-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .pet-custom-reminder-heading h3 { margin: 0 0 3px; font-size: 16px; }
 .pet-custom-reminder-heading p { margin: 0; color: var(--muted); font-size: 12px; }
 .pet-custom-reminder-heading .button { min-height: 38px; flex: 0 0 auto; padding: 0 13px; border-radius: 13px; font-size: 12px; }
+.pet-custom-reminder-heading [data-add-custom-reminder] { border-color: var(--orange); color: #fff; background-color: var(--orange); }
 .pet-custom-reminder-list { display: grid; gap: 10px; }
 .pet-custom-reminder-empty { margin: 0; color: var(--muted); font-size: 13px; }
 .pet-custom-reminder-row { display: grid; gap: 10px; padding: 13px; border: 1px solid #f0dfd4; border-radius: 13px; background: #fff; }
@@ -467,6 +539,8 @@ h1, h2, h3, p { margin-top: 0; }
 .pet-custom-reminder-row .pet-custom-reminder-remove { min-height: 28px; justify-self: end; padding: 2px 4px; border: 0; color: #a94e0b; background: transparent; font: 600 12px 'Avenir Next'; text-decoration: underline; cursor: pointer; }
 .pet-care-note { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.45; }
 .pet-care-form .button { min-height: 48px; border-radius: 16px; }
+.pet-reminder-panel .button { box-shadow: inset 0 2px 5px rgba(255, 255, 255, .52), inset 0 -4px 7px rgba(139, 62, 0, .18), 0 5px 12px rgba(74, 46, 27, .14); }
+.pet-reminder-panel .button:hover, .pet-reminder-panel .button:focus-visible { transform: none; box-shadow: inset 0 2px 5px rgba(255, 255, 255, .62), inset 0 -4px 7px rgba(139, 62, 0, .2), 0 5px 12px rgba(74, 46, 27, .16); }
 .pet-care-list, .pet-record-history { display: grid; gap: 8px; margin: 18px 0 0; padding: 0; list-style: none; }
 .pet-care-list li { min-height: 48px; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 9px 12px; border-radius: 14px; background: #fff4eb; font-size: 13px; }
 .pet-care-list li strong { color: #99420c; }
@@ -493,10 +567,19 @@ h1, h2, h3, p { margin-top: 0; }
 .pet-exercise-start:hover, .pet-exercise-start:focus-visible, .pet-exercise-start:active { transform: translateX(-50%); background: #FE7801; box-shadow: inset 0 2px 5px rgba(255, 255, 255, .68), inset 0 -4px 7px rgba(139, 62, 0, .2), 0 6px 16px rgba(74, 46, 27, .23); }
 .pet-exercise-panel .pet-care-form button[type="submit"] { color: #fff; background: #FE7801; box-shadow: inset 0 2px 5px rgba(255, 255, 255, .55), inset 0 -4px 7px rgba(139, 62, 0, .2), 0 5px 12px rgba(74, 46, 27, .14); }
 .pet-exercise-panel .pet-care-form button[type="submit"]:hover { background: #FE7801; box-shadow: inset 0 2px 5px rgba(255, 255, 255, .65), inset 0 -4px 7px rgba(139, 62, 0, .22), 0 6px 14px rgba(74, 46, 27, .18); }
-.pet-intake-panel .profile-menu-group p, .pet-exercise-panel .profile-menu-group p { margin: 3px 0 0; color: var(--muted); font-size: 13px; }
+.pet-intake-panel .profile-menu-group p, .pet-exercise-panel .profile-menu-group p, .pet-medicine-panel .profile-menu-group p { margin: 3px 0 0; color: var(--muted); font-size: 13px; }
 .pet-intake-cards { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
 .pet-intake-card { position: relative; min-width: 0; min-height: 278px; overflow: hidden; display: flex; flex-direction: column; justify-content: space-between; padding: 17px 18px 12px; border: 1px solid #f0dfd4; border-radius: 24px; background: #fff; box-shadow: inset 0 2px 8px #fff, inset 0 -5px 12px #e9d8cc75, 0 5px 14px #49301a12; }
 .pet-intake-card.is-food { color: #fff; border-color: #f2a36b; background: #FE7801; box-shadow: inset 0 2px 8px #ffffff45, inset 0 -6px 12px #a94e0b30, 0 5px 14px #49301a24; }
+.pet-intake-card.is-medicine { color: #99420c; background: #fff5ee; }
+.pet-intake-card.is-medicine { grid-column: 1 / -1; min-height: 150px; }
+.pet-intake-card.is-medicine .pet-intake-add { grid-template-columns: auto auto minmax(0, 1fr); grid-template-rows: auto auto auto; align-items: center; gap: 0 12px; }
+.pet-intake-card.is-medicine .pet-intake-title { min-height: auto; margin-bottom: 7px; }
+.pet-intake-card.is-medicine .pet-intake-count { grid-column: 1; grid-row: 2; font-size: clamp(38px, 5vw, 52px); }
+.pet-intake-card.is-medicine .pet-intake-times { grid-column: 2; grid-row: 2; align-self: center; font-size: 17px; }
+.pet-intake-card.is-medicine .pet-intake-last { grid-column: 3; grid-row: 2; margin: 0; }
+.pet-intake-card.is-medicine .pet-intake-prompt { grid-column: 3; grid-row: 3; margin-top: 2px; }
+.pet-intake-card.is-medicine .pet-intake-undo { align-self: flex-end; }
 .pet-intake-add { width: 100%; min-width: 0; flex: 1; display: grid; grid-template-columns: minmax(54px, .6fr) minmax(0, 1fr); grid-template-rows: auto auto auto auto; align-content: start; align-items: center; gap: 0 8px; padding: 0; border: 0; color: inherit; background: transparent; font: inherit; text-align: left; cursor: pointer; }
 .pet-intake-title { grid-column: 1 / -1; min-height: 48px; display: flex; align-items: flex-start; font-size: 17px; line-height: 1.22; font-weight: 700; }
 .pet-intake-add img { grid-column: 2; grid-row: 2 / 4; width: min(100%, 118px); height: 90px; justify-self: center; object-fit: contain; }
@@ -507,19 +590,43 @@ h1, h2, h3, p { margin-top: 0; }
 .pet-intake-undo { min-height: 29px; align-self: flex-end; padding: 1px 2px; border: 0; color: inherit; background: transparent; font: 500 14px 'Avenir Next'; cursor: pointer; }
 .pet-intake-undo:disabled { visibility: hidden; }
 .pet-intake-feedback { min-height: 18px; margin: 8px 1px 0; color: var(--muted); font-size: 12px; }
-.pet-record-chart-panel { width: min(100%, 760px); margin: 0 auto 18px; padding: 22px; border: 1px solid #f0dfd4; border-radius: 24px; background: #fff; box-shadow: inset 0 2px 8px #fff, inset 0 -5px 12px #e9d8cc75, 0 5px 14px #49301a12; }
-.pet-record-chart-panel h2 { margin: 0 0 22px; font-size: 20px; line-height: 1.25; }
-.pet-intake-chart { min-height: 180px; display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); align-items: stretch; gap: 5px; padding: 24px 0 0; border-bottom: 1px solid #827d78; }
-.pet-intake-day { min-width: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-rows: 1fr auto; align-items: end; justify-items: center; gap: 0 2px; }
-.pet-intake-bar-column { min-width: 0; width: 100%; height: 128px; display: flex; flex-direction: column; justify-content: flex-end; align-items: center; }
-.pet-intake-bar-count { min-height: 18px; color: #242328; font-size: 11px; font-weight: 700; line-height: 18px; }
-.pet-intake-bar-column i { width: min(100%, 24px); height: var(--bar-height); min-height: 0; display: block; background: #79a77e; }
-.pet-intake-bar-column i.is-water { background: #afd4e6; }
-.pet-intake-day-label { grid-column: 1 / -1; width: max-content; max-width: calc(100% + 12px); overflow: hidden; padding: 8px 0 10px; color: var(--orange); font-size: 12px; font-weight: 700; white-space: nowrap; }
-.pet-intake-chart-legend { display: flex; justify-content: center; gap: 20px; padding-top: 13px; color: var(--muted); font-size: 12px; }
-.pet-intake-chart-legend span { display: inline-flex; align-items: center; gap: 6px; }
-.pet-intake-chart-legend i { width: 11px; height: 11px; border-radius: 3px; background: #79a77e; }
-.pet-intake-chart-legend i.is-water { background: #afd4e6; }
+.pet-medicine-saved-details:empty { display: none; }
+.pet-medicine-saved-details { display: grid; gap: 12px; padding: 0; border: 0; background: transparent; }
+.pet-medicine-saved-item { padding: 13px 15px; border: 1px solid #f1dfd3; border-radius: 15px; background: #fff5ee; }
+.pet-medicine-saved-item dl { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 18px; margin: 0; }
+.pet-medicine-saved-item dl div { min-width: 0; }
+.pet-medicine-saved-item dt { margin-bottom: 3px; color: var(--muted); font-size: 12px; }
+.pet-medicine-saved-item dd { margin: 0; color: var(--ink); font-size: 14px; font-weight: 600; overflow-wrap: anywhere; }
+.pet-medicine-item-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 11px; }
+.pet-medicine-item-actions .button { min-height: 34px; padding: 6px 13px; font-size: 12px; }
+.pet-medicine-item-actions .button { border: 1px solid #fe7801; color: #fe7801; background: transparent; box-shadow: none; }
+.pet-medicine-item-actions .button:hover, .pet-medicine-item-actions .button:focus-visible { border-color: #fe7801; color: #fe7801; background: #fff5ee; box-shadow: none; }
+.pet-medicine-editor[hidden] { display: none !important; }
+.pet-medicine-add[hidden] { display: none !important; }
+.pet-medicine-add { width: 100%; margin-bottom: 12px; border: 0; color: #fff; background: #FE7801; box-shadow: inset 0 2px 5px rgba(255, 255, 255, .55), inset 0 -4px 7px rgba(139, 62, 0, .2), 0 5px 12px rgba(74, 46, 27, .14); }
+.pet-medicine-add:hover, .pet-medicine-add:focus-visible { border: 0; color: #fff; background: #FE7801; box-shadow: inset 0 2px 5px rgba(255, 255, 255, .65), inset 0 -4px 7px rgba(139, 62, 0, .22), 0 6px 14px rgba(74, 46, 27, .18); }
+.pet-medicine-editor-actions { display: flex; flex-wrap: wrap; gap: 10px; }
+.pet-medicine-editor-actions .button:first-child { flex: 1 1 220px; }
+.pet-medicine-saved-details dl { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 18px; margin: 0; }
+.pet-medicine-saved-details dl div { min-width: 0; }
+.pet-medicine-saved-details dt { margin-bottom: 3px; color: var(--muted); font-size: 12px; }
+.pet-medicine-saved-details dd { margin: 0; color: var(--ink); font-size: 14px; font-weight: 600; overflow-wrap: anywhere; }
+.pet-medicine-period { display: grid; gap: 6px; }
+.pet-medicine-period > strong { color: var(--ink); font-size: 14px; }
+.pet-medicine-period > p { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.45; }
+.pet-medicine-range-display { margin: 5px 0 8px; }
+.pet-medicine-calendar { padding: 10px; }
+.pet-medicine-frequency { display: flex; align-items: center; gap: 8px; min-height: 48px; padding: 5px 10px; border: 1px solid rgba(255,255,255,.82); border-radius: 13px; background: rgba(255,255,255,.58); box-shadow: inset 0 2px 5px rgba(130,91,62,.08); }
+.pet-medicine-frequency input { width: 68px; min-height: 36px; padding: 5px 8px; border: 1px solid #f0dfd4; border-radius: 9px; background: #fff; font: inherit; }
+.pet-medicine-frequency select { min-width: 0; flex: 1; min-height: 36px; padding: 5px 7px; border: 1px solid #f0dfd4; border-radius: 9px; background: #fff; font: inherit; }
+.pet-medicine-frequency select { appearance: none; padding-right: 34px; color: var(--ink); background-color: #fff; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%23fe7801' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 10px center; box-shadow: inset 0 2px 5px rgba(130,91,62,.08); }
+.pet-medicine-notification-setting { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.pet-medicine-notification-setting .button { min-height: 36px; padding: 7px 12px; font-size: 12px; }
+.pet-medicine-notification-setting span { color: var(--muted); font-size: 12px; }
+.pet-medicine-reminder-toast { position: fixed; z-index: 1200; right: 18px; bottom: calc(18px + env(safe-area-inset-bottom)); width: min(440px, calc(100vw - 36px)); display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 15px; border: 1px solid #f3d9c7; border-radius: 16px; color: #342c27; background: #fff8f2; box-shadow: 0 8px 28px rgba(52,35,23,.2); }
+.pet-medicine-reminder-toast > span { flex: 1 1 100%; font-size: 14px; line-height: 1.4; }
+.pet-medicine-reminder-toast button { min-height: 36px; padding: 7px 13px; border: 0; border-radius: 10px; color: #fff; background: #fe7801; font: 700 13px 'Avenir Next'; cursor: pointer; }
+.pet-medicine-reminder-toast button[data-dismiss-medicine-toast] { margin-left: auto; padding: 3px 9px; color: #6c625d; background: transparent; font-size: 22px; }
 @media (max-width: 420px) {
   .pet-intake-cards { gap: 9px; }
   .pet-intake-card { min-height: 252px; padding: 13px 12px 9px; border-radius: 19px; }
@@ -529,12 +636,8 @@ h1, h2, h3, p { margin-top: 0; }
   .pet-intake-count { font-size: 53px; }
   .pet-intake-times { font-size: 16px; }
   .pet-intake-last, .pet-intake-prompt { font-size: 11px; }
-  .pet-record-chart-panel { padding: 17px 13px; border-radius: 20px; }
-  .pet-record-chart-panel h2 { font-size: 17px; }
-  .pet-intake-chart { min-height: 150px; gap: 2px; }
-  .pet-intake-bar-column { height: 100px; }
-  .pet-intake-bar-count { font-size: 10px; }
-  .pet-intake-day-label { font-size: 10px; }
+  .pet-medicine-saved-item dl { grid-template-columns: minmax(0, 1fr); gap: 9px; }
+  .pet-medicine-frequency { gap: 5px; padding-inline: 7px; }
 }
 @media (max-width: 420px) {
   .profile-page { padding-right: 18px; padding-left: 18px; }
@@ -944,12 +1047,8 @@ h1, h2, h3, p { margin-top: 0; }
 .local-finder-suggest-edit { display: block; color: #d85f00; font-size: 13px; text-align: right; }
 .credit-row { height: 220px; min-height: 220px; position: relative; display: block; margin: 0 -5px; padding: 0; }
 /* Home header pet artwork scales to sit beside the Total Credit card. */
-.home-pet-art { width: 50%; max-width: 220px; height: auto; position: absolute; z-index: 1; top: -3px; left: 23%; transform: translateX(-50%); object-fit: contain; filter: drop-shadow(0 7px 5px #71310f2b); transition: opacity .16s ease, translate .12s ease; }
-.home-pet-art.is-switching-pet { opacity: 0; }
-.home-pet-art.has-switched-pet { animation: home-pet-switch-in .24s ease-out both; }
-@keyframes home-pet-switch-in { from { opacity: .25; translate: 0 5px; } to { opacity: 1; translate: 0 0; } }
-.home-pet-assistant-shortcut { width: 65%; max-width: 320px; height: 100%; position: absolute; z-index: 1; top: -3px; left: 23%; display: block; transform: translateX(-50%); color: #fff; text-decoration: none; touch-action: pan-y; cursor: grab; }
-.home-pet-assistant-shortcut:active { cursor: grabbing; }
+.home-pet-art { width: 50%; max-width: 220px; height: auto; position: absolute; z-index: 1; top: -3px; left: 23%; transform: translateX(-50%); object-fit: contain; filter: drop-shadow(0 7px 5px #71310f2b); }
+.home-pet-assistant-shortcut { width: 65%; max-width: 320px; height: 100%; position: absolute; z-index: 1; top: -3px; left: 23%; display: block; transform: translateX(-50%); -webkit-clip-path: inset(0 var(--mascot-safe-right-inset, 0px) 0 0); clip-path: inset(0 var(--mascot-safe-right-inset, 0px) 0 0); color: #fff; text-decoration: none; touch-action: pan-y; cursor: pointer; }
 .home-pet-assistant-shortcut:focus-visible { border-radius: 18px; outline: 3px solid #fff; outline-offset: 3px; }
 .home-pet-assistant-shortcut > .home-pet-art { width: 110%; max-width: none; height: auto; position: absolute; top: -10%; left: -5%; transform: none; }
 .home-pet-assistant-bubble { width: 54%; height: 68px; position: absolute; z-index: 2; top: 21px; right: 0; display: grid; align-content: center; gap: 4px; overflow: visible; padding: 8px 11px; border-radius: 15px; color: #71310f; background: #fbb478; box-shadow: none; text-decoration: none; }
@@ -4435,6 +4534,16 @@ select::-ms-expand { display: none; }
 .token-card { container-type: normal; color: #fff; background: linear-gradient(115deg, #ff9c28 0%, #ff7200 100%); box-shadow: 0 15px 24px #71310f40, 0 4px 10px #71310f24; text-decoration: none; }
 .home-token-art { width: 20%; max-width: 140px; height: auto; position: absolute; z-index: 4; top: 50%; left: 49%; transform: translate(-50%, -50%); object-fit: contain; filter: drop-shadow(0 7px 7px #5c260d38); }
 .home-token-copy { min-width: 0; position: absolute; z-index: 4; top: 50%; right: 12px; left: 61%; display: grid; gap: 4px; transform: translateY(-50%); color: #fff; }
+.home-pet-mascot-arrows { width: max-content; height: auto; position: absolute; z-index: 16; right: auto; bottom: 6px; left: 0; display: flex; align-items: center; justify-content: center; padding: 0; pointer-events: none; }
+.home-pet-mascot-swipe-hint { display: inline-flex; align-items: center; justify-content: center; gap: 5px; padding: 6px 11px; border: 1px solid rgba(255, 255, 255, .82); border-radius: 18px; color: #d85f00; background: rgba(255, 255, 255, .72); -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); box-shadow: 0 10px 22px rgba(104, 52, 19, .15), 0 2px 6px rgba(104, 52, 19, .08); font: 600 12px/1.2 'Avenir Next', sans-serif; white-space: nowrap; cursor: pointer; pointer-events: auto; transform: scale(.72); transform-origin: center; animation: home-pet-swipe-hint-slide 2.4s ease-in-out infinite; }
+@keyframes home-pet-swipe-hint-slide { 0%, 100% { translate: -4px 0; } 50% { translate: 4px 0; } }
+.home-pet-swipe-preview { z-index: 4 !important; opacity: 1 !important; }
+@media (max-width: 679px) {
+  .home-pet-mascot-arrows {
+    left: calc(clamp(-60px, -14vw, -42px) - 16px + 18.9525vw + 68.229px);
+    transform: translateX(-50%);
+  }
+}
 .home-balance-label { display: block; overflow: hidden; font-size: clamp(10px, 5.5cqw, 18px); line-height: 1.15; text-overflow: ellipsis; white-space: nowrap; }
 .token-card strong { width: 100%; display: block; overflow: hidden; color: #fff; font: 800 clamp(28px, 16cqw, 76px)/.98 'Avenir Next'; letter-spacing: -.04em; white-space: nowrap; }
 .home-balance-cards .credit-card { container-type: inline-size; padding: 13px 12px 12px; border-radius: 23px; box-shadow: 0 15px 24px #79300040, 0 4px 10px #4d250026; }
@@ -5239,6 +5348,7 @@ select::-ms-expand { display: none; }
   backdrop-filter: none;
   -webkit-backdrop-filter: none;
 }
+.pet-care-links .profile-menu-row:not(:last-child) { border-bottom: 1px solid #f2e7df; }
 .pet-care-links .profile-menu-row:hover { background: transparent; }
 .pet-overview-media .pet-profile-photo-name { margin: 4px 0 15px; color: var(--ink); font: 700 clamp(23px, 3vw, 33px)/1.2 'Avenir Next'; text-align: center; }
 .pet-profile-page .pet-card.pet-profile-overview-card.pet-profile-details-banner { grid-template-rows: auto auto; gap: 16px; }
@@ -5464,6 +5574,11 @@ select::-ms-expand { display: none; }
   .pet-profile-form .pet-profile-fields {
     row-gap: 32px;
   }
+  .pet-occasion-date-controls { grid-template-columns: minmax(0, .7fr) minmax(0, 1.3fr); gap: 10px; }
+  .pet-occasion-date-row > legend { font-size: 16px; }
+  .pet-occasion-buttons select { height: 60px; padding: 0 24px 0 8px; background-position: right 7px center; background-size: 10px 8px; font-size: 11px; }
+  .pet-birth-date-selects { gap: 4px; }
+  .pet-birth-date-selects select { height: 60px; padding: 0 15px 0 5px !important; background-position: right 4px center !important; background-size: 9px 7px !important; font-size: 12px; }
   .pet-profile-form .pet-button-choices {
     min-height: 54px;
   }
@@ -5818,4 +5933,100 @@ select::-ms-expand { display: none; }
 .supplier-portal-view[data-supplier-section="profile"] .supplier-profile-form .button-primary,
 .supplier-portal-view[data-supplier-section="profile"] .supplier-profile-logout {
   box-shadow: inset 0 2px 3px rgba(255, 255, 255, 0.28), inset 0 -3px 4px rgba(92, 35, 0, 0.22), 0 5px 10px rgba(188, 90, 27, 0.25);
+}
+
+@media (min-width: 680px) {
+  .home-pet-mascot-arrows {
+    width: min(48%, 360px);
+    top: auto;
+    bottom: 8px;
+    left: 27%;
+    transform: translateX(-50%);
+  }
+}
+
+/* Use the shared canvas color on every Furgo page except the customer homepage. */
+html,
+body { background-color: #fefaf6; }
+main:not(.mobile-home) { background: #fefaf6 !important; }
+main.splash-screen { background-color: #FE7801 !important; }
+.pet-profile-page input:not([type="hidden"]):not([type="checkbox"]):not([type="radio"]):not([type="file"]):not([type="submit"]):not([type="button"]):not([type="range"]):not([type="color"]):not(:disabled),
+.pet-profile-page textarea:not(:disabled),
+.pet-profile-page select:not(:disabled),
+.pet-profile-page input[type="date"] { background-color: #fdf2e6 !important; }
+.pet-profile-page input[type="date"]:disabled { color: #a6a6a6 !important; -webkit-text-fill-color: #a6a6a6; opacity: 1; }
+.pet-profile-page input[type="date"]:not(:disabled) { color: #242329 !important; -webkit-text-fill-color: #242329; }
+.pet-profile-page .pet-birth-date-selects select { background-color: #fdf2e6 !important; }
+.pet-profile-page .pet-birth-date-selects select:disabled { color: #a6a6a6 !important; }
+.pet-profile-page .pet-birth-date-selects select:not(:disabled) { color: #242329 !important; }
+.pet-profile-page .pet-occasion-buttons select[data-selected="true"] { color: #fff !important; background-color: var(--orange) !important; }
+
+/* Add the Furgo inset 3D treatment to My Profile and its customer settings pages. */
+.profile-page:not(.account-page):not(.support-destination) section:not(.profile-menu-group) {
+  box-shadow: inset 0 2px 7px rgba(255, 255, 255, 0.78), inset 0 -4px 9px rgba(110, 72, 43, 0.09), 0 6px 16px rgba(56, 36, 18, 0.07);
+}
+.profile-page:not(.account-page):not(.support-destination) button,
+.profile-page:not(.account-page):not(.support-destination) .profile-edit-link {
+  box-shadow: inset 0 2px 4px rgba(255, 255, 255, 0.38), inset 0 -3px 5px rgba(92, 35, 0, 0.14), 0 4px 9px rgba(188, 90, 27, 0.16);
+}
+.profile-page:not(.account-page):not(.support-destination) input:not([type="hidden"]):not([type="checkbox"]):not([type="radio"]):not([type="file"]),
+.profile-page:not(.account-page):not(.support-destination) select,
+.profile-page:not(.account-page):not(.support-destination) textarea {
+  box-shadow: inset 0 2px 5px rgba(89, 58, 35, 0.09), inset 0 -1px 2px rgba(255, 255, 255, 0.88);
+}
+.profile-page.account-page:not(.tokens-page) section {
+  box-shadow: inset 0 2px 7px rgba(255, 255, 255, 0.78), inset 0 -4px 9px rgba(110, 72, 43, 0.09), 0 6px 16px rgba(56, 36, 18, 0.07);
+}
+.profile-page.account-page:not(.tokens-page) button,
+.profile-page.account-page:not(.tokens-page) .button {
+  box-shadow: inset 0 2px 4px rgba(255, 255, 255, 0.38), inset 0 -3px 5px rgba(92, 35, 0, 0.14), 0 4px 9px rgba(188, 90, 27, 0.16);
+}
+.profile-page.account-page:not(.tokens-page) input:not([type="hidden"]):not([type="checkbox"]):not([type="radio"]):not([type="file"]),
+.profile-page.account-page:not(.tokens-page) select,
+.profile-page.account-page:not(.tokens-page) textarea {
+  box-shadow: inset 0 2px 5px rgba(89, 58, 35, 0.09), inset 0 -1px 2px rgba(255, 255, 255, 0.88);
+}
+
+/* Local Finder: add a subtle inset 3D finish while preserving existing colors. */
+.local-finder-page .local-finder-share-card,
+.local-finder-page .local-finder-favorites-banner,
+.local-finder-page .local-finder-announcement-card,
+.local-finder-page .local-finder-place-card,
+.local-finder-page .local-finder-map-wrap,
+.local-finder-page .local-finder-empty,
+.local-finder-page .local-finder-loading,
+.local-finder-page .local-finder-detail-summary,
+.local-finder-page .local-finder-detail-contact,
+.local-finder-page .local-finder-detail-facts,
+.local-finder-page .local-finder-detail-actions,
+.local-finder-page .local-finder-reviews,
+.local-finder-page .local-finder-review {
+  box-shadow: inset 0 2px 6px rgba(255, 255, 255, 0.76), inset 0 -3px 7px rgba(92, 58, 34, 0.11), 2px 4px 8px rgba(56, 36, 18, 0.1);
+}
+.local-finder-page button,
+.local-finder-page .button,
+.local-finder-page summary.button {
+  box-shadow: inset 0 2px 4px rgba(255, 255, 255, 0.42), inset 0 -3px 5px rgba(92, 35, 0, 0.16), 0 3px 7px rgba(56, 36, 18, 0.12);
+}
+.local-finder-page input:not([type="hidden"]):not([type="checkbox"]):not([type="radio"]):not([type="file"]),
+.local-finder-page select,
+.local-finder-page textarea {
+  box-shadow: inset 0 2px 5px rgba(89, 58, 35, 0.1), inset 0 -1px 2px rgba(255, 255, 255, 0.88);
+}
+.local-finder-page .local-finder-search {
+  min-height: 55px;
+  gap: 12px;
+  padding: 0 6px 0 17px;
+  border: 1px solid rgba(255, 255, 255, 0.82);
+  border-radius: 32px;
+  background: rgba(255, 255, 255, 0.72);
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+  box-shadow: inset 0 2px 6px rgba(255, 255, 255, 0.76), inset 0 -3px 7px rgba(92, 58, 34, 0.11), 0 10px 22px rgba(104, 52, 19, 0.15), 0 2px 6px rgba(104, 52, 19, 0.08);
+}
+.local-finder-page .local-finder-search input {
+  appearance: none;
+  -webkit-appearance: none;
+  background: transparent;
+  box-shadow: none !important;
 }

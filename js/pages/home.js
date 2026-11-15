@@ -209,17 +209,18 @@ export function homeAssistantBubbleMessages(pet) {
     if (show.foodWater) messages.push('I haven’t logged my food or water today yet');
     if (show.exercise) messages.push('I haven’t logged exercise today yet');
   }
-  const medicine = petReminders.medicine;
-  if (show.medicine && medicine?.name && medicine?.time) messages.push(`I need to take ${medicine.name} at ${medicine.time}`);
-  const foodWeight = petReminders.foodWeight;
-  if (show.foodWeight && foodWeight?.date) {
-    const reminderName = foodWeight.type === 'weight-check' ? 'weight check-in' : 'food change';
-    messages.push(`My ${reminderName} will be on ${formatPetDate(foodWeight.date)}`);
-  }
+  const medicines = Array.isArray(petReminders.medicines) ? petReminders.medicines : (petReminders.medicine?.name ? [petReminders.medicine] : []);
+  if (show.medicine) medicines.forEach((medicine) => {
+    const medicineIsCurrent = medicine && (!medicine.startDate || medicine.startDate <= today) && (!medicine.endDate || medicine.endDate >= today);
+    if (!medicine?.name || !medicineIsCurrent) return;
+    if (medicine.frequency) messages.push(`Remember ${medicine.name}${medicine.dosage ? ` (${medicine.dosage})` : ''} — ${medicine.frequency}`);
+    else if (medicine.time) messages.push(`I need to take ${medicine.name} at ${medicine.time}`);
+  });
+  if (show.foodWeight && pet.weight) messages.push(`My current weight is ${pet.weight} kg`);
   const milestone = petReminders.milestone;
-  if (show.milestone && milestone?.date) {
-    const occasionDate = nextAnnualPetDate(milestone.date);
-    const occasionName = milestone.type === 'adoption' ? 'adoption day' : 'birthday';
+  if (show.milestone && pet.birthDate) {
+    const occasionDate = nextAnnualPetDate(pet.birthDate);
+    const occasionName = (pet.birthDateType || milestone?.type) === 'adoption' ? 'adoption day' : 'birthday';
     if (occasionDate) messages.push(`My ${occasionName} is on ${formatPetDate(occasionDate)}`);
   }
   if (show.custom && Array.isArray(petReminders.customReminders)) {
@@ -295,7 +296,7 @@ export function homePage() {
     <section class="home-orange" aria-label="Furgo dashboard">
       <div class="home-topline"><div><span class="home-kicker">Better Care For Every Pet</span><div class="home-greeting-title"><h1>Hey, ${escapeHTML(userName)}</h1><svg class="home-greeting-rays" viewBox="0 0 40 34" aria-hidden="true"><path d="M8 18 2 16M17 12 15 2M25 15 33 9" /></svg></div></div>${portalNotificationsMarkup('customer')}</div>
       <a class="home-search" href="#search" aria-label="Search products, services, or pet-friendly places"><span class="search-symbol" aria-hidden="true"></span><span class="home-search-placeholder">Search products, services, or places</span><span class="search-hint">Try “parks”</span></a>
-      <div class="credit-row"><a class="home-pet-assistant-bubble" href="${escapeHTML(assistantRoute)}" aria-label="Open AI Pet Assistant${assistantPet ? ` for ${escapeHTML(assistantPet.name)}` : ''}" data-assistant-bubble data-messages="${escapeHTML(JSON.stringify(assistantBubbleMessages))}"><span class="home-pet-assistant-copy"><span class="home-pet-assistant-name" data-assistant-pet-name>${escapeHTML(assistantPet?.name || 'Furgo Assistant')}</span><span data-assistant-bubble-text>${escapeHTML(assistantBubbleMessages[0])}</span></span><span class="home-pet-assistant-arrow" aria-hidden="true">›</span></a><div class="home-balance-cards"><a class="home-pet-assistant-shortcut" data-assistant-pet-ids="${escapeHTML(JSON.stringify(assistantPets.map((pet) => String(pet.id))))}" href="${escapeHTML(mascotProfileRoute)}" aria-label="Open ${assistantPet ? `${escapeHTML(assistantPet.name)}'s` : 'a pet'} profile"><img class="home-pet-art" src="${escapeHTML(assistantAvatar)}" alt="" /></a><a class="home-balance-card token-card" href="#tokens" aria-label="Furgo Coins: ${tokenBalance}"><span class="home-token-stack"><img class="home-token-art" src="Image/Other%20Image/Pet%20Token-2.png" alt="" /><span class="home-token-copy"><span class="home-balance-label">Furgo Coins</span><strong data-fit-balance data-furgo-coins-balance>${tokenBalance.toLocaleString()}</strong></span></span></a><a class="credit-card home-balance-card" href="#credit?from=home"><span class="credit-label">Furgo Credit</span><span class="credit-balance-row"><strong data-fit-balance>${creditBalance.toFixed(2)}</strong><small class="credit-currency">MYR</small><img class="wallet-mark" src="${icon('Icon-11.png')}" alt="" /></span></a></div></div>
+      <div class="credit-row"><a class="home-pet-assistant-bubble" href="${escapeHTML(assistantRoute)}" aria-label="Open AI Pet Assistant${assistantPet ? ` for ${escapeHTML(assistantPet.name)}` : ''}" data-assistant-bubble data-messages="${escapeHTML(JSON.stringify(assistantBubbleMessages))}"><span class="home-pet-assistant-copy"><span class="home-pet-assistant-name" data-assistant-pet-name>${escapeHTML(assistantPet?.name || 'Furgo Assistant')}</span><span data-assistant-bubble-text>${escapeHTML(assistantBubbleMessages[0])}</span></span><span class="home-pet-assistant-arrow" aria-hidden="true">›</span></a><div class="home-balance-cards"><a class="home-pet-assistant-shortcut" data-assistant-pet-ids="${escapeHTML(JSON.stringify(assistantPets.map((pet) => String(pet.id))))}" href="${escapeHTML(mascotProfileRoute)}" aria-label="Open ${assistantPet ? `${escapeHTML(assistantPet.name)}'s` : 'a pet'} profile"><img class="home-pet-art" src="${escapeHTML(assistantAvatar)}" alt="" /></a><div class="home-pet-mascot-arrows" data-assistant-pet-arrows aria-live="polite"></div><a class="home-balance-card token-card" href="#tokens" aria-label="Furgo Coins: ${tokenBalance}"><span class="home-token-stack"><img class="home-token-art" src="Image/Other%20Image/Pet%20Token-2.png" alt="" /><span class="home-token-copy"><span class="home-balance-label">Furgo Coins</span><strong data-fit-balance data-furgo-coins-balance>${tokenBalance.toLocaleString()}</strong></span></span></a><a class="credit-card home-balance-card" href="#credit?from=home"><span class="credit-label">Furgo Credit</span><span class="credit-balance-row"><strong data-fit-balance>${creditBalance.toFixed(2)}</strong><small class="credit-currency">MYR</small><img class="wallet-mark" src="${icon('Icon-11.png')}" alt="" /></span></a></div></div>
       ${serviceShortcuts ? `<nav class="service-shortcuts" id="services" aria-label="Pet services">${serviceShortcuts}</nav>` : ''}
     </section>
     <div class="home-content">

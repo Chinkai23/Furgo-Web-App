@@ -24,7 +24,7 @@ import { loadMarketplaceCart, loadMarketplaceCartSelection, loadMarketplaceFavor
 import { marketplaceSubscriptionsPage } from './pages/marketplace-subscriptions.js';
 import { petProfileEditPage } from './pages/pet-profile.js';
 import { petAvatarPage, petDataPage, petProfileAddCardPage, petProfileOverviewPage, petRecordPage, petReminderPage, petVaccinationPage, setupPetCarePages } from './pages/pet-care-pages.js';
-import { deletePetCareData, loadPetReminders, savePetReminders } from './pages/pet-care-data.js';
+import { deletePetCareData, loadPetReminders, localPetDate, savePetRecord, savePetReminders } from './pages/pet-care-data.js';
 import { adminPromotionsPage, loadAnnouncements, loadPromotions, maximumPromotions, normalizePromotionDestination, promotionStorageKey } from './pages/admin-promotions.js';
 import { adminPortalPage, setupAdminPortal } from './pages/admin.js';
 import { groomingBookingPage, groomingOrdersPage } from './pages/grooming.js';
@@ -90,6 +90,7 @@ function petFromDatabase(row, photo = '', vaccinationCards = [], localPet = {}, 
     breed: row.breed || '',
     sex: row.sex || '',
     birthDate: row.birth_date || '',
+    birthDateType: row.birth_date_type || localPet.birthDateType || '',
     neutered: row.neutered === true ? 'yes' : row.neutered === false ? 'no' : '',
     weight: row.weight_kg == null ? '' : String(row.weight_kg),
     colour: row.colour || '',
@@ -212,6 +213,7 @@ async function saveCloudPet(pet, userId) {
     breed: pet.breed || '',
     sex: pet.sex || '',
     birth_date: pet.birthDate || null,
+    birth_date_type: pet.birthDateType === 'adoption' ? 'adoption' : pet.birthDateType === 'birthday' ? 'birthday' : null,
     neutered: pet.neutered === 'yes' ? true : pet.neutered === 'no' ? false : null,
     weight_kg: pet.weight === '' || pet.weight == null ? null : Number(pet.weight),
     colour: pet.colour || '',
@@ -702,14 +704,26 @@ function setupHomePetProfiles() {
   const updateAssistantDisplay = (assistantPet, pets, saveSelection = false, showPetSpecificMessage = false) => {
     const assistantLink = document.querySelector('.home-pet-assistant-shortcut');
     const assistantBubble = document.querySelector('.home-pet-assistant-bubble');
+    const switchButtons = document.querySelector('[data-assistant-pet-arrows]');
     const messages = homeAssistantBubbleMessages(assistantPet);
     if (saveSelection && assistantPet) saveSelectedPetAssistantId(assistantPet.id);
     if (assistantLink) {
       const assistantImage = assistantLink.querySelector('.home-pet-art');
       if (assistantImage) assistantImage.src = petAvatarUrl(assistantPet);
-      assistantLink.href = assistantPet ? `#pet-profile?id=${encodeURIComponent(assistantPet.id)}` : '#pet-profile?mode=add';
-      assistantLink.setAttribute('aria-label', `Open ${assistantPet ? `${assistantPet.name}'s` : 'a pet'} profile. Swipe to switch Pet Assistant.`);
+      assistantLink.href = assistantPet ? `#pet-profile?id=${encodeURIComponent(assistantPet.id)}&section=settings` : '#pet-profile?mode=add';
+      assistantLink.setAttribute('aria-label', `Open ${assistantPet ? `${assistantPet.name}'s` : 'a pet'} profile. Double-click to switch Pet Assistant.`);
       assistantLink.dataset.assistantPetIds = JSON.stringify(selectedHomeAssistantPets(pets).map((pet) => String(pet.id)));
+    }
+    if (switchButtons) {
+      const activeAssistants = selectedHomeAssistantPets(pets);
+      const hint = activeAssistants.length > 1 ? document.createElement('button') : null;
+      if (hint) {
+        hint.type = 'button';
+        hint.className = 'home-pet-mascot-swipe-hint';
+        hint.textContent = 'Change Pet →';
+        hint.setAttribute('aria-label', 'Change to the next Home Page Pet Assistant');
+      }
+      switchButtons.replaceChildren(...(hint ? [hint] : []));
     }
     if (assistantBubble) {
       assistantBubble.href = assistantPet ? `#pet-assistant?pet=${encodeURIComponent(assistantPet.id)}` : '#pet-assistant';
@@ -741,9 +755,82 @@ function setupHomePetProfiles() {
     window.setTimeout(() => toast.classList.remove('visible'), 3000);
   };
 
+  const cycleAssistantPet = (direction = 1) => {
+    const pets = loadPetProfiles();
+    const assistantPets = selectedHomeAssistantPets(pets);
+    if (assistantPets.length < 2) return false;
+    const currentId = selectedHomeAssistantPet(pets)?.id;
+    const currentIndex = Math.max(0, assistantPets.findIndex((pet) => String(pet.id) === String(currentId)));
+    const nextPet = assistantPets[(currentIndex + direction + assistantPets.length) % assistantPets.length];
+    updateAssistantDisplay(nextPet, pets, true, true);
+    return true;
+  };
+  const adjacentAssistantPet = (direction = 1) => {
+    const pets = loadPetProfiles();
+    const assistantPets = selectedHomeAssistantPets(pets);
+    if (assistantPets.length < 2) return null;
+    const currentId = selectedHomeAssistantPet(pets)?.id;
+    const currentIndex = Math.max(0, assistantPets.findIndex((pet) => String(pet.id) === String(currentId)));
+    return assistantPets[(currentIndex + direction + assistantPets.length) % assistantPets.length];
+  };
+  const clearMascotPreview = (preview, image) => {
+    if (preview?.isConnected) preview.remove();
+    if (image) {
+      image.style.transition = '';
+      image.style.translate = '';
+    }
+  };
   renderPets();
 
   const mascot = document.querySelector('.home-pet-assistant-shortcut');
+  const mascotChangeButton = document.querySelector('[data-assistant-pet-arrows]');
+  mascotChangeButton?.addEventListener('click', (event) => {
+    if (!event.target.closest('.home-pet-mascot-swipe-hint')) return;
+    const nextPet = adjacentAssistantPet(1);
+    const mascotImage = mascot?.querySelector('.home-pet-art');
+    if (!nextPet || !mascot || !mascotImage) return;
+    const width = mascot.getBoundingClientRect().width || 1;
+    const preview = mascotImage.cloneNode();
+    preview.classList.add('home-pet-swipe-preview');
+    preview.src = petAvatarUrl(nextPet);
+    preview.alt = '';
+    preview.setAttribute('aria-hidden', 'true');
+    preview.style.pointerEvents = 'none';
+    preview.style.transition = 'none';
+    preview.style.translate = `${width}px 0`;
+    mascot.append(preview);
+    void preview.offsetWidth;
+    mascotImage.style.transition = 'translate 220ms cubic-bezier(.22,.72,.24,1)';
+    mascotImage.style.translate = `${-width}px 0`;
+    preview.style.transition = 'translate 220ms cubic-bezier(.22,.72,.24,1)';
+    preview.style.translate = '0 0';
+    window.setTimeout(() => {
+      const currentPets = loadPetProfiles();
+      const currentNextPet = currentPets.find((pet) => String(pet.id) === String(nextPet.id));
+      if (currentNextPet) updateAssistantDisplay(currentNextPet, currentPets, true, true);
+      clearMascotPreview(preview, mascotImage);
+    }, 230);
+  });
+  const mascotBubble = document.querySelector('.home-pet-assistant-bubble');
+  const creditRow = document.querySelector('.credit-row');
+  if (mascot && mascotBubble && creditRow) {
+    window.__furgoMascotBoundaryResizeObserver?.disconnect();
+    if (window.__furgoMascotBoundaryResizeHandler) window.removeEventListener('resize', window.__furgoMascotBoundaryResizeHandler);
+    const updateMascotSafeBoundary = () => {
+      const mascotRect = mascot.getBoundingClientRect();
+      const bubbleRect = mascotBubble.getBoundingClientRect();
+      const rightInset = Math.max(0, mascotRect.right - bubbleRect.left);
+      mascot.style.setProperty('--mascot-safe-right-inset', `${rightInset}px`);
+    };
+    window.__furgoMascotBoundaryResizeHandler = updateMascotSafeBoundary;
+    window.addEventListener('resize', updateMascotSafeBoundary, { passive: true });
+    window.__furgoMascotBoundaryResizeObserver = new ResizeObserver(updateMascotSafeBoundary);
+    window.__furgoMascotBoundaryResizeObserver.observe(mascot);
+    window.__furgoMascotBoundaryResizeObserver.observe(mascotBubble);
+    window.__furgoMascotBoundaryResizeObserver.observe(creditRow);
+    updateMascotSafeBoundary();
+  }
+
   if (mascot) {
     let pointerStart = null;
     let suppressClickUntil = 0;
@@ -751,11 +838,8 @@ function setupHomePetProfiles() {
     const mascotImage = mascot.querySelector('.home-pet-art');
     mascot.style.touchAction = 'pan-y';
     mascot.addEventListener('pointerdown', (event) => {
-      if (event.button !== 0) return;
-      let ids = [];
-      try { ids = JSON.parse(mascot.dataset.assistantPetIds || '[]'); } catch { ids = []; }
-      if (ids.length < 2) return;
-      pointerStart = { x: event.clientX, y: event.clientY, id: event.pointerId, moved: false };
+      if (event.button !== 0 || selectedHomeAssistantPets(loadPetProfiles()).length < 2) return;
+      pointerStart = { x: event.clientX, y: event.clientY, id: event.pointerId, moved: false, direction: 0, preview: null };
       mascot.setPointerCapture?.(event.pointerId);
     });
     mascot.addEventListener('pointermove', (event) => {
@@ -763,38 +847,76 @@ function setupHomePetProfiles() {
       const dx = event.clientX - pointerStart.x;
       const dy = event.clientY - pointerStart.y;
       if (Math.abs(dx) > Math.abs(dy) + 4 && Math.abs(dx) > 8) pointerStart.moved = true;
-      if (pointerStart.moved && mascotImage) mascotImage.style.translate = `${Math.max(-30, Math.min(30, dx * 0.3))}px 0`;
+      if (!pointerStart.moved || !mascotImage) return;
+      const direction = dx < 0 ? 1 : -1;
+      if (pointerStart.direction !== direction) {
+        pointerStart.preview?.remove();
+        pointerStart.preview = null;
+        pointerStart.direction = direction;
+        const nextPet = adjacentAssistantPet(direction);
+        if (nextPet) {
+          const preview = mascotImage.cloneNode();
+          preview.classList.add('home-pet-swipe-preview');
+          preview.src = petAvatarUrl(nextPet);
+          preview.alt = '';
+          preview.setAttribute('aria-hidden', 'true');
+          preview.style.pointerEvents = 'none';
+          preview.style.transition = 'none';
+          mascot.append(preview);
+          pointerStart.preview = preview;
+        }
+      }
+      const width = mascot.getBoundingClientRect().width || 1;
+      const dragX = Math.max(-width, Math.min(width, dx));
+      mascotImage.style.transition = 'none';
+      mascotImage.style.translate = `${dragX}px 0`;
+      if (pointerStart.preview) pointerStart.preview.style.translate = `${(direction > 0 ? width : -width) + dragX}px 0`;
     });
     mascot.addEventListener('pointerup', (event) => {
       if (!pointerStart || pointerStart.id !== event.pointerId) return;
       const dx = event.clientX - pointerStart.x;
       const dy = event.clientY - pointerStart.y;
-      const moved = pointerStart.moved && Math.abs(dx) > 48 && Math.abs(dx) > Math.abs(dy);
+      const swipe = pointerStart;
+      const committed = swipe.moved && Math.abs(dx) > 48 && Math.abs(dx) > Math.abs(dy);
       pointerStart = null;
-      if (mascotImage) mascotImage.style.translate = '';
-      if (!moved) return;
+      if (!committed) {
+        if (swipe.moved) {
+          suppressClickUntil = Date.now() + 350;
+          mascotImage.style.transition = 'translate 180ms cubic-bezier(.22,.72,.24,1)';
+          if (swipe.preview) swipe.preview.style.transition = 'translate 180ms cubic-bezier(.22,.72,.24,1)';
+          mascotImage.style.translate = '0 0';
+          if (swipe.preview) swipe.preview.style.translate = `${swipe.direction > 0 ? mascot.getBoundingClientRect().width : -mascot.getBoundingClientRect().width}px 0`;
+          window.setTimeout(() => clearMascotPreview(swipe.preview, mascotImage), 190);
+        } else clearMascotPreview(swipe.preview, mascotImage);
+        return;
+      }
       suppressClickUntil = Date.now() + 500;
-      const pets = loadPetProfiles();
-      const assistantPets = selectedHomeAssistantPets(pets);
-      if (assistantPets.length < 2) return;
-      const currentId = selectedHomeAssistantPet(pets)?.id;
-      const currentIndex = Math.max(0, assistantPets.findIndex((pet) => String(pet.id) === String(currentId)));
-      const nextIndex = Math.max(0, Math.min(assistantPets.length - 1, currentIndex + (dx < 0 ? 1 : -1)));
-      if (nextIndex === currentIndex) return;
-      const nextPet = assistantPets[nextIndex];
-      if (mascotImage) mascotImage.classList.add('is-switching-pet');
+      const nextPet = adjacentAssistantPet(dx < 0 ? 1 : -1);
+      if (!nextPet || !mascotImage) { clearMascotPreview(swipe.preview, mascotImage); return; }
+      const width = mascot.getBoundingClientRect().width || 1;
+      mascotImage.style.transition = 'translate 220ms cubic-bezier(.22,.72,.24,1)';
+      mascotImage.style.translate = `${dx < 0 ? -width : width}px 0`;
+      if (swipe.preview) {
+        swipe.preview.style.transition = 'translate 220ms cubic-bezier(.22,.72,.24,1)';
+        swipe.preview.style.translate = '0 0';
+      }
       window.setTimeout(() => {
-        updateAssistantDisplay(nextPet, pets, true, true);
-        if (mascotImage) {
-          mascotImage.classList.remove('is-switching-pet');
-          mascotImage.classList.add('has-switched-pet');
-          window.setTimeout(() => mascotImage.classList.remove('has-switched-pet'), 260);
-        }
-      }, 100);
+        const pets = loadPetProfiles();
+        const updatedPet = pets.find((pet) => String(pet.id) === String(nextPet.id));
+        if (updatedPet) updateAssistantDisplay(updatedPet, pets, true, true);
+        clearMascotPreview(swipe.preview, mascotImage);
+      }, 225);
     });
     mascot.addEventListener('pointercancel', () => {
+      const swipe = pointerStart;
       pointerStart = null;
-      if (mascotImage) mascotImage.style.translate = '';
+      if (swipe?.preview && mascotImage) {
+        mascotImage.style.transition = 'translate 180ms cubic-bezier(.22,.72,.24,1)';
+        swipe.preview.style.transition = 'translate 180ms cubic-bezier(.22,.72,.24,1)';
+        mascotImage.style.translate = '0 0';
+        swipe.preview.style.translate = `${swipe.direction > 0 ? mascot.getBoundingClientRect().width : -mascot.getBoundingClientRect().width}px 0`;
+        window.setTimeout(() => clearMascotPreview(swipe.preview, mascotImage), 190);
+      } else if (mascotImage) clearMascotPreview(null, mascotImage);
     });
     mascot.addEventListener('click', (event) => {
       if (Date.now() < suppressClickUntil) { event.preventDefault(); return; }
@@ -805,34 +927,20 @@ function setupHomePetProfiles() {
       if (event.detail > 1) {
         if (mascotClickTimer) window.clearTimeout(mascotClickTimer);
         mascotClickTimer = null;
-        const currentPet = selectedHomeAssistantPet(pets);
-        if (currentPet) window.location.hash = `#pet-profile?id=${encodeURIComponent(currentPet.id)}`;
+        cycleAssistantPet(1);
         return;
       }
       if (mascotClickTimer) {
         window.clearTimeout(mascotClickTimer);
         mascotClickTimer = null;
-        const currentPet = selectedHomeAssistantPet(pets);
-        if (currentPet) window.location.hash = `#pet-profile?id=${encodeURIComponent(currentPet.id)}`;
+        cycleAssistantPet(1);
         return;
       }
       mascotClickTimer = window.setTimeout(() => {
         mascotClickTimer = null;
         const latestPets = loadPetProfiles();
-        const enabledPets = selectedHomeAssistantPets(latestPets);
-        if (enabledPets.length < 2) return;
-        const currentId = selectedHomeAssistantPet(latestPets)?.id;
-        const currentIndex = Math.max(0, enabledPets.findIndex((pet) => String(pet.id) === String(currentId)));
-        const nextPet = enabledPets[(currentIndex + 1) % enabledPets.length];
-        if (mascotImage) mascotImage.classList.add('is-switching-pet');
-        window.setTimeout(() => {
-          updateAssistantDisplay(nextPet, latestPets, true, true);
-          if (mascotImage) {
-            mascotImage.classList.remove('is-switching-pet');
-            mascotImage.classList.add('has-switched-pet');
-            window.setTimeout(() => mascotImage.classList.remove('has-switched-pet'), 260);
-          }
-        }, 100);
+        const currentPet = selectedHomeAssistantPet(latestPets);
+        if (currentPet) window.location.hash = `#pet-profile?id=${encodeURIComponent(currentPet.id)}&section=settings`;
       }, 260);
     });
   }
@@ -1447,6 +1555,23 @@ function setupPetProfileForm() {
   const birthDay = form.querySelector('[data-birth-day]');
   const birthYear = form.querySelector('[data-birth-year]');
   const birthDateValue = form.querySelector('[data-birth-date-value]');
+  const birthDateTypeChoice = form.querySelector('[data-birth-date-type]');
+  const birthDatePicker = form.querySelector('[data-birth-date-picker]');
+  birthDateTypeChoice?.addEventListener('change', () => {
+    const hasOccasion = Boolean(birthDateTypeChoice.value);
+    birthDateTypeChoice.dataset.selected = String(hasOccasion);
+    if (birthDatePicker) {
+      birthDatePicker.classList.toggle('is-disabled', !hasOccasion);
+      birthDatePicker.setAttribute('aria-disabled', String(!hasOccasion));
+      birthDatePicker.querySelectorAll('select').forEach((field) => { field.disabled = !hasOccasion; });
+    }
+    if (!hasOccasion) {
+      birthMonth.value = '';
+      birthDay.value = '';
+      birthYear.value = '';
+      birthDateValue.value = '';
+    }
+  });
   let activeBreedOption = -1;
   const visibleBreedOptions = () => [...breedListbox.querySelectorAll('[data-breed-option]')].filter((option) => !option.hidden);
   const closeBreedOptions = () => {
@@ -1580,10 +1705,17 @@ function setupPetProfileForm() {
     event.preventDefault();
     if (!form.reportValidity()) return;
     const birthParts = [birthMonth.value, birthDay.value, birthYear.value];
+    const selectedBirthDateType = form.elements.birthDateType.value;
     if (birthParts.some(Boolean) && !birthParts.every(Boolean)) {
-      feedback.textContent = 'Choose the month, day, and year, or leave Birth Date blank.';
+      feedback.textContent = 'Choose the month, day, and year, or leave the occasion date blank.';
       feedback.classList.add('visible');
       [birthMonth, birthDay, birthYear].find((field) => !field.value)?.focus();
+      return;
+    }
+    if (birthParts.some(Boolean) && !selectedBirthDateType) {
+      feedback.textContent = 'Choose Birthday or Adoption Day before entering the date.';
+      feedback.classList.add('visible');
+      birthDateTypeChoice?.focus();
       return;
     }
     const savedPets = loadPetProfiles();
@@ -1603,6 +1735,7 @@ function setupPetProfileForm() {
       breed: form.elements.breed.value.trim(),
       sex: form.elements.sex.value,
       birthDate: form.elements.birthDate.value,
+      birthDateType: selectedBirthDateType === 'adoption' ? 'adoption' : selectedBirthDateType === 'birthday' ? 'birthday' : '',
       neutered: form.elements.neutered.value,
       weight: form.elements.weight.value,
       colour: existingPet.colour || '',
@@ -1628,6 +1761,11 @@ function setupPetProfileForm() {
     } else {
       const updatedPets = existingPet.id ? savedPets.map((item) => item.id === currentId ? pet : item) : [...savedPets, pet];
       localStorage.setItem(petProfilesStorageKeyForCurrentUser(), JSON.stringify(updatedPets));
+    }
+    const nextWeight = Number(pet.weight);
+    const previousWeight = Number(existingPet.weight);
+    if (Number.isFinite(nextWeight) && nextWeight > 0 && (!Number.isFinite(previousWeight) || nextWeight !== previousWeight)) {
+      savePetRecord(petId, { date: localPetDate(), weightKg: String(nextWeight) });
     }
     window.location.hash = petReturnContext === 'pet-profile' ? `#pet-profile?id=${encodeURIComponent(petId)}` : petReturnTo;
   });
@@ -5703,7 +5841,7 @@ async function render({ preserveScroll = false } = {}) {
     'pet-avatar': 'This Pet Avatar — Furgo',
     'pet-reminder': 'Pet Reminder — Furgo',
     'pet-vaccination': 'Pet Vaccination — Furgo',
-    'pet-record': 'Pet Record — Furgo',
+    'pet-record': 'Daily Care — Furgo',
     'pet-data': 'Pet Data — Furgo',
     'pet-assistant': 'Pet Assistant — Furgo',
     'ai-nutritionist': 'AI Nutritionist — Furgo',
@@ -5760,6 +5898,22 @@ async function render({ preserveScroll = false } = {}) {
   setupPetCarePages();
   lastRenderedHash = requestedHash;
   window.scrollTo(0, shouldPreserveScroll ? previousScrollY : 0);
+  if (page === 'pet-profile' && routeParams.get('section') === 'settings') {
+    window.requestAnimationFrame(() => document.querySelector('.pet-profile-page .pet-care-menu')?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
+  }
+  if (page === 'pet-profile-edit' && routeParams.get('section') === 'weight') {
+    window.requestAnimationFrame(() => document.getElementById('pet-weight-field')?.scrollIntoView({ behavior: 'smooth', block: 'center' }));
+  }
+  if (page === 'pet-data') {
+    const dataSectionIds = { service: 'pet-data-service', weight: 'pet-data-weight', vaccination: 'pet-data-vaccination', medicine: 'pet-data-medicine', intake: 'pet-data-intake', exercise: 'pet-data-exercise' };
+    const target = dataSectionIds[routeParams.get('section') || ''];
+    if (target) window.requestAnimationFrame(() => document.getElementById(target)?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
+  }
+  if (page === 'pet-record') {
+    const recordSectionIds = { intake: 'pet-record-intake', medicine: 'pet-record-medicine', exercise: 'pet-record-exercise' };
+    const target = recordSectionIds[routeParams.get('section') || ''];
+    if (target) window.requestAnimationFrame(() => document.getElementById(target)?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
+  }
   if (page === 'admin-orders' && routeParams.get('view') === 'scan') {
     window.requestAnimationFrame(() => document.querySelector('.admin-checkin-scan-panel')?.scrollIntoView({ behavior: 'smooth', block: 'center' }));
   }

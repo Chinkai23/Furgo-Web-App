@@ -1,22 +1,35 @@
 import { bottomNavigation, escapeHTML } from '../shared.js';
 import { defaultPetAvatarPath, freePetAssistantAvatars, freePetCatAvatars, isPetAssistantSelected, loadPetProfiles, petAvatarUrl, petCustomAvatarLibrary, petProfilePictureUrl, savePetAssistantIds, saveSelectedPetAssistantId, selectedPetAssistantId, selectedPetAssistantIds } from './home.js';
 import { formatPetDate, localPetDate, loadPetRecords, loadPetReminders, petServiceReminders, savePetRecord, savePetReminders } from './pet-care-data.js';
+import { loadGroomingBookings } from './grooming-data.js';
+import { loadHotelBookings } from './hotel-data.js';
+import { loadDaycareBookings } from './daycare-data.js';
 
 const icon = (file) => `Image/Icon/${encodeURIComponent(file)}`;
 const getPet = (petId) => loadPetProfiles().find((pet) => String(pet.id) === String(petId)) || null;
+const medicineDetailsList = (reminders = {}) => Array.isArray(reminders.medicines)
+  ? reminders.medicines.map((item, index) => ({ ...item, id: item.id || `medicine-${index + 1}` }))
+  : reminders.medicine?.name ? [{ ...reminders.medicine, id: reminders.medicine.id || 'legacy-medicine' }] : [];
+const activeMedicineDetails = (reminders, date = localPetDate()) => medicineDetailsList(reminders).filter((item) => item.name && item.startDate && item.endDate && item.frequency && item.dosage && item.startDate <= date && item.endDate >= date);
+const medicineIntakeFieldKey = (id) => `medicine_${String(id || '').replace(/[^a-zA-Z0-9_]/g, '_')}`;
+const medicineIntakeEntry = (entry, reminders = {}) => {
+  if (typeof entry === 'string') return { time: entry, medicineId: '', name: reminders.medicine?.name || 'Medicine' };
+  return entry || {};
+};
+let medicineReminderInterval = null;
 const petSettingTitle = (pet, section) => pet?.name?.trim() ? `${escapeHTML(pet.name)}’s ${section}` : `This Pet ${section}`;
 const petSettingIcon = (name) => {
   const paths = {
     Avatar: '<circle cx="12" cy="8" r="3.2"/><path d="M5.5 19a6.5 6.5 0 0 1 13 0"/><path d="M4 4v3M4 4h3M20 4h-3M20 4v3M4 20v-3M4 20h3M20 20h-3M20 20v-3"/>',
     Reminder: '<rect x="4.5" y="6" width="15" height="14" rx="2"/><path d="M8 3.5v5M16 3.5v5M4.5 10h15M8 14h2M13 14h3"/>',
     Vaccination: '<path d="m8 3 13 13-5 5L3 8z"/><path d="m6 6 3-3M10 10l2-2M13 13l2-2M8 16l2-2M12 20l2-2"/>',
-    Record: '<path d="M7 4.5h10a2 2 0 0 1 2 2v13H5v-13a2 2 0 0 1 2-2Z"/><path d="M9 4.5v-2h6v2M8 10h8M8 14h8M8 18h5"/>',
+    'Daily Care': '<path d="M7 4.5h10a2 2 0 0 1 2 2v13H5v-13a2 2 0 0 1 2-2Z"/><path d="M9 4.5v-2h6v2M8 10h8M8 14h8M8 18h5"/>',
     Data: '<path d="M4 6.5C4 5.1 7.6 4 12 4s8 1.1 8 2.5S16.4 9 12 9 4 7.9 4 6.5Z"/><path d="M4 6.5v5C4 12.9 7.6 14 12 14s8-1.1 8-2.5v-5M4 11.5v5C4 17.9 7.6 19 12 19s8-1.1 8-2.5v-5"/>',
   };
-  return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths[name] || paths.Record}</svg>`;
+  return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths[name] || paths['Daily Care']}</svg>`;
 };
 const petSettingRow = (pet, section, href) => `<a class="profile-menu-row" href="${href}"><span class="pet-setting-label"><span class="pet-setting-icon">${petSettingIcon(section)}</span><span>${petSettingTitle(pet, section)}</span></span><span class="profile-chevron" aria-hidden="true">›</span></a>`;
-const pageHeader = (title, pet, back = `#pet-profile?id=${encodeURIComponent(pet?.id || '')}`) => `<header class="profile-heading"><a class="profile-back" href="${back}" aria-label="Back to Pet Profile">‹</a><h1>${title}</h1></header>`;
+const pageHeader = (title, pet, back = `#pet-profile?id=${encodeURIComponent(pet?.id || '')}&section=settings`) => `<header class="profile-heading"><a class="profile-back" href="${back}" aria-label="Back to Pet Profile settings">‹</a><h1>${title}</h1></header>`;
 const missingPet = () => `<section class="profile-summary"><h2>Pet profile not found</h2><p>Return to the home page and choose a pet profile.</p><a href="#home">Go to Home</a></section>`;
 
 export function petProfileOverviewPage(petId = '') {
@@ -56,9 +69,9 @@ export function petProfileOverviewPage(petId = '') {
     <nav class="profile-menu pet-care-menu" aria-label="Settings for this pet">
       <section class="profile-menu-group pet-care-links">
         ${petSettingRow(pet, 'Avatar', `#pet-avatar?id=${encodeURIComponent(pet.id)}`)}
-        ${petSettingRow(pet, 'Reminder', `#pet-reminder?id=${encodeURIComponent(pet.id)}`)}
+        ${petSettingRow(pet, 'Daily Care', `#pet-record?id=${encodeURIComponent(pet.id)}`)}
         ${petSettingRow(pet, 'Vaccination', `#pet-vaccination?id=${encodeURIComponent(pet.id)}`)}
-        ${petSettingRow(pet, 'Record', `#pet-record?id=${encodeURIComponent(pet.id)}`)}
+        ${petSettingRow(pet, 'Reminder', `#pet-reminder?id=${encodeURIComponent(pet.id)}`)}
         ${petSettingRow(pet, 'Data', `#pet-data?id=${encodeURIComponent(pet.id)}`)}
       </section>
       <button class="pet-assistant-profile-toggle ${isPetAssistantSelected(pet.id) ? 'is-selected' : ''}" type="button" data-toggle-pet-assistant="${escapeHTML(pet.id)}" aria-pressed="${isPetAssistantSelected(pet.id)}">${isPetAssistantSelected(pet.id) ? '✓ Shown as Home Page Pet Assistant' : 'Show as Home Page Pet Assistant'}</button>
@@ -105,7 +118,7 @@ export function petProfileAddCardPage() {
     </article>
     <nav class="profile-menu pet-care-menu pet-profile-add-settings" aria-label="Settings for this pet">
       <section class="profile-menu-group pet-care-links">
-        ${['Avatar', 'Reminder', 'Vaccination', 'Record', 'Data'].map((section) => `<button class="profile-menu-row" type="button" disabled><span class="pet-setting-label"><span class="pet-setting-icon">${petSettingIcon(section)}</span><span>This Pet ${section}</span></span><span class="profile-chevron" aria-hidden="true">›</span></button>`).join('')}
+        ${['Avatar', 'Daily Care', 'Vaccination', 'Reminder', 'Data'].map((section) => `<button class="profile-menu-row" type="button" disabled><span class="pet-setting-label"><span class="pet-setting-icon">${petSettingIcon(section)}</span><span>This Pet ${section}</span></span><span class="profile-chevron" aria-hidden="true">›</span></button>`).join('')}
       </section>
     </nav>
     </section>
@@ -157,19 +170,182 @@ export function petAvatarPage(petId = '') {
 export function petDataPage(petId = '') {
   const pet = getPet(petId);
   if (!pet) return `<main class="pet-profile-page pet-care-page">${pageHeader('This Pet Data', null, '#home')}${missingPet()}${bottomNavigation('home', icon)}</main>`;
-  const rows = [
-    ['Pet name', pet.name], ['Breed', pet.breed], ['Gender', pet.sex], ['Birth date', pet.birthDate ? formatPetDate(pet.birthDate) : 'Not added'],
-    ['Weight', pet.weight ? `${pet.weight} kg` : 'Not added'], ['Neutered / Spayed', pet.neutered === 'yes' ? 'Yes' : pet.neutered === 'no' ? 'No' : 'Not added'],
-    ['Vaccination cards', `${(pet.vaccinationCards || []).length} uploaded`],
-  ];
+  const records = loadPetRecords(pet.id).slice().sort((a, b) => String(a.date || '').localeCompare(String(b.date || '')));
+  const reminders = loadPetReminders(pet.id);
+  const rawWeightPoints = records.flatMap((record) => {
+    if (Array.isArray(record.weightHistory) && record.weightHistory.length) {
+      return record.weightHistory.flatMap((entry) => {
+        const value = Number(entry.value ?? entry.weightKg ?? entry.weight);
+        const timestamp = entry.changedAt || record.date;
+        const changedDate = entry.changedAt && Number.isFinite(new Date(entry.changedAt).getTime())
+          ? localPetDate(new Date(entry.changedAt))
+          : record.date;
+        return Number.isFinite(value) && value > 0 ? [{ date: changedDate, timestamp, value }] : [];
+      });
+    }
+    const value = Number(record.weightKg ?? record.weight);
+    return Number.isFinite(value) && value > 0 ? [{ date: record.date, value }] : [];
+  });
+  rawWeightPoints.sort((a, b) => String(a.timestamp || a.date || '').localeCompare(String(b.timestamp || b.date || '')));
+  const weightByDay = new Map();
+  rawWeightPoints.forEach((point) => {
+    const day = String(point.date || point.timestamp || 'unknown').slice(0, 10);
+    weightByDay.set(day, point);
+  });
+  const weightPoints = [...weightByDay.values()];
+  const currentWeight = Number(pet.weight);
+  if (Number.isFinite(currentWeight) && currentWeight > 0) {
+    const todayPoint = weightPoints.find((point) => point.date === localPetDate());
+    if (todayPoint) {
+      todayPoint.value = currentWeight;
+      todayPoint.current = true;
+    }
+    else weightPoints.push({ date: '', value: currentWeight, current: true });
+  }
+  const vaccinationCards = Array.isArray(pet.vaccinationCards) ? pet.vaccinationCards : [];
+  const medicineEvents = records.flatMap((record) => {
+    const loggedIntakes = (Array.isArray(record.medicineIntakes) ? record.medicineIntakes : []).map((entry) => {
+      const details = medicineIntakeEntry(entry, reminders);
+      const saved = medicineDetailsList(reminders).find((medicine) => String(medicine.id) === String(details.medicineId));
+      return { date: record.date, medicineId: details.medicineId, name: details.name || saved?.name || record.medicineName || 'Medicine' };
+    });
+    const legacyEvents = (Array.isArray(record.medicineEvents) ? record.medicineEvents : Array.isArray(record.medicationHistory) ? record.medicationHistory : [])
+      .map((entry) => ({ date: record.date, ...(typeof entry === 'string' ? { name: entry } : entry) }));
+    return [...loggedIntakes, ...legacyEvents];
+  });
+  const savedMedicines = medicineDetailsList(reminders);
+  const medicineHistory = new Map();
+  savedMedicines.forEach((medicine) => medicineHistory.set(`medicine:${medicine.id}`, { name: medicine.name, startDate: medicine.startDate || '', endDate: medicine.endDate || '' }));
+  medicineEvents.forEach((event) => {
+    const name = event.name || event.medicine || 'Medicine / Supplement';
+    const key = event.medicineId ? `medicine:${event.medicineId}` : `medicine-name:${name.toLocaleLowerCase()}`;
+    const saved = event.medicineId ? savedMedicines.find((medicine) => String(medicine.id) === String(event.medicineId)) : null;
+    const item = medicineHistory.get(key) || { name: saved?.name || name, startDate: '', endDate: '' };
+    if (event.date) {
+      if (!item.startDate || event.date < item.startDate) item.startDate = event.date;
+      if (!item.endDate || event.date > item.endDate) item.endDate = event.date;
+    }
+    medicineHistory.set(key, item);
+  });
+  const medicineHistoryRows = Array.from(medicineHistory.values()).map((medicine) => {
+    const dateRange = medicine.startDate ? `${formatPetDate(medicine.startDate)} – ${formatPetDate(medicine.endDate || medicine.startDate)}` : '—';
+    return `<tr><td>${escapeHTML(medicine.name)}</td><td>${escapeHTML(dateRange)}</td></tr>`;
+  }).join('');
+  const vaccineRows = vaccinationCards.map((card, index) => `<tr><td>${escapeHTML(card.name || `Vaccination record ${index + 1}`)}</td><td>${escapeHTML(card.date || card.uploadedAt ? formatPetDate(card.date || card.uploadedAt) : 'Date not recorded')}</td><td>${escapeHTML(reminders.vaccinationDate || pet.vaccinationValidUntil ? formatPetDate(reminders.vaccinationDate || pet.vaccinationValidUntil) : 'Not set')}</td><td>${card.data ? `<a href="${escapeHTML(card.data)}" target="_blank" rel="noopener">View file</a>` : 'File unavailable'}</td></tr>`).join('');
+  const serviceBookings = [
+    ...loadGroomingBookings().filter((booking) => petBookingMatches(booking, pet.id)).map((booking) => ({ ...booking, _service: 'Grooming', _date: booking.date })),
+    ...loadHotelBookings().filter((booking) => petBookingMatches(booking, pet.id)).map((booking) => ({ ...booking, _service: 'Pet Hotel', _date: booking.checkIn || booking.startDate || booking.date, _dateEnd: booking.checkOut || booking.endDate })),
+    ...loadDaycareBookings().filter((booking) => petBookingMatches(booking, pet.id) && booking.type !== 'pass-purchase').map((booking) => ({ ...booking, _service: 'Pet Daycare', _date: booking.date })),
+  ].sort((a, b) => String(b._date || b.createdAt || '').localeCompare(String(a._date || a.createdAt || '')));
+  const intakeHistoryChart = petIntakeHistoryChart(records, reminders);
+  const exerciseRows = records.slice().reverse().filter((record) => Number(record.exerciseKm || 0) || (record.exerciseSessions || []).length).map((record) => `<tr><td>${escapeHTML(formatPetDate(record.date) || '—')}</td><td>${Number(record.exerciseKm || 0).toFixed(2)} km</td><td>${(record.exerciseSessions || []).length} session${(record.exerciseSessions || []).length === 1 ? '' : 's'}</td></tr>`).join('');
+  const petIdQuery = encodeURIComponent(pet.id);
   return `<main class="pet-profile-page pet-care-page">
     ${pageHeader(petSettingTitle(pet, 'Data'), pet)}
-    <section class="pet-care-panel"><div class="profile-menu-group"><h2>${escapeHTML(pet.name)}’s Data</h2></div>
-      <dl class="pet-data-list">${rows.map(([label, value]) => `<div><dt>${escapeHTML(label)}</dt><dd>${escapeHTML(value || 'Not added')}</dd></div>`).join('')}</dl>
-      ${(pet.vaccinationCards || []).length ? `<section class="pet-data-documents"><h3>Vaccination Cards</h3><ul class="pet-care-list">${pet.vaccinationCards.map((card) => `<li><a href="${escapeHTML(card.data || '#')}" target="_blank" rel="noopener">${escapeHTML(card.name || 'Vaccination record')}</a></li>`).join('')}</ul></section>` : ''}
-    </section>
+    <div class="pet-data-dashboard">
+      <section class="pet-data-section" id="pet-data-service"><header><h2>Service History</h2><a class="pet-intake-history-toggle" href="#services">Book Services</a></header><div class="pet-data-table-wrap"><table><thead><tr><th>Service</th><th>Date</th><th>Outlet</th><th>Status</th></tr></thead><tbody>${serviceBookings.map((booking) => `<tr><td>${escapeHTML(booking._service)}</td><td>${escapeHTML(formatPetDate(booking._date) || '—')}${booking._dateEnd ? ` – ${escapeHTML(formatPetDate(booking._dateEnd))}` : ''}</td><td>${escapeHTML(booking.outlet || '—')}</td><td>${escapeHTML(booking.status || 'Booked')}</td></tr>`).join('')}</tbody></table>${serviceBookings.length ? '' : '<p class="pet-data-empty">No grooming, Pet Hotel, or Pet Daycare bookings found.</p>'}</div></section>
+      <section class="pet-data-section pet-data-weight" id="pet-data-weight"><header><h2>Weight Changes</h2><a class="pet-intake-history-toggle" href="#pet-profile-edit?id=${petIdQuery}&amp;from=pet-profile&amp;section=weight">Edit Profile</a></header><span class="pet-data-current-weight">${pet.weight ? `${escapeHTML(pet.weight)} kg current` : 'No current weight'}</span>${petWeightGraph(weightPoints)}</section>
+      <section class="pet-data-section" id="pet-data-vaccination"><header><h2>Vaccination History</h2><a class="pet-intake-history-toggle" href="#pet-vaccination?id=${petIdQuery}">‹ Back to Vaccination</a></header><div class="pet-data-table-wrap"><table><thead><tr><th>Record</th><th>Date</th><th>Next vaccination</th><th>Document</th></tr></thead><tbody>${vaccineRows}</tbody></table>${vaccineRows ? '' : '<p class="pet-data-empty">No vaccination records uploaded.</p>'}</div></section>
+      <section class="pet-data-section" id="pet-data-medicine"><header><h2>Medicine &amp; Supplement History</h2><a class="pet-intake-history-toggle" href="#pet-record?id=${petIdQuery}&amp;section=medicine">‹ Back to Daily Care</a></header><div class="pet-data-table-wrap"><table><thead><tr><th>Medicine / Supplement</th><th>Date range</th></tr></thead><tbody>${medicineHistoryRows}</tbody></table>${medicineHistoryRows ? '' : '<p class="pet-data-empty">No medicine or supplement history recorded.</p>'}</div></section>
+      <section class="pet-data-section" id="pet-data-intake"><header><h2>Food, Water &amp; Medicine / Supplement Intake History</h2><a class="pet-intake-history-toggle" href="#pet-record?id=${petIdQuery}&amp;section=intake">‹ Back to Daily Care</a></header>${intakeHistoryChart}</section>
+      <section class="pet-data-section" id="pet-data-exercise"><header><h2>${escapeHTML(pet.name)}’s Exercise History</h2><a class="pet-intake-history-toggle" href="#pet-record?id=${petIdQuery}&amp;section=exercise">‹ Back to Daily Care</a></header><div class="pet-data-table-wrap"><table><thead><tr><th>Date</th><th>Distance</th><th>Sessions</th></tr></thead><tbody>${exerciseRows}</tbody></table>${exerciseRows ? '' : '<p class="pet-data-empty">No exercise history recorded.</p>'}</div></section>
+    </div>
     ${bottomNavigation('home', icon)}
   </main>`;
+}
+
+function petBookingMatches(booking, petId) {
+  return [booking.petId, ...(Array.isArray(booking.petIds) ? booking.petIds : []), ...(Array.isArray(booking.pets) ? booking.pets.map((item) => item.id) : [])].some((id) => String(id) === String(petId));
+}
+
+function petWeightGraph(points) {
+  if (!points.length) return '<p class="pet-data-empty">No weight measurements recorded yet.</p>';
+  const visible = points.slice().reverse();
+  const svgWidth = Math.max(700, 72 + Math.max(0, visible.length - 1) * 105);
+  const values = visible.map((point) => point.value);
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const spread = Math.max(max - min, 1);
+  const coords = visible.map((point, index) => ({ ...point, index, x: visible.length === 1 ? svgWidth / 2 : 36 + index * 105, y: 164 - ((point.value - min) / spread) * 78 }));
+  const path = coords.map((point, index) => `${index ? 'L' : 'M'} ${point.x} ${point.y}`).join(' ');
+  const labelSize = coords.length > 20 ? 6 : coords.length > 10 ? 8 : coords.length > 6 ? 9 : 11;
+  return `<div class="pet-data-weight-chart"><svg style="width:${svgWidth}px;min-width:${svgWidth}px" viewBox="0 0 ${svgWidth} 222" role="img" aria-label="Weight history timeline with latest measurement first, followed by older records"><line x1="24" y1="168" x2="${svgWidth - 24}" y2="168" class="pet-data-chart-axis"/><path d="${path}" class="pet-data-chart-line"/>${coords.map((point) => {
+    const dateLabel = point.current ? 'Current' : point.date ? new Date(`${String(point.date).slice(0, 10)}T00:00:00`).toLocaleDateString('en-MY', { day: 'numeric', month: 'short' }) : 'Current';
+    const titleDate = point.date ? new Date(`${String(point.date).slice(0, 10)}T00:00:00`).toLocaleDateString('en-MY', { day: 'numeric', month: 'short', year: 'numeric' }) : 'current profile weight';
+    const dateY = 180 + (point.index % 3) * 12;
+    return `<circle cx="${point.x}" cy="${point.y}" r="${point.current ? 7 : 5}" class="pet-data-chart-point${point.current ? ' is-current' : ''}"><title>${point.current ? 'Current weight: ' : ''}${point.value} kg · ${escapeHTML(titleDate)}</title></circle><text x="${point.x}" y="${dateY}" text-anchor="middle" font-size="${labelSize}">${escapeHTML(dateLabel)}</text><text x="${point.x}" y="${point.y - 10}" text-anchor="middle" class="pet-data-chart-value${point.current ? ' is-current' : ''}" font-size="${labelSize}">${escapeHTML(point.value)} kg</text>`;
+  }).join('')}</svg></div>`;
+}
+
+function petIntakeHistoryChart(records = [], reminders = {}) {
+  const dailyRecords = records.filter((record) => record.date && (Number(record.foodCount) > 0 || Number(record.waterCount) > 0 || Number(record.medicineCount) > 0 || (Array.isArray(record.medicineIntakes) && record.medicineIntakes.length) || (Array.isArray(record.foodIntakes) && record.foodIntakes.length) || (Array.isArray(record.waterIntakes) && record.waterIntakes.length)));
+  if (!dailyRecords.length) return '<p class="pet-data-empty">No food, water, medicine, or supplement intakes recorded yet.</p>';
+
+  const savedMedicines = medicineDetailsList(reminders);
+  const medicineRows = new Map();
+  dailyRecords.forEach((record) => {
+    (Array.isArray(record.medicineIntakes) ? record.medicineIntakes : []).forEach((rawEntry) => {
+      const entry = medicineIntakeEntry(rawEntry, reminders);
+      const medicine = savedMedicines.find((item) => String(item.id) === String(entry.medicineId));
+      const name = entry.name || medicine?.name || 'Medicine / Supplement';
+      const key = entry.medicineId ? `medicine:${entry.medicineId}` : `medicine-name:${name.toLocaleLowerCase()}`;
+      if (!medicineRows.has(key)) medicineRows.set(key, { key, name });
+    });
+    if (Number(record.medicineCount) > (record.medicineIntakes || []).length && !medicineRows.has('medicine:legacy')) {
+      medicineRows.set('medicine:legacy', { key: 'medicine:legacy', name: reminders.medicine?.name || 'Medicine / Supplement' });
+    }
+  });
+  const series = [
+    { key: 'food', name: 'Food', kind: 'food', color: '#fe7801' },
+    { key: 'water', name: 'Water', kind: 'water', color: '#5599c4' },
+    ...Array.from(medicineRows.values()).map((medicine) => ({ ...medicine, kind: 'medicine', color: '#79a77e' })),
+  ];
+  const dates = [...new Set(dailyRecords.map((record) => record.date))].sort((a, b) => String(b).localeCompare(String(a)));
+  const recordByDate = new Map(dailyRecords.map((record) => [record.date, record]));
+  const countFor = (record, item) => {
+    if (item.kind !== 'medicine') return Math.max(0, Number(record?.[`${item.kind}Count`]) || (Array.isArray(record?.[`${item.kind}Intakes`]) ? record[`${item.kind}Intakes`].length : 0));
+    const entries = (Array.isArray(record?.medicineIntakes) ? record.medicineIntakes : []).map((rawEntry) => medicineIntakeEntry(rawEntry, reminders));
+    if (item.key === 'medicine:legacy') return Math.max(0, (Number(record?.medicineCount) || 0) - entries.length);
+    return entries.filter((entry) => (entry.medicineId ? `medicine:${entry.medicineId}` : `medicine-name:${(entry.name || 'Medicine / Supplement').toLocaleLowerCase()}`) === item.key).length;
+  };
+  const maxCount = Math.max(1, ...dates.flatMap((date) => series.map((item) => countFor(recordByDate.get(date), item))));
+  const chartMax = Math.max(4, Math.ceil(maxCount / 4) * 4);
+  const chartHeight = 230;
+  const axisLeft = 38;
+  const plotTop = 16;
+  const plotHeight = 155;
+  const axisY = plotTop + plotHeight;
+  const groupWidth = Math.max(82, series.length * 15 + 20);
+  const chartWidth = axisLeft + dates.length * groupWidth + 12;
+  const ticks = [...new Set([0, Math.round(chartMax / 4), Math.round(chartMax / 2), Math.round(chartMax * 3 / 4), chartMax])].sort((a, b) => a - b);
+  const grid = ticks.map((tick) => {
+    const y = axisY - (tick / chartMax) * plotHeight;
+    return `<line x1="${axisLeft}" y1="${y}" x2="${chartWidth - 8}" y2="${y}" class="pet-intake-chart-gridline"/><text x="${axisLeft - 8}" y="${y + 4}" text-anchor="end" class="pet-intake-chart-axis-label">${tick}</text>`;
+  }).join('');
+  const bars = dates.map((date, dateIndex) => {
+    const record = recordByDate.get(date);
+    const xStart = axisLeft + dateIndex * groupWidth;
+    const visibleSeries = series.filter((item) => countFor(record, item) > 0);
+    const barWidth = Math.min(13, (groupWidth - 18) / Math.max(1, visibleSeries.length));
+    const barGap = 3;
+    const barsWidth = visibleSeries.length * barWidth + Math.max(0, visibleSeries.length - 1) * barGap;
+    const xOffset = (groupWidth - barsWidth) / 2;
+    const rects = visibleSeries.map((item, seriesIndex) => {
+      const count = countFor(record, item);
+      const barHeight = count ? Math.max(2, (count / chartMax) * plotHeight) : 0;
+      const x = xStart + xOffset + seriesIndex * (barWidth + barGap);
+      const y = axisY - barHeight;
+      return `<rect x="${x}" y="${y}" width="${barWidth}" height="${barHeight}" rx="3" fill="${item.color}" role="button" tabindex="0" data-intake-bar data-intake-date="${escapeHTML(date)}" data-intake-name="${escapeHTML(item.name)}" data-intake-count="${count}" aria-label="${escapeHTML(item.name)}: ${count} intake${count === 1 ? '' : 's'} on ${escapeHTML(formatPetDate(date))}"><title>${escapeHTML(item.name)}: ${count} intake${count === 1 ? '' : 's'} · ${escapeHTML(formatPetDate(date))}</title></rect>`;
+    }).join('');
+    const label = new Date(`${date}T00:00:00`).toLocaleDateString('en-MY', { day: 'numeric', month: 'short' });
+    return `${rects}<text x="${xStart + groupWidth / 2}" y="${axisY + 22}" text-anchor="middle" class="pet-intake-chart-date">${escapeHTML(label)}</text>`;
+  }).join('');
+  const legend = [
+    '<span><i style="--intake-series-color:#fe7801"></i>Food</span>',
+    '<span><i style="--intake-series-color:#5599c4"></i>Water</span>',
+    '<span><i style="--intake-series-color:#79a77e"></i>Medicine / Supplement</span>',
+  ].join('');
+  return `<div class="pet-intake-chart-legend" aria-label="Intake chart legend">${legend}</div><div class="pet-intake-chart-scroll" tabindex="0" role="region" aria-label="Daily intake bar chart. Latest date first; scroll horizontally for older records."><svg style="width:${chartWidth}px;min-width:${chartWidth}px" viewBox="0 0 ${chartWidth} ${chartHeight}" role="img" aria-label="Daily food, water, medicine, and supplement intake counts by date, latest date first"><text x="10" y="${(plotTop + axisY) / 2}" text-anchor="middle" transform="rotate(-90 10 ${(plotTop + axisY) / 2})" class="pet-intake-chart-axis-label">Intakes / day</text>${grid}<line x1="${axisLeft}" y1="${axisY}" x2="${chartWidth - 8}" y2="${axisY}" class="pet-intake-chart-axis"/>${bars}</svg></div><p class="pet-intake-chart-detail" data-intake-chart-detail aria-live="polite">Click a bar to view the intake details.</p><p class="pet-data-caption">Dates run left to right. The latest date is on the left; scroll right for older records.</p>`;
 }
 
 export function petReminderPage(petId = '') {
@@ -180,27 +356,21 @@ export function petReminderPage(petId = '') {
   const serviceRows = services.map((booking) => `<li><span>${escapeHTML(booking.service)}</span><strong>${escapeHTML(formatPetDate(booking.date))}</strong></li>`).join('');
   const bubbleSettings = { service: true, vaccination: true, foodWater: true, exercise: true, medicine: true, foodWeight: true, milestone: true, ...(reminders.showInAssistant || {}) };
   const customReminders = Array.isArray(reminders.customReminders) ? reminders.customReminders : [];
-  const foodWeight = reminders.foodWeight || {};
-  const milestone = reminders.milestone || {};
-  const milestoneDate = milestone.date || pet.birthDate || '';
   const bubbleOptions = [
     ['service', 'Grooming / Pet Hotel / Pet Daycare reminders'],
     ['vaccination', 'Vaccination reminders'],
     ['foodWater', 'Food and water intake'],
-    ['medicine', 'Medicine reminders'],
+    ['medicine', 'Medicine & Supplement reminders'],
     ['exercise', 'Exercise updates'],
-    ['foodWeight', 'Food changes or weight check-ins'],
+    ['foodWeight', 'Weight check-ins (from pet profile)'],
     ['milestone', 'Birthday or adoption day'],
     ['custom', 'Custom reminders'],
   ];
   return `<main class="pet-profile-page pet-care-page">
     ${pageHeader(petSettingTitle(pet, 'Reminder'), pet)}
-    <section class="pet-care-panel"><div class="profile-menu-group"><h2>${escapeHTML(pet.name)}’s Reminders</h2></div>
+    <section class="pet-care-panel pet-reminder-panel"><div class="profile-menu-group"><h2>${escapeHTML(pet.name)}’s Reminders</h2></div>
       <form class="pet-care-form" data-pet-reminder-form data-pet-id="${escapeHTML(pet.id)}">
         <fieldset class="pet-reminder-visibility"><legend>Show in the home speech bubble</legend>${bubbleOptions.map(([key, label]) => `<label><input type="checkbox" name="show-${key}" ${bubbleSettings[key] !== false ? 'checked' : ''} /><span>${label}</span></label>`).join('')}</fieldset>
-        <div class="pet-care-inline-fields"><label>Medicine name<input name="medicineName" value="${escapeHTML(reminders.medicine?.name || '')}" maxlength="80" placeholder="e.g. Daily medicine" /></label><label>Medicine time<input type="time" name="medicineTime" value="${escapeHTML(reminders.medicine?.time || '')}" /></label></div>
-        <div class="pet-care-inline-fields"><label>Food or weight reminder<select name="foodWeightType"><option value="food-change" ${foodWeight.type !== 'weight-check' ? 'selected' : ''}>Food change</option><option value="weight-check" ${foodWeight.type === 'weight-check' ? 'selected' : ''}>Weight check-in</option></select></label><label>Reminder date<input type="date" name="foodWeightDate" value="${escapeHTML(foodWeight.date || '')}" /></label></div>
-        <div class="pet-care-inline-fields"><label>Annual occasion<select name="milestoneType"><option value="birthday" ${milestone.type !== 'adoption' ? 'selected' : ''}>Birthday</option><option value="adoption" ${milestone.type === 'adoption' ? 'selected' : ''}>Adoption day</option></select></label><label>Occasion date<input type="date" name="milestoneDate" value="${escapeHTML(milestoneDate)}" /></label></div>
         <section class="pet-custom-reminder-editor" aria-labelledby="custom-reminder-title"><div class="pet-custom-reminder-heading"><div><h3 id="custom-reminder-title">Custom Reminders</h3><p>Add one or more reminders for ${escapeHTML(pet.name)}.</p></div><button class="button button-outline" type="button" data-add-custom-reminder>Add Reminder</button></div><div class="pet-custom-reminder-list" data-custom-reminder-list>${customReminders.length ? customReminders.map((reminder) => customReminderEditorRow(reminder)).join('') : '<p class="pet-custom-reminder-empty" data-custom-reminder-empty>No custom reminders yet.</p>'}</div></section>
         <p class="pet-care-note">Grooming, Pet Hotel, and Pet Daycare reminders appear here automatically from your bookings.</p>
         <div class="form-feedback" role="status" aria-live="polite"></div><button class="button button-primary" type="submit">Save Reminders</button>
@@ -220,7 +390,7 @@ export function petVaccinationPage(petId = '') {
   return `<main class="pet-profile-page pet-care-page">
     ${pageHeader(petSettingTitle(pet, 'Vaccination'), pet)}
     <section class="pet-care-panel pet-vaccination-page-panel">
-      <div class="profile-menu-group"><h2>${escapeHTML(pet.name)}’s Vaccination</h2></div>
+      <div class="pet-intake-heading-row"><div class="profile-menu-group"><h2>${escapeHTML(pet.name)}’s Vaccination</h2><p>Keep vaccination dates and documents up to date.</p></div><a class="pet-intake-history-toggle" href="#pet-data?id=${encodeURIComponent(pet.id)}&amp;section=vaccination">View History</a></div>
       <form class="pet-care-form" data-pet-vaccination-form data-pet-id="${escapeHTML(pet.id)}">
         <label>Next vaccination date<input type="date" name="vaccinationValidUntil" value="${escapeHTML(reminders.vaccinationDate || pet.vaccinationValidUntil || '')}" /></label>
         <section class="pet-vaccination-section" aria-labelledby="pet-vaccination-title"><h2 id="pet-vaccination-title">Vaccination Cards</h2><p>Upload vaccination card images or PDF documents. Up to 3 files, 1.5 MB each (2.5 MB total).</p><label class="pet-vaccination-upload"><span>Choose files</span><input type="file" name="vaccinationCards" accept="image/*,.pdf,application/pdf" multiple data-vaccination-upload /></label><ul class="pet-vaccination-list" data-vaccination-list>${rows || '<li class="pet-vaccination-empty">No vaccination cards uploaded.</li>'}</ul></section>
@@ -238,24 +408,23 @@ function customReminderEditorRow(reminder = {}) {
 
 export function petRecordPage(petId = '') {
   const pet = getPet(petId);
-  if (!pet) return `<main class="pet-profile-page pet-care-page">${pageHeader('This Pet Record', null, '#home')}${missingPet()}${bottomNavigation('home', icon)}</main>`;
+  if (!pet) return `<main class="pet-profile-page pet-care-page">${pageHeader('This Pet Daily Care', null, '#home')}${missingPet()}${bottomNavigation('home', icon)}</main>`;
   const today = localPetDate();
   const records = loadPetRecords(pet.id);
   const todayRecord = records.find((item) => item.date === today) || {};
+  const medicineReminders = loadPetReminders(pet.id);
+  const medicines = medicineDetailsList(medicineReminders);
+  const activeMedicines = activeMedicineDetails(medicineReminders, today);
+  const intakeKinds = ['food', 'water', ...(activeMedicines.length ? ['medicine'] : [])];
   return `<main class="pet-profile-page pet-care-page">
-    ${pageHeader(petSettingTitle(pet, 'Record'), pet)}
-    <section class="pet-care-panel pet-intake-panel" aria-labelledby="pet-intake-heading">
-      <div class="profile-menu-group"><h2 id="pet-intake-heading">Today with ${escapeHTML(pet.name)}</h2><p>Tap a card to log an intake.</p></div>
-      <div class="pet-intake-cards" data-pet-intake-cards data-pet-id="${escapeHTML(pet.id)}" data-pet-name="${escapeHTML(pet.name)}">${petIntakeCards(todayRecord, pet.name)}</div>
+    ${pageHeader(petSettingTitle(pet, 'Daily Care'), pet)}
+    <section class="pet-care-panel pet-intake-panel" id="pet-record-intake" aria-labelledby="pet-intake-heading">
+      <div class="pet-intake-heading-row"><div class="profile-menu-group"><h2 id="pet-intake-heading">Today with ${escapeHTML(pet.name)}</h2><p>Tap a card to log an intake.</p></div><a class="pet-intake-history-toggle" href="#pet-data?id=${encodeURIComponent(pet.id)}&amp;section=intake">View History</a></div>
+      <div class="pet-intake-cards" data-pet-intake-cards data-intake-kinds="${intakeKinds.join(',')}" data-pet-id="${escapeHTML(pet.id)}" data-pet-name="${escapeHTML(pet.name)}">${petIntakeCards(todayRecord, pet.name, intakeKinds, activeMedicines)}</div>
       <p class="pet-intake-feedback" data-intake-feedback role="status" aria-live="polite"></p>
     </section>
-    <section class="pet-record-chart-panel" aria-labelledby="pet-intake-chart-title">
-      <h2 id="pet-intake-chart-title">Food &amp; Water Intake — Last 7 Days</h2>
-      ${petIntakeChart(records, today)}
-      <div class="pet-intake-chart-legend"><span><i class="is-food"></i>Food</span><span><i class="is-water"></i>Water</span></div>
-    </section>
-    <section class="pet-care-panel pet-exercise-panel" aria-labelledby="pet-exercise-heading">
-      <div class="profile-menu-group"><h2 id="pet-exercise-heading">Exercise</h2><p>Keep this pet’s activity record up to date.</p></div>
+    <section class="pet-care-panel pet-exercise-panel" id="pet-record-exercise" aria-labelledby="pet-exercise-heading">
+      <div class="pet-intake-heading-row"><div class="profile-menu-group"><h2 id="pet-exercise-heading">${escapeHTML(pet.name)}’s Exercise</h2><p>Keep this pet’s activity record up to date.</p></div><a class="pet-intake-history-toggle" href="#pet-data?id=${encodeURIComponent(pet.id)}&amp;section=exercise">View History</a></div>
       <section class="pet-exercise-tracker" data-exercise-tracker data-pet-id="${escapeHTML(pet.id)}" aria-label="Exercise route tracker">
         <div class="pet-exercise-summary">
           <strong data-exercise-distance>0.00 km</strong>
@@ -273,17 +442,38 @@ export function petRecordPage(petId = '') {
         <div class="form-feedback" role="status" aria-live="polite"></div><button class="button button-primary" type="submit">Save Exercise Record</button>
       </form>
     </section>
+    <section class="pet-care-panel pet-medicine-panel" id="pet-record-medicine" aria-labelledby="pet-medicine-heading">
+      <div class="pet-intake-heading-row"><div class="profile-menu-group"><h2 id="pet-medicine-heading">${escapeHTML(pet.name)}’s Medicine &amp; Supplement</h2><p>Set the active period and frequency. Reminders and intake cards appear only during each item’s active period.</p></div><a class="pet-intake-history-toggle" href="#pet-data?id=${encodeURIComponent(pet.id)}&amp;section=medicine">View History</a></div>
+      <button class="button button-primary pet-medicine-add" type="button" data-add-medicine ${medicines.length ? '' : 'hidden'}>Add Medicine/Supplement</button>
+      <div class="pet-medicine-saved-details" data-medicine-saved-details>${petMedicineDetailsListMarkup(medicines)}</div>
+      <form class="pet-care-form pet-medicine-editor" data-pet-medicine-form data-pet-id="${escapeHTML(pet.id)}" ${medicines.length ? 'hidden' : ''}>
+        <input type="hidden" name="medicineId" value="" />
+        <label>Medicine or supplement name<input name="medicineName" value="" maxlength="80" placeholder="e.g. Joint supplement" required /></label>
+        <div class="pet-medicine-period"><strong>Medicine or Supplement Period</strong><p>Select the first and last active dates. Reminders and the intake card are active only within this period. Reminders run while Furgo is open; allow browser notifications to see alerts when the tab is in the background.</p><div class="hotel-range-display pet-medicine-range-display"><div><small>Start date</small><strong data-medicine-start-display>Choose date</strong></div><span aria-hidden="true">→</span><div><small>End date</small><strong data-medicine-end-display>Choose date</strong></div></div><input type="hidden" name="medicineStartDate" data-medicine-start value="" required /><input type="hidden" name="medicineEndDate" data-medicine-end value="" required /><div class="hotel-calendar pet-medicine-calendar" data-medicine-calendar aria-label="Select medicine or supplement active dates"><div class="hotel-calendar-heading"><button type="button" data-medicine-calendar-nav="previous" aria-label="Previous month">‹</button><strong data-medicine-calendar-month></strong><button type="button" data-medicine-calendar-nav="next" aria-label="Next month">›</button></div><div class="hotel-calendar-grid" data-medicine-calendar-grid role="grid"></div></div></div>
+        <div class="pet-care-inline-fields"><label>Frequency<div class="pet-medicine-frequency"><span>Every</span><input name="medicineFrequencyInterval" type="number" min="1" max="24" value="1" required /><select name="medicineFrequencyUnit" aria-label="Medicine frequency unit"><option value="hours">hours</option><option value="days" selected>days</option></select></div></label><label>Dosage<input name="medicineDosage" value="" maxlength="80" placeholder="e.g. 1 tablet" required /></label></div>
+        <div class="pet-medicine-notification-setting"><button class="button button-light" type="button" data-enable-medicine-notifications>Enable Browser Reminders</button><span data-medicine-notification-status role="status" aria-live="polite"></span></div>
+        <div class="form-feedback" role="status" aria-live="polite"></div><div class="pet-medicine-editor-actions"><button class="button button-primary" type="submit">Save Details</button><button class="button button-light" type="button" data-cancel-medicine-edit>Cancel</button></div>
+      </form>
+    </section>
     ${bottomNavigation('home', icon)}
   </main>`;
 }
 
-function petIntakeCards(record = {}, petName = '') {
-  return [
+function petIntakeCards(record = {}, petName = '', kinds = ['food', 'water'], medicines = []) {
+  const intakeItems = [
     { key: 'food', label: `${petName}’s Food Intake`, asset: 'Food and Water Intake-01.png', count: Number(record.foodCount) || 0, last: record.foodLastAt || '' },
     { key: 'water', label: `${petName}’s Water Intake`, asset: 'Food and Water Intake-02.png', count: Number(record.waterCount) || 0, last: record.waterLastAt || '' },
-  ].map((item) => `<article class="pet-intake-card is-${item.key}">
+    ...medicines.map((medicine, index) => {
+      const key = medicineIntakeFieldKey(medicine.id);
+      const events = Array.isArray(record.medicineIntakes) ? record.medicineIntakes.map((entry) => medicineIntakeEntry(entry)).filter((entry) => entry.medicineId === medicine.id) : [];
+      const legacyEvents = medicine.id === 'legacy-medicine' && index === 0 && Array.isArray(record.medicineIntakes) ? record.medicineIntakes.filter((entry) => typeof entry === 'string') : [];
+      const allMedicineEvents = [...events, ...legacyEvents.map((time) => ({ time }))];
+      return { key, type: 'medicine', label: `${medicine.name} Intake`, count: allMedicineEvents.length, last: allMedicineEvents.map((entry) => entry.time).filter(Boolean).at(-1) || '' };
+    }),
+  ];
+  return intakeItems.filter((item) => item.key === 'food' || item.key === 'water' ? kinds.includes(item.key) : kinds.includes('medicine')).map((item) => `<article class="pet-intake-card is-${item.type || item.key}">
     <button class="pet-intake-add" type="button" data-add-pet-intake="${item.key}" aria-label="Add ${item.key} intake for today">
-      <span class="pet-intake-title">${escapeHTML(item.label)} Today</span><img src="Image/Other%20Image/${encodeURIComponent(item.asset)}" alt="" />
+      <span class="pet-intake-title">${escapeHTML(item.label)} Today</span>${item.asset ? `<img src="Image/Other%20Image/${encodeURIComponent(item.asset)}" alt="" />` : ''}
       <span class="pet-intake-count" data-intake-count="${item.key}">${item.count}</span><span class="pet-intake-times">${item.count === 1 ? 'Time' : 'Times'}</span>
       <span class="pet-intake-last" data-intake-last="${item.key}">Last Intake: ${item.last ? escapeHTML(item.last) : '—'}</span>
       <span class="pet-intake-prompt">Tap to add an intake</span>
@@ -292,41 +482,95 @@ function petIntakeCards(record = {}, petName = '') {
   </article>`).join('');
 }
 
-function petIntakeChart(records, today) {
-  const byDate = new Map(records.map((record) => [record.date, record]));
-  const days = Array.from({ length: 7 }, (_, offset) => {
-    const date = new Date(`${today}T00:00:00`);
-    date.setDate(date.getDate() - (6 - offset));
-    return localPetDate(date);
-  });
-  const max = Math.max(1, ...days.flatMap((date) => {
-    const record = byDate.get(date) || {};
-    return [Number(record.foodCount) || 0, Number(record.waterCount) || 0];
-  }));
-  return `<div class="pet-intake-chart" role="img" aria-label="Food and water intake counts for the last seven days">${days.map((date) => {
-    const record = byDate.get(date) || {};
-    const food = Number(record.foodCount) || 0;
-    const water = Number(record.waterCount) || 0;
-    const labelDate = new Date(`${date}T00:00:00`).toLocaleDateString('en-MY', { day: 'numeric', month: 'short' });
-    const bar = (kind, count) => `<div class="pet-intake-bar-column"><span class="pet-intake-bar-count">${count || ''}</span><i class="is-${kind}" style="--bar-height:${count ? Math.max(4, count / max * 100) : 0}%"></i></div>`;
-    return `<div class="pet-intake-day">${bar('food', food)}${bar('water', water)}<span class="pet-intake-day-label">${escapeHTML(labelDate)}</span></div>`;
-  }).join('')}</div>`;
+function petMedicineDetailsMarkup(details) {
+  if (!details?.name) return '';
+  return `<dl><div><dt>Medicine / Supplement</dt><dd>${escapeHTML(details.name)}</dd></div><div><dt>Medicine or Supplement Period</dt><dd>${escapeHTML(details.startDate ? formatPetDate(details.startDate) : 'Not set')} – ${escapeHTML(details.endDate ? formatPetDate(details.endDate) : 'Not set')}</dd></div><div><dt>Frequency</dt><dd>${escapeHTML(details.frequency || 'Not set')}</dd></div><div><dt>Dosage</dt><dd>${escapeHTML(details.dosage || 'Not set')}</dd></div></dl>`;
+}
+
+function petMedicineDetailsListMarkup(medicines = []) {
+  return medicines.map((details) => `<article class="pet-medicine-saved-item" data-medicine-item="${escapeHTML(details.id)}"><dl><div><dt>Medicine / Supplement</dt><dd>${escapeHTML(details.name)}</dd></div><div><dt>Medicine or Supplement Period</dt><dd>${escapeHTML(details.startDate ? formatPetDate(details.startDate) : 'Not set')} – ${escapeHTML(details.endDate ? formatPetDate(details.endDate) : 'Not set')}</dd></div><div><dt>Frequency</dt><dd>${escapeHTML(details.frequency || 'Not set')}</dd></div><div><dt>Dosage</dt><dd>${escapeHTML(details.dosage || 'Not set')}</dd></div></dl><div class="pet-medicine-item-actions"><button class="button button-light" type="button" data-edit-medicine="${escapeHTML(details.id)}">Edit</button><button class="button button-light" type="button" data-delete-medicine="${escapeHTML(details.id)}">Remove</button></div></article>`).join('');
+}
+
+function resetMedicineForm(form, details = null) {
+  form.reset();
+  form.elements.medicineId.value = details?.id || '';
+  form.elements.medicineName.value = details?.name || '';
+  form.elements.medicineStartDate.value = details?.startDate || '';
+  form.elements.medicineEndDate.value = details?.endDate || '';
+  const parsed = parseMedicineFrequency(details?.frequency || '');
+  form.elements.medicineFrequencyInterval.value = details?.frequencyInterval || parsed.interval || 1;
+  form.elements.medicineFrequencyUnit.value = details?.frequencyUnit || parsed.unit || 'days';
+  form.elements.medicineDosage.value = details?.dosage || '';
+  const start = details?.startDate || localPetDate();
+  const [year, month] = start.split('-').map(Number);
+  renderMedicineCalendar(form, new Date(year, month - 1, 1));
+  const feedback = form.querySelector('.form-feedback');
+  if (feedback) { feedback.textContent = ''; feedback.classList.remove('visible'); }
+}
+
+function formatMedicineDate(value) {
+  return value ? new Date(`${value}T12:00:00`).toLocaleDateString('en-MY', { day: 'numeric', month: 'short', year: 'numeric' }) : '';
+}
+
+function parseMedicineFrequency(value = '') {
+  const match = String(value).match(/every\s+(?:(\d+)\s*)?(hour|day)/i);
+  if (!match) return { interval: 1, unit: 'days' };
+  return { interval: Math.max(1, Number(match[1]) || 1), unit: match[2].toLowerCase().startsWith('hour') ? 'hours' : 'days' };
+}
+
+function renderMedicineCalendar(form, month) {
+  const calendar = form.querySelector('[data-medicine-calendar]');
+  if (!calendar) return;
+  const year = month.getFullYear();
+  const monthIndex = month.getMonth();
+  const firstWeekday = new Date(year, monthIndex, 1).getDay();
+  const daysInMonth = new Date(year, monthIndex + 1, 0).getDate();
+  const start = form.elements.medicineStartDate.value;
+  const end = form.elements.medicineEndDate.value;
+  const weekdays = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((day) => `<span class="hotel-calendar-weekday" role="columnheader">${day}</span>`).join('');
+  const blanks = Array.from({ length: firstWeekday }, () => '<span class="hotel-calendar-empty" aria-hidden="true"></span>').join('');
+  const days = Array.from({ length: daysInMonth }, (_, index) => {
+    const day = index + 1;
+    const value = localPetDate(new Date(year, monthIndex, day));
+    const selected = value === start || value === end;
+    const inRange = Boolean(start && end && value > start && value < end);
+    const date = new Date(year, monthIndex, day);
+    const label = date.toLocaleDateString('en-MY', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+    return `<button type="button" class="hotel-calendar-day ${selected ? 'is-selected' : ''} ${inRange ? 'is-in-range' : ''}" role="gridcell" data-medicine-calendar-date="${value}" aria-label="${label}" aria-pressed="${selected}">${day}</button>`;
+  }).join('');
+  calendar.querySelector('[data-medicine-calendar-month]').textContent = month.toLocaleDateString('en-MY', { month: 'long', year: 'numeric' });
+  calendar.querySelector('[data-medicine-calendar-grid]').innerHTML = `${weekdays}${blanks}${days}`;
+  form.querySelector('[data-medicine-start-display]').textContent = formatMedicineDate(start) || 'Choose date';
+  form.querySelector('[data-medicine-end-display]').textContent = formatMedicineDate(end) || 'Choose date';
 }
 
 function updatePetIntakeCards(record) {
-  const cards = document.querySelector('[data-pet-intake-cards]');
-  if (!cards) return;
-  cards.innerHTML = petIntakeCards(record, cards.dataset.petName);
-}
-
-function updatePetIntakeChart(records) {
-  const panel = document.querySelector('.pet-record-chart-panel');
-  if (!panel) return;
-  const chart = panel.querySelector('.pet-intake-chart');
-  if (chart) chart.outerHTML = petIntakeChart(records, localPetDate());
+  document.querySelectorAll('[data-pet-intake-cards]').forEach((cards) => {
+    const kinds = cards.dataset.intakeKinds ? cards.dataset.intakeKinds.split(',') : ['food', 'water'];
+    const medicines = kinds.includes('medicine') ? activeMedicineDetails(loadPetReminders(cards.dataset.petId)) : [];
+    cards.innerHTML = petIntakeCards(record, cards.dataset.petName, kinds, medicines);
+  });
 }
 
 export function setupPetCarePages() {
+  setupMedicineReminderScheduler();
+  const intakeChart = document.querySelector('.pet-intake-chart-scroll');
+  const intakeChartDetail = document.querySelector('[data-intake-chart-detail]');
+  intakeChart?.addEventListener('click', (event) => {
+    const bar = event.target.closest('[data-intake-bar]');
+    if (!bar || !intakeChartDetail) return;
+    intakeChart.querySelectorAll('[data-intake-bar].is-active').forEach((activeBar) => activeBar.classList.remove('is-active'));
+    bar.classList.add('is-active');
+    const count = Number(bar.dataset.intakeCount) || 0;
+    const date = formatPetDate(bar.dataset.intakeDate) || bar.dataset.intakeDate;
+    intakeChartDetail.textContent = `${bar.dataset.intakeName}: ${count} intake${count === 1 ? '' : 's'} on ${date}.`;
+  });
+  intakeChart?.addEventListener('keydown', (event) => {
+    if ((event.key === 'Enter' || event.key === ' ') && event.target.matches('[data-intake-bar]')) {
+      event.preventDefault();
+      event.target.click();
+    }
+  });
   document.querySelectorAll('[data-toggle-pet-assistant]').forEach((button) => button.addEventListener('click', () => {
     const petId = String(button.dataset.togglePetAssistant || '');
     const selected = selectedPetAssistantIds() || (selectedPetAssistantId() ? [selectedPetAssistantId()] : []);
@@ -341,6 +585,88 @@ export function setupPetCarePages() {
   }));
 
   const reminderForm = document.querySelector('[data-pet-reminder-form]');
+  const medicineForm = document.querySelector('[data-pet-medicine-form]');
+  if (medicineForm) {
+    const notificationButton = medicineForm.querySelector('[data-enable-medicine-notifications]');
+    const notificationStatus = medicineForm.querySelector('[data-medicine-notification-status]');
+    if (!window.Notification || window.Notification.permission === 'granted') notificationButton.hidden = true;
+    notificationButton.addEventListener('click', async () => {
+      if (!window.Notification) {
+        notificationStatus.textContent = 'This browser does not support browser notifications.';
+        return;
+      }
+      const permission = await window.Notification.requestPermission();
+      notificationStatus.textContent = permission === 'granted'
+        ? 'Browser reminders are enabled.'
+        : 'Allow notifications in your browser settings to receive reminders when this tab is in the background.';
+      notificationButton.hidden = permission === 'granted';
+    });
+    let calendarMonth = new Date();
+    const initialDate = medicineForm.elements.medicineStartDate.value || localPetDate();
+    const [initialYear, initialMonth] = initialDate.split('-').map(Number);
+    calendarMonth = new Date(initialYear, initialMonth - 1, 1);
+    renderMedicineCalendar(medicineForm, calendarMonth);
+    medicineForm.querySelector('[data-medicine-calendar]')?.addEventListener('click', (event) => {
+      const nav = event.target.closest('[data-medicine-calendar-nav]');
+      if (nav) {
+        calendarMonth = new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() + (nav.dataset.medicineCalendarNav === 'next' ? 1 : -1), 1);
+        renderMedicineCalendar(medicineForm, calendarMonth);
+        return;
+      }
+      const day = event.target.closest('[data-medicine-calendar-date]');
+      if (!day) return;
+      const selectedDate = day.dataset.medicineCalendarDate;
+      const startField = medicineForm.elements.medicineStartDate;
+      const endField = medicineForm.elements.medicineEndDate;
+      if (!startField.value || endField.value || selectedDate <= startField.value) {
+        startField.value = selectedDate;
+        endField.value = '';
+      } else {
+        endField.value = selectedDate;
+      }
+      renderMedicineCalendar(medicineForm, calendarMonth);
+    });
+    const medicinePanel = medicineForm.closest('.pet-medicine-panel');
+    const openEditor = (details = null) => {
+      resetMedicineForm(medicineForm, details);
+      const selectedDate = medicineForm.elements.medicineStartDate.value || localPetDate();
+      const [selectedYear, selectedMonth] = selectedDate.split('-').map(Number);
+      calendarMonth = new Date(selectedYear, selectedMonth - 1, 1);
+      medicineForm.hidden = false;
+      medicineForm.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    };
+    medicinePanel.querySelector('[data-add-medicine]')?.addEventListener('click', () => openEditor());
+    medicinePanel.querySelector('[data-cancel-medicine-edit]')?.addEventListener('click', () => {
+      medicineForm.hidden = true;
+      medicinePanel.querySelector('[data-add-medicine]').hidden = false;
+    });
+    medicinePanel.querySelector('[data-medicine-saved-details]')?.addEventListener('click', (event) => {
+      const editButton = event.target.closest('[data-edit-medicine]');
+      const deleteButton = event.target.closest('[data-delete-medicine]');
+      if (!editButton && !deleteButton) return;
+      const current = loadPetReminders(medicineForm.dataset.petId);
+      const medicines = medicineDetailsList(current);
+      const medicineId = (editButton || deleteButton).dataset.editMedicine || (editButton || deleteButton).dataset.deleteMedicine;
+      if (editButton) {
+        const selected = medicines.find((item) => String(item.id) === String(medicineId));
+        if (selected) openEditor(selected);
+        return;
+      }
+      const remaining = medicines.filter((item) => String(item.id) !== String(medicineId));
+      savePetReminders(medicineForm.dataset.petId, { ...current, medicines: remaining, medicine: remaining[0] || null });
+      medicinePanel.querySelector('[data-medicine-saved-details]').innerHTML = petMedicineDetailsListMarkup(remaining);
+      medicinePanel.querySelector('[data-add-medicine]').textContent = 'Add Medicine/Supplement';
+      medicinePanel.querySelector('[data-add-medicine]').hidden = false;
+      const cards = document.querySelector('.pet-intake-panel [data-pet-intake-cards]');
+      if (cards) {
+        const todayRecord = loadPetRecords(medicineForm.dataset.petId).find((record) => record.date === localPetDate()) || {};
+        const active = activeMedicineDetails({ medicines: remaining });
+        const kinds = ['food', 'water', ...(active.length ? ['medicine'] : [])];
+        cards.dataset.intakeKinds = kinds.join(',');
+        cards.innerHTML = petIntakeCards(todayRecord, cards.dataset.petName, kinds, active);
+      }
+    });
+  }
   const customReminderList = reminderForm?.querySelector('[data-custom-reminder-list]');
   customReminderList?.addEventListener('click', (event) => {
     if (!event.target.closest('[data-remove-custom-reminder]')) return;
@@ -355,17 +681,9 @@ export function setupPetCarePages() {
   reminderForm?.addEventListener('submit', (event) => {
     event.preventDefault();
     const feedback = reminderForm.querySelector('.form-feedback');
-    const name = reminderForm.elements.medicineName.value.trim();
-    const time = reminderForm.elements.medicineTime.value;
-    if (Boolean(name) !== Boolean(time)) {
-      feedback.textContent = 'Enter both the medicine name and time, or leave both blank.';
-      feedback.classList.add('visible');
-      return;
-    }
     const current = loadPetReminders(reminderForm.dataset.petId);
     savePetReminders(reminderForm.dataset.petId, {
       ...current,
-      medicine: name && time ? { name, time } : null,
       showInAssistant: {
         service: reminderForm.elements['show-service'].checked,
         vaccination: reminderForm.elements['show-vaccination'].checked,
@@ -382,50 +700,108 @@ export function setupPetCarePages() {
         date: row.querySelector('[data-custom-reminder-date]').value,
         time: row.querySelector('[data-custom-reminder-time]').value,
       })).filter((reminder) => reminder.title && reminder.date),
-      foodWeight: reminderForm.elements.foodWeightDate.value ? {
-        type: reminderForm.elements.foodWeightType.value,
-        date: reminderForm.elements.foodWeightDate.value,
-      } : null,
-      milestone: reminderForm.elements.milestoneDate.value ? {
-        type: reminderForm.elements.milestoneType.value,
-        date: reminderForm.elements.milestoneDate.value,
-      } : null,
+      foodWeight: null,
     });
     feedback.textContent = 'Reminders and home speech bubble settings saved.';
     feedback.classList.add('visible');
   });
+  medicineForm?.addEventListener('submit', (event) => {
+    event.preventDefault();
+    const feedback = medicineForm.querySelector('.form-feedback');
+    const name = medicineForm.elements.medicineName.value.trim();
+    const startDate = medicineForm.elements.medicineStartDate.value;
+    const endDate = medicineForm.elements.medicineEndDate.value;
+    const frequencyInterval = Math.max(1, Math.min(24, Number(medicineForm.elements.medicineFrequencyInterval.value) || 1));
+    const frequencyUnit = medicineForm.elements.medicineFrequencyUnit.value === 'hours' ? 'hours' : 'days';
+    const frequency = frequencyUnit === 'days' && frequencyInterval === 1 ? 'Every day' : `Every ${frequencyInterval} ${frequencyUnit.replace(/s$/, frequencyInterval === 1 ? '' : 's')}`;
+    const dosage = medicineForm.elements.medicineDosage.value.trim();
+    if (!name || !startDate || !endDate || !frequency || !dosage) {
+      feedback.textContent = 'Complete all medicine and supplement details before saving.';
+      feedback.classList.add('visible');
+      return;
+    }
+    if (endDate < startDate) {
+      feedback.textContent = 'The end date must be the same as or later than the start date.';
+      feedback.classList.add('visible');
+      return;
+    }
+    const current = loadPetReminders(medicineForm.dataset.petId);
+    const currentMedicines = medicineDetailsList(current);
+    const medicineId = medicineForm.elements.medicineId.value || `medicine-${window.crypto?.randomUUID?.() || Date.now()}`;
+    const now = new Date();
+    const startAnchor = new Date(`${startDate}T${now.toTimeString().slice(0, 8)}`);
+    const scheduleAnchorAt = (startAnchor.getTime() > now.getTime() ? startAnchor : now).toISOString();
+    const oldDetails = currentMedicines.find((item) => String(item.id) === String(medicineId));
+    const scheduleUnchanged = oldDetails && oldDetails.startDate === startDate && oldDetails.frequency === frequency;
+    const details = { ...oldDetails, id: medicineId, name, startDate, endDate, frequency, frequencyInterval, frequencyUnit, dosage, scheduleAnchorAt: scheduleUnchanged ? oldDetails.scheduleAnchorAt : scheduleAnchorAt, lastReminderAt: scheduleUnchanged ? (oldDetails.lastReminderAt || '') : '' };
+    const medicines = oldDetails ? currentMedicines.map((item) => String(item.id) === String(medicineId) ? details : item) : [...currentMedicines, details];
+    savePetReminders(medicineForm.dataset.petId, { ...current, medicines, medicine: medicines[0] || null });
+    const todayCards = document.querySelector('.pet-intake-panel [data-pet-intake-cards]');
+    if (todayCards) {
+      const active = activeMedicineDetails({ medicines });
+      const kinds = ['food', 'water', ...(active.length ? ['medicine'] : [])];
+      todayCards.dataset.intakeKinds = kinds.join(',');
+      const todayRecord = loadPetRecords(medicineForm.dataset.petId).find((record) => record.date === localPetDate()) || {};
+      todayCards.innerHTML = petIntakeCards(todayRecord, todayCards.dataset.petName, kinds, active);
+    }
+    const medicinePanel = medicineForm.closest('.pet-medicine-panel');
+    medicinePanel.querySelector('[data-medicine-saved-details]').innerHTML = petMedicineDetailsListMarkup(medicines);
+    medicinePanel.querySelector('[data-add-medicine]').hidden = false;
+    medicineForm.hidden = true;
+    feedback.textContent = oldDetails ? 'Medicine details updated.' : 'Medicine details saved.';
+    feedback.classList.add('visible');
+  });
   const recordForm = document.querySelector('[data-pet-record-form]');
   setupPetExerciseTracker();
-  const intakeCards = document.querySelector('[data-pet-intake-cards]');
-  intakeCards?.addEventListener('click', (event) => {
+  const intakeCards = document.querySelectorAll('[data-pet-intake-cards]');
+  intakeCards.forEach((cards) => cards.addEventListener('click', (event) => {
     const addButton = event.target.closest('[data-add-pet-intake]');
     const undoButton = event.target.closest('[data-undo-pet-intake]');
     const actionButton = addButton || undoButton;
     if (!actionButton) return;
     const kind = actionButton.dataset.addPetIntake || actionButton.dataset.undoPetIntake;
+    const isMedicine = kind.startsWith('medicine_');
     const countField = `${kind}Count`;
     const lastField = `${kind}LastAt`;
     const eventsField = `${kind}Intakes`;
     const today = localPetDate();
-    const current = loadPetRecords(intakeCards.dataset.petId).find((record) => record.date === today) || { date: today };
-    const previousCount = Number(current[countField]) || 0;
-    const events = Array.isArray(current[eventsField]) ? [...current[eventsField]] : Array(previousCount).fill('');
-    if (addButton) events.push(new Date().toLocaleTimeString('en-MY', { hour: 'numeric', minute: '2-digit', hour12: true }).toLowerCase());
-    else if (events.length) events.pop();
-    const nextCount = addButton ? previousCount + 1 : Math.max(0, previousCount - 1);
-    const nextRecord = {
-      ...current,
-      date: today,
-      [countField]: String(nextCount),
-      [eventsField]: events,
-      [lastField]: events.filter(Boolean).at(-1) || '',
-    };
-    const records = savePetRecord(intakeCards.dataset.petId, nextRecord);
+    const current = loadPetRecords(cards.dataset.petId).find((record) => record.date === today) || { date: today };
+    const time = new Date().toLocaleTimeString('en-MY', { hour: 'numeric', minute: '2-digit', hour12: true }).toLowerCase();
+    let events;
+    let nextRecord;
+    if (isMedicine) {
+      const medicineId = kind.slice('medicine_'.length);
+      const reminders = loadPetReminders(cards.dataset.petId);
+      const medicine = medicineDetailsList(reminders).find((item) => medicineIntakeFieldKey(item.id) === kind);
+      const allEvents = Array.isArray(current.medicineIntakes) ? current.medicineIntakes.map((entry) => medicineIntakeEntry(entry, reminders)) : [];
+      if (addButton) allEvents.push({ medicineId: medicine?.id || medicineId, name: medicine?.name || 'Medicine / Supplement', time });
+      else {
+        const removeIndex = allEvents.map((entry, index) => ({ entry, index })).filter(({ entry }) => medicineIntakeFieldKey(entry.medicineId) === kind).at(-1)?.index;
+        if (removeIndex !== undefined) allEvents.splice(removeIndex, 1);
+      }
+      events = allEvents;
+      const legacyTimes = allEvents.map((entry) => entry.time).filter(Boolean);
+      nextRecord = { ...current, date: today, medicineIntakes: allEvents, medicineCount: String(allEvents.length), medicineLastAt: legacyTimes.at(-1) || '' };
+    } else {
+      const previousCount = Number(current[countField]) || 0;
+      events = Array.isArray(current[eventsField]) ? [...current[eventsField]] : Array(previousCount).fill('');
+      if (addButton) events.push(time);
+      else if (events.length) events.pop();
+      const nextCount = addButton ? previousCount + 1 : Math.max(0, previousCount - 1);
+      nextRecord = {
+        ...current,
+        date: today,
+        [countField]: String(nextCount),
+        [eventsField]: events,
+        [lastField]: events.filter(Boolean).at(-1) || '',
+      };
+    }
+    savePetRecord(cards.dataset.petId, nextRecord);
     updatePetIntakeCards(nextRecord);
-    updatePetIntakeChart(records);
-    const feedback = document.querySelector('[data-intake-feedback]');
-    if (feedback) feedback.textContent = addButton ? `${kind === 'food' ? 'Food' : 'Water'} intake added.` : `${kind === 'food' ? 'Food' : 'Water'} intake removed.`;
-  });
+    const feedback = cards.closest('.pet-care-panel')?.querySelector('[data-intake-feedback]');
+    const label = kind === 'food' ? 'Food' : kind === 'water' ? 'Water' : 'Medicine or supplement';
+    if (feedback) feedback.textContent = addButton ? `${label} intake added.` : `${label} intake removed.`;
+  }));
   recordForm?.addEventListener('submit', (event) => {
     event.preventDefault();
     const feedback = recordForm.querySelector('.form-feedback');
@@ -438,6 +814,66 @@ export function setupPetCarePages() {
     feedback.textContent = 'Today’s exercise record saved.';
     feedback.classList.add('visible');
   });
+}
+
+function setupMedicineReminderScheduler() {
+  if (medicineReminderInterval) return;
+  const scan = () => {
+    const now = Date.now();
+    const today = localPetDate();
+    loadPetProfiles().forEach((pet) => {
+      const settings = loadPetReminders(pet.id);
+      if (settings.showInAssistant?.medicine === false) return;
+      let changed = false;
+      const medicines = medicineDetailsList(settings).map((medicine) => {
+        if (!medicine?.name || !medicine.startDate || !medicine.endDate || today < medicine.startDate || today > medicine.endDate) return medicine;
+        const interval = Math.max(1, Number(medicine.frequencyInterval) || parseMedicineFrequency(medicine.frequency).interval);
+        const unit = medicine.frequencyUnit || parseMedicineFrequency(medicine.frequency).unit;
+        const cadenceMs = interval * (unit === 'hours' ? 60 * 60 * 1000 : 24 * 60 * 60 * 1000);
+        const anchor = Date.parse(medicine.scheduleAnchorAt || medicine.savedAt || '');
+        if (!Number.isFinite(anchor)) return medicine;
+        const lastReminder = Date.parse(medicine.lastReminderAt || '');
+        const dueAt = Number.isFinite(lastReminder) ? lastReminder + cadenceMs : anchor + cadenceMs;
+        if (now < dueAt) return medicine;
+        const message = `${medicine.name}${medicine.dosage ? ` · ${medicine.dosage}` : ''} is due for ${pet.name}.`;
+        let delivered = false;
+        if (window.Notification?.permission === 'granted') {
+          try {
+            const notification = new Notification('Medicine & Supplement Reminder', { body: message, tag: `furgo-medicine-${pet.id}-${medicine.id}` });
+            notification.onclick = () => { window.focus(); window.location.hash = `#pet-record?id=${encodeURIComponent(pet.id)}`; notification.close(); };
+            delivered = true;
+          } catch { /* Fall back to an in-app reminder when native notifications are unavailable. */ }
+        }
+        if (!delivered && !document.hidden) {
+          showMedicineReminderToast(message, pet.id);
+          delivered = true;
+        }
+        if (!delivered) return medicine;
+        changed = true;
+        return { ...medicine, lastReminderAt: new Date(now).toISOString() };
+      });
+      if (changed) savePetReminders(pet.id, { ...settings, medicines, medicine: medicines[0] || null });
+    });
+  };
+  scan();
+  medicineReminderInterval = window.setInterval(scan, 30_000);
+}
+
+function showMedicineReminderToast(message, petId) {
+  let toast = document.querySelector('[data-medicine-reminder-toast]');
+  if (!toast) {
+    toast = document.createElement('div');
+    toast.className = 'pet-medicine-reminder-toast';
+    toast.dataset.medicineReminderToast = '';
+    toast.setAttribute('role', 'status');
+    toast.setAttribute('aria-live', 'polite');
+    document.body.append(toast);
+  }
+  toast.innerHTML = `<span>${escapeHTML(message)}</span><button type="button" data-open-medicine-intake>Log Intake</button><button type="button" data-dismiss-medicine-toast aria-label="Dismiss reminder">×</button>`;
+  toast.querySelector('[data-open-medicine-intake]').onclick = () => { window.location.hash = `#pet-record?id=${encodeURIComponent(petId)}`; toast.remove(); };
+  toast.querySelector('[data-dismiss-medicine-toast]').onclick = () => toast.remove();
+  window.clearTimeout(Number(toast.dataset.timeoutId));
+  toast.dataset.timeoutId = String(window.setTimeout(() => toast.remove(), 12_000));
 }
 
 function setupPetExerciseTracker() {
