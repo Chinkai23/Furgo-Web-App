@@ -20,7 +20,7 @@ import { marketplaceCartPage, marketplaceCheckoutPage } from './pages/cart.js';
 import { adminMarketplaceManagePage, adminMarketplacePage, adminMarketplaceProductsPage } from './pages/admin-marketplace.js';
 import { marketplaceSupplierPage, marketplaceSupplierProductEditPage, matchesSupplierOrderStatus, supplierDefaultCourierStorageKey, supplierOrderRows, supplierTrackingForm, supplierProductRows } from './pages/marketplace-supplier.js';
 import { setupPortalNotifications } from './portal-notifications.js';
-import { loadMarketplaceCart, loadMarketplaceCartSelection, loadMarketplaceFavorites, loadMarketplaceOfferSettings, loadMarketplaceOrders, loadMarketplaceProducts, loadMarketplaceSubscriptionCart, loadMarketplaceSubscriptions, marketplaceCartKey, marketplaceCartLineKey, marketplaceCartSelectionKey, marketplaceCheckoutSelectionKey, marketplaceFavoritesKey, marketplaceLine, marketplaceOfferSettingsKey, marketplaceOrdersKey, marketplaceProductsKey, marketplaceSubscriptionCartKey, marketplaceSubscriptionsKey, marketplaceSubscriptionLine, safeMarketplaceImage } from './pages/marketplace-data.js';
+import { loadMarketplaceCart, loadMarketplaceCartSelection, loadMarketplaceFavorites, loadMarketplaceOfferSettings, loadMarketplaceOrders, loadMarketplaceProducts, loadMarketplaceSubscriptionCart, loadMarketplaceSubscriptions, marketplaceCartKey, marketplaceCartLineKey, marketplaceCartSelectionKey, marketplaceCheckoutSelectionKey, marketplaceFavoritesKey, marketplaceLine, marketplaceOfferSettingsKey, marketplaceProductsKey, marketplaceSubscriptionCartKey, marketplaceSubscriptionsKey, marketplaceSubscriptionLine, safeMarketplaceImage } from './pages/marketplace-data.js';
 import { marketplaceSubscriptionsPage } from './pages/marketplace-subscriptions.js';
 import { petProfileEditPage } from './pages/pet-profile.js';
 import { petAvatarPage, petDataPage, petProfileAddCardPage, petProfileOverviewPage, petRecordPage, petReminderPage, petVaccinationPage, setupPetCarePages } from './pages/pet-care-pages.js';
@@ -57,7 +57,7 @@ import { localFinderFavoritesPage, localFinderListPage, localFinderPage, localFi
 import { adminLocalFinderPage, setupAdminLocalFinder } from './pages/admin-local-finder.js';
 import { supabase, toMalaysianE164 } from './supabase.js';
 import { refreshSharedOutlets } from './pages/outlet-directory.js';
-import { cacheSyncedRecords, loadCloudAppData, refreshMarketplaceCatalogFromDatabase, saveMarketplaceOrder, saveOrderRecords, saveSharedAppData } from './app-data-sync.js';
+import { cacheSyncedRecords, loadCloudAppData, refreshMarketplaceCatalogFromDatabase, saveMarketplaceOrder, saveSharedAppData, updateMarketplaceOrder } from './app-data-sync.js';
 import { refreshFurgoCoinBalance } from './coin-wallet.js';
 import { startQRScanner } from './qr-scanner.js';
 import { adminSellerManagementPage, adminSellerPayoutFeePage, sellerPortalPage, setupAdminSellerManagement, setupAdminSellerPayoutFee, setupSellerPortal } from './pages/seller-portal.js';
@@ -3050,65 +3050,74 @@ function setupAdminMarketplace() {
     try { await navigator.clipboard.writeText(text); toastAdmin('Store order details copied.'); }
     catch { const field = document.createElement('textarea'); field.value = text; document.body.append(field); field.select(); document.execCommand('copy'); field.remove(); toastAdmin('Store order details copied.'); }
   }));
-  document.querySelectorAll('[data-tracking-form]').forEach((form) => form.addEventListener('submit', (event) => {
+  document.querySelectorAll('[data-tracking-form]').forEach((form) => form.addEventListener('submit', async (event) => {
     event.preventDefault();
     if (!form.reportValidity()) return;
     const orders = loadMarketplaceOrders();
     const order = orders.find((item) => item.id === form.dataset.trackingForm);
     if (!order) return;
     if (order.paymentStatus !== 'Paid') { toastAdmin('Verify the payment before shipping this order.'); return; }
-    order.courier = form.elements.courier.value.trim();
-    order.trackingNumber = form.elements.trackingNumber.value.trim();
-    order.trackingUrl = form.elements.trackingUrl.value.trim();
-    order.status = 'Shipped';
-    order.shippedAt = new Date().toISOString();
-    localStorage.setItem(marketplaceOrdersKey, JSON.stringify(orders));
-    void recordAdminAction('order_status_updated', 'marketplace_order', order.reference || order.id, { status: order.status });
+    try {
+      await updateMarketplaceOrder(order.id, form.closest('[data-order-version]')?.dataset.orderVersion, 'ship', {
+        courier: form.elements.courier.value.trim(),
+        trackingNumber: form.elements.trackingNumber.value.trim(),
+        trackingUrl: form.elements.trackingUrl.value.trim(),
+      });
+    } catch (error) { toastAdmin(`Shipment could not be saved online: ${error.message || 'Please try again.'}`); return; }
+    void recordAdminAction('order_status_updated', 'marketplace_order', order.reference || order.id, { status: 'Shipped' });
     render();
   }));
-  document.querySelectorAll('[data-complete-order]').forEach((button) => button.addEventListener('click', () => {
+  document.querySelectorAll('[data-complete-order]').forEach((button) => button.addEventListener('click', async () => {
     const orders = loadMarketplaceOrders();
     const order = orders.find((item) => item.id === button.dataset.completeOrder);
-    if (order) { order.status = 'Delivered'; order.deliveredAt = new Date().toISOString(); localStorage.setItem(marketplaceOrdersKey, JSON.stringify(orders)); void recordAdminAction('order_status_updated', 'marketplace_order', order.reference || order.id, { status: order.status }); render(); }
+    if (!order) return;
+    button.disabled = true;
+    try { await updateMarketplaceOrder(order.id, button.closest('[data-order-version]')?.dataset.orderVersion, 'deliver'); }
+    catch (error) { button.disabled = false; toastAdmin(`Delivery could not be saved online: ${error.message || 'Please try again.'}`); return; }
+    void recordAdminAction('order_status_updated', 'marketplace_order', order.reference || order.id, { status: 'Delivered' });
+    render();
   }));
   document.querySelectorAll('[data-approve-payment], [data-reject-payment]').forEach((button) => button.addEventListener('click', async () => {
     const orders = loadMarketplaceOrders();
     const orderId = button.dataset.approvePayment || button.dataset.rejectPayment;
     const order = orders.find((item) => item.id === orderId);
     if (!order) return;
-    if (button.hasAttribute('data-reject-payment')) {
-      const reason = window.prompt('Enter a reason for rejecting this transfer:');
-      if (!reason?.trim()) return;
-      order.paymentStatus = 'Payment Rejected'; order.status = 'Payment Rejected'; order.paymentRejectionReason = reason.trim();
-    } else {
-      order.paymentStatus = 'Paid'; order.status = 'Paid / Processing';
-    }
-    try { await saveOrderRecords(marketplaceOrdersKey, order, orders); }
-    catch (error) { toastAdmin(`Payment decision could not be saved online: ${error.message || 'Please try again.'}`); return; }
+    const reject = button.hasAttribute('data-reject-payment');
+    const reason = reject ? window.prompt('Enter a reason for rejecting this transfer:')?.trim() : '';
+    if (reject && !reason) return;
+    button.disabled = true;
+    try {
+      await updateMarketplaceOrder(order.id, button.closest('[data-order-version]')?.dataset.orderVersion,
+        reject ? 'reject_payment' : 'approve_payment', reject ? { reason } : {});
+    } catch (error) { button.disabled = false; toastAdmin(`Payment decision could not be saved online: ${error.message || 'Please try again.'}`); return; }
     try { await refreshMarketplaceCatalogFromDatabase(); } catch (refreshError) { console.warn('Marketplace stock cache refresh deferred:', refreshError); }
-    void recordAdminAction(button.hasAttribute('data-reject-payment') ? 'marketplace_payment_rejected' : 'marketplace_payment_approved', 'marketplace_order', order.reference || order.id, { status: order.paymentStatus });
+    void recordAdminAction(reject ? 'marketplace_payment_rejected' : 'marketplace_payment_approved', 'marketplace_order', order.reference || order.id, { status: reject ? 'Payment Rejected' : 'Paid' });
     render();
   }));
   document.querySelectorAll('[data-order-receipt]').forEach((input) => input.addEventListener('change', async () => {
+    const version = input.closest('[data-order-version]')?.dataset.orderVersion;
     const file = input.files?.[0];
     if (!file || file.size > 1.5 * 1024 * 1024) { toastAdmin('Choose a receipt no larger than 1.5 MB.'); return; }
     if (!file.type.startsWith('image/') && file.type !== 'application/pdf' && !file.name.toLowerCase().endsWith('.pdf')) { toastAdmin('Upload a receipt image or PDF.'); return; }
-    const data = await new Promise((resolve) => { const reader = new FileReader(); reader.onload = () => resolve(reader.result); reader.onerror = () => resolve(''); reader.readAsDataURL(file); });
-    const orders = loadMarketplaceOrders();
-    const order = orders.find((item) => item.id === input.dataset.orderReceipt);
-    if (order && data) {
-      const previousStatus = customerOrderStatus({ ...order, serviceId: 'marketplace' });
-      order.receipt = { name: file.name, data, uploadedAt: new Date().toISOString(), previousStatus };
-      order.adminReceiptUploadedAt = order.receipt.uploadedAt;
-      if (!['Shipped', 'Completed', 'Cancelled'].includes(previousStatus)) {
-        order.status = 'Received Order';
-        order.adminStatus = 'Received Order';
-        order.statusHistory = [...(order.statusHistory || []), { status: 'Received Order', previousStatus, changedAt: order.adminReceiptUploadedAt, changedBy: 'Admin receipt upload' }];
-      }
-      try { await saveOrderRecords(marketplaceOrdersKey, order, orders); }
-      catch (error) { toastAdmin(`Receipt could not be saved online: ${error.message || 'Please try again.'}`); return; }
+    const order = loadMarketplaceOrders().find((item) => item.id === input.dataset.orderReceipt);
+    if (!order) return;
+    const receiptFile = file.type.startsWith('image/') || file.type === 'application/pdf' ? file : new Blob([file], { type: 'application/pdf' });
+    input.disabled = true;
+    try {
+      const data = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = () => reject(new Error('The receipt file could not be read.'));
+        reader.readAsDataURL(receiptFile);
+      });
+      await updateMarketplaceOrder(order.id, version, 'save_receipt', { name: file.name, data });
       void recordAdminAction('receipt_uploaded', 'marketplace_order', order.reference || order.id);
       render();
+    } catch (error) {
+      toastAdmin(`Receipt could not be saved online: ${error.message || 'Please try again.'}`);
+    } finally {
+      input.value = '';
+      input.disabled = false;
     }
   }));
   document.querySelector('[data-export-market-csv]')?.addEventListener('click', () => {

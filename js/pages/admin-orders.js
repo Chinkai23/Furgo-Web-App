@@ -6,7 +6,7 @@ import { applyCheckInScan, extractCheckInCode, formatCheckInToken, previewCheckI
 import { mountDriverLocation } from './driver-location.js';
 import { recordAdminAction } from '../admin-audit.js';
 import { startQRScanner } from '../qr-scanner.js';
-import { saveOrderRecords } from '../app-data-sync.js';
+import { saveOrderRecords, updateMarketplaceOrder } from '../app-data-sync.js';
 import { supabase } from '../supabase.js';
 import { customerOrderStatus, statusCategory } from '../order-status.js';
 import { adminOrderProgressMarkup, adminOrderStatusControl, canMarkOrderNoShow, isOrderCurrentToday } from '../admin-order-ui.js';
@@ -288,7 +288,7 @@ function renderAdminOrdersPage(routeParams = new URLSearchParams()) {
     const summary = order.summary || [order.packageName || order.roomName || order.productName, order.date || order.checkIn || order.bookingDate, order.time, order.outlet || order.location].filter(Boolean).join(' · ');
     const receiptSummary = currentOrderView ? '' : `<p class="admin-order-receipt-summary">Receipt: ${escapeHTML(receiptStatusLabel(order))}</p>`;
     const commonSummary = `<div class="my-order-card-top"><span class="my-order-service-label">${escapeHTML(order.serviceLabel)}</span><b class="my-order-status admin-orders-status-pill ${statusTone}">${escapeHTML(order.adminStatus)}</b></div><h2>${escapeHTML(title)}</h2><p class="my-order-summary">${escapeHTML(summary || 'Order details will appear here.')}</p>${receiptSummary}<div class="my-order-card-bottom"><small>${[reference, date ? new Date(date).toLocaleDateString('en-MY', { day: 'numeric', month: 'short', year: 'numeric' }) : ''].filter(Boolean).map(escapeHTML).join(' · ')}</small><strong>MYR ${Number(order.totalAmount || order.total || 0).toFixed(2)}</strong></div>`;
-    const dataAttributes = `data-order-key="${escapeHTML(order.storageKey)}" data-order-id="${escapeHTML(order.id)}"`;
+    const dataAttributes = `data-order-key="${escapeHTML(order.storageKey)}" data-order-id="${escapeHTML(order.id)}"${order.serviceId === 'marketplace' ? ` data-order-version="${escapeHTML(order._orderVersion ?? '')}"` : ''}`;
     if (currentOrderView) {
       const target = `#admin-orders?service=${encodeURIComponent(order.serviceId)}&status=all&order=${encodeURIComponent(order.id)}&key=${encodeURIComponent(order.storageKey)}`;
       return `<a class="my-order-card admin-orders-card admin-current-order-card" href="${target}" ${dataAttributes}><div class="my-order-card-summary">${commonSummary}<span class="my-order-expand-hint">Open Order Details <span aria-hidden="true">→</span></span></div></a>`;
@@ -574,19 +574,23 @@ export function setupAdminOrders() {
       }
     }
     const previousStatus = customerOrderStatus({ ...order, serviceId });
-    const now = new Date().toISOString();
-    order.status = nextStatus;
-    order.adminStatus = nextStatus;
-    if (nextStatus === 'No-Show') order.noShowAt = now;
-    if (nextStatus === 'Checked-In') order.checkedInAt = order.checkedInAt || now;
-    if (nextStatus === 'Completed') order.completedAt = now;
-    if (nextStatus === 'Cancelled') order.cancelledAt = now;
-    let actor = 'Admin';
-    try { const profile = JSON.parse(sessionStorage.getItem('furgo-demo-user-profile') || '{}'); if (profile.name) actor = `${profile.name} (${profile.role || 'Admin'})`; } catch { /* keep generic admin label */ }
-    order.statusHistory = [...(order.statusHistory || []), { status: nextStatus, previousStatus, changedAt: now, changedBy: actor }];
     select.disabled = true;
     try {
-      await saveOrderRecords(key, order, records);
+      if (key === marketplaceOrdersKey) {
+        await updateMarketplaceOrder(id, select.closest('[data-order-version]')?.dataset.orderVersion, 'status', { status: nextStatus });
+      } else {
+        const now = new Date().toISOString();
+        order.status = nextStatus;
+        order.adminStatus = nextStatus;
+        if (nextStatus === 'No-Show') order.noShowAt = now;
+        if (nextStatus === 'Checked-In') order.checkedInAt = order.checkedInAt || now;
+        if (nextStatus === 'Completed') order.completedAt = now;
+        if (nextStatus === 'Cancelled') order.cancelledAt = now;
+        let actor = 'Admin';
+        try { const profile = JSON.parse(sessionStorage.getItem('furgo-demo-user-profile') || '{}'); if (profile.name) actor = `${profile.name} (${profile.role || 'Admin'})`; } catch { /* keep generic admin label */ }
+        order.statusHistory = [...(order.statusHistory || []), { status: nextStatus, previousStatus, changedAt: now, changedBy: actor }];
+        await saveOrderRecords(key, order, records);
+      }
       void recordAdminAction('order_status_updated', 'order', order.reference || id, { previousStatus, status: nextStatus });
       window.dispatchEvent(new Event('hashchange'));
     } catch (error) {
@@ -686,29 +690,31 @@ export function setupAdminOrders() {
     const orders = readOrders(key);
     const order = orders.find((item) => String(item.id) === id);
     if (!order) { window.alert('The order could not be found. Refresh and try again.'); return; }
-    const previousStatus = order.receipt?.previousStatus || getAdminStatus({ ...order, serviceId: key === marketplaceOrdersKey ? 'marketplace' : order.serviceId });
-    const previousPaymentStatus = order.receipt?.previousPaymentStatus ?? order.paymentStatus;
-    const uploadedAt = new Date().toISOString();
-    order.receipt = {
+    const receipt = {
       name: `${receiptDocument.receiptNo.replace(/[^a-z0-9-_]+/gi, '-') || 'furgo-receipt'}.pdf`,
       type: receiptDocument.receiptType,
-      uploadedAt,
-      previousStatus,
-      previousPaymentStatus,
       document: receiptDocument,
     };
-    const taxiTripStarted = Boolean(order.includeTaxi || order.taxi?.pickup || order.taxi?.dropoff)
-      && !['Scheduled', 'Assigned'].includes(order.taxiProgress?.status || 'Scheduled');
-    if ((key === marketplaceOrdersKey || !taxiTripStarted) && !['Checked-In', 'Completed', 'Cancelled', 'Shipped'].includes(previousStatus)) {
-      order.status = 'Received Order';
-      order.adminStatus = 'Received Order';
-      order.statusHistory = [...(order.statusHistory || []), { status: 'Received Order', previousStatus, changedAt: uploadedAt, changedBy: 'Generated receipt' }];
-    }
     button.disabled = true;
     const feedback = form.querySelector('[data-generated-receipt-feedback]');
     if (feedback) feedback.textContent = 'Saving receipt details…';
     try {
-      await saveOrderRecords(key, order, orders);
+      if (key === marketplaceOrdersKey) {
+        await updateMarketplaceOrder(id, card.dataset.orderVersion, 'save_receipt', receipt);
+      } else {
+        const previousStatus = order.receipt?.previousStatus || getAdminStatus(order);
+        const previousPaymentStatus = order.receipt?.previousPaymentStatus ?? order.paymentStatus;
+        const uploadedAt = new Date().toISOString();
+        order.receipt = { ...receipt, uploadedAt, previousStatus, previousPaymentStatus };
+        const taxiTripStarted = Boolean(order.includeTaxi || order.taxi?.pickup || order.taxi?.dropoff)
+          && !['Scheduled', 'Assigned'].includes(order.taxiProgress?.status || 'Scheduled');
+        if (!taxiTripStarted && !['Checked-In', 'Completed', 'Cancelled', 'Shipped'].includes(previousStatus)) {
+          order.status = 'Received Order';
+          order.adminStatus = 'Received Order';
+          order.statusHistory = [...(order.statusHistory || []), { status: 'Received Order', previousStatus, changedAt: uploadedAt, changedBy: 'Generated receipt' }];
+        }
+        await saveOrderRecords(key, order, orders);
+      }
       void recordAdminAction('receipt_generated', 'order', order.reference || id, { generated: true, receiptNo: receiptDocument.receiptNo });
       window.dispatchEvent(new Event('hashchange'));
     } catch (error) {
@@ -725,20 +731,26 @@ export function setupAdminOrders() {
     const orders = readOrders(key);
     const order = orders.find((item) => String(item.id) === id);
     if (!order?.receipt) return;
-    const previousStatus = order.receipt.previousStatus;
-    const previousPaymentStatus = order.receipt.previousPaymentStatus;
-    delete order.receipt;
-    if (previousPaymentStatus !== undefined) order.paymentStatus = previousPaymentStatus;
-    if (getAdminStatus({ ...order, receipt: null }) === 'Received Order' && previousStatus) {
-      order.status = previousStatus;
-      order.adminStatus = previousStatus;
-      order.statusHistory = [...(order.statusHistory || []), { status: previousStatus, previousStatus: 'Received Order', changedAt: new Date().toISOString(), changedBy: 'Admin receipt removal' }];
-    }
+    if (key === marketplaceOrdersKey) button.disabled = true;
     try {
-      await saveOrderRecords(key, order, orders);
+      if (key === marketplaceOrdersKey) {
+        await updateMarketplaceOrder(id, card.dataset.orderVersion, 'remove_receipt');
+      } else {
+        const previousStatus = order.receipt.previousStatus;
+        const previousPaymentStatus = order.receipt.previousPaymentStatus;
+        delete order.receipt;
+        if (previousPaymentStatus !== undefined) order.paymentStatus = previousPaymentStatus;
+        if (getAdminStatus({ ...order, receipt: null }) === 'Received Order' && previousStatus) {
+          order.status = previousStatus;
+          order.adminStatus = previousStatus;
+          order.statusHistory = [...(order.statusHistory || []), { status: previousStatus, previousStatus: 'Received Order', changedAt: new Date().toISOString(), changedBy: 'Admin receipt removal' }];
+        }
+        await saveOrderRecords(key, order, orders);
+      }
       void recordAdminAction('receipt_removed', 'order', order.reference || id);
       window.dispatchEvent(new Event('hashchange'));
     } catch (error) {
+      if (key === marketplaceOrdersKey) button.disabled = false;
       window.alert(`The receipt could not be synced: ${error.message}`);
     }
   }));

@@ -2,6 +2,8 @@
 // Function: Keep prototype customer state and Admin-managed catalogs in shared Supabase storage.
 import { supabase } from './supabase.js';
 
+const marketplaceOrdersKey = 'furgo-demo-marketplace-orders';
+
 const sharedKeys = new Set([
   'furgo-demo-hotel-settings',
   'furgo-demo-daycare-settings',
@@ -32,7 +34,7 @@ const customerKeys = new Set([
 ]);
 
 const operationKeys = new Set([
-  'furgo-demo-marketplace-orders',
+  marketplaceOrdersKey,
   'furgo-demo-hotel-bookings',
   'furgo-demo-daycare-bookings',
   'furgo-demo-daycare-orders',
@@ -40,7 +42,7 @@ const operationKeys = new Set([
   'furgo-demo-driver-locations',
 ]);
 const receiptOrderKeys = new Set([
-  'furgo-demo-marketplace-orders',
+  marketplaceOrdersKey,
   'furgo-demo-grooming-bookings',
   'furgo-demo-hotel-bookings',
   'furgo-demo-daycare-bookings',
@@ -49,7 +51,7 @@ const receiptOrderKeys = new Set([
 ]);
 const operationObjectKeys = new Set(['furgo-demo-check-in-tokens', 'furgo-demo-driver-locations']);
 const dedicatedOperationKeys = new Set([
-  'furgo-demo-marketplace-orders',
+  marketplaceOrdersKey,
   'furgo-demo-hotel-bookings',
   'furgo-demo-daycare-bookings',
 ]);
@@ -66,7 +68,7 @@ const managerSharedSettingsKeys = new Set([
 ]);
 const executiveMarketplaceKeys = new Set(['furgo-demo-marketplace-products']);
 const updateOnlyOrderRoles = new Set(['staff', 'executive', 'manager']);
-const staffLegacyOrderKeys = new Set(['furgo-demo-marketplace-orders', 'furgo-demo-hotel-bookings', 'furgo-demo-daycare-bookings', 'furgo-demo-daycare-orders']);
+const staffLegacyOrderKeys = new Set([marketplaceOrdersKey, 'furgo-demo-hotel-bookings', 'furgo-demo-daycare-bookings', 'furgo-demo-daycare-orders']);
 
 const allSyncedKeys = new Set([...sharedKeys, ...customerKeys, ...operationKeys]);
 const marketplaceSupplierContactsKey = 'furgo-demo-marketplace-suppliers';
@@ -91,6 +93,7 @@ let dedicatedTablesReady = false;
 function compactReceiptOrder(order) {
   const receipt = order?.receipt;
   if (!Object.prototype.hasOwnProperty.call(receipt || {}, 'data')) return order;
+  if (receipt.source === 'upload' && !receipt.document) return order;
   const hasPdfPayload = receipt.document
     || /^data:application\/pdf(?:;|,)/i.test(String(receipt.data || ''))
     || /\.pdf$/i.test(String(receipt.name || ''));
@@ -150,6 +153,8 @@ function readLocal(key) {
 }
 
 async function writeRemote(key, value) {
+  // The Marketplace order cache is read-only outside the order RPCs.
+  if (key === marketplaceOrdersKey) return;
   value = compactReceiptRecords(key, value);
   const scope = getScope(key);
   if (!scope || !activeUserId) return;
@@ -190,14 +195,20 @@ function safeDate(value) {
   return /^\d{4}-\d{2}-\d{2}$/.test(String(value || '')) ? value : null;
 }
 
-async function writeDedicatedRecord(key, record, ownerId) {
-  if (!record || !ownerId || !record.id) return;
+// Preserve the existing first-login import for old customer orders. This path
+// only fills missing rows and cannot update or delete an existing order or line.
+async function restoreLegacyMarketplaceOrder(record, ownerId) {
   record = compactReceiptOrder(record);
   const id = String(record.id);
-  const createdAt = safeTimestamp(record.createdAt);
-  if (key === 'furgo-demo-marketplace-orders') {
-    const { _cloudOwnerId, userId, items = [], ...details } = record;
-    const payload = {
+  const { _cloudOwnerId, _orderVersion, userId, items = [], ...details } = record;
+  const { data: existing, error: lookupError } = await supabase.from('marketplace_orders').select('id').eq('id', id).maybeSingle();
+  if (lookupError) throw lookupError;
+  if (existing) {
+    const { data: existingItems, error } = await supabase.from('marketplace_order_items').select('line_number').eq('order_id', id).limit(1);
+    if (error) throw error;
+    if (existingItems?.length) return;
+  } else {
+    const { error } = await supabase.from('marketplace_orders').insert({
       id,
       user_id: ownerId,
       reference: String(record.reference || id),
@@ -206,44 +217,26 @@ async function writeDedicatedRecord(key, record, ownerId) {
       total: Number(record.total) || 0,
       outlet: String(record.outlet || record.fulfillmentOutlet || ''),
       details,
-      created_at: createdAt,
+      created_at: safeTimestamp(record.createdAt),
       updated_at: new Date().toISOString(),
-    };
-    let writeResult;
-    if (activeRole === 'customer') {
-      const { data: existing, error: lookupError } = await supabase.from('marketplace_orders').select('id').eq('id', id).maybeSingle();
-      if (lookupError) throw lookupError;
-      if (existing) {
-        const { data: existingItems, error: itemLookupError } = await supabase.from('marketplace_order_items').select('line_number').eq('order_id', id).limit(1);
-        if (itemLookupError) throw itemLookupError;
-        // A previous attempt may have inserted the order header but failed before
-        // its item rows. Recreate those rows so the store RPC can see the order.
-        if (existingItems?.length) return;
-        writeResult = { error: null };
-      } else writeResult = await supabase.from('marketplace_orders').insert(payload);
-    } else if (updateOnlyOrderRoles.has(activeRole)) {
-      writeResult = await supabase.from('marketplace_orders').update(payload).eq('id', id);
-    } else {
-      writeResult = await supabase.from('marketplace_orders').upsert(payload, { onConflict: 'id' });
-    }
-    const { error } = writeResult;
+    });
     if (error) throw error;
-    if (updateOnlyOrderRoles.has(activeRole)) return;
-    if (activeRole !== 'customer') {
-      const { error: removeItemsError } = await supabase.from('marketplace_order_items').delete().eq('order_id', id);
-      if (removeItemsError) throw removeItemsError;
-    }
-    if (Array.isArray(items) && items.length) {
-      const { error: itemError } = await supabase.from('marketplace_order_items').insert(items.map((item, index) => ({
-        order_id: id,
-        line_number: index + 1,
-        item,
-      })));
-      if (itemError) throw itemError;
-    }
-    return;
   }
+  if (Array.isArray(items) && items.length) {
+    const { error } = await supabase.from('marketplace_order_items').insert(items.map((item, index) => ({
+      order_id: id,
+      line_number: index + 1,
+      item,
+    })));
+    if (error) throw error;
+  }
+}
 
+async function writeDedicatedRecord(key, record, ownerId) {
+  if (!record || !ownerId || !record.id) return;
+  record = compactReceiptOrder(record);
+  const id = String(record.id);
+  const createdAt = safeTimestamp(record.createdAt);
   const { _cloudOwnerId, userId, ...details } = record;
   if (key === 'furgo-demo-hotel-bookings') {
     const payload = {
@@ -297,7 +290,7 @@ async function writeDedicatedOperations(key, value) {
 
 // Saves a service booking to Supabase before updating the browser cache, matching Grooming's submit flow.
 export async function saveDedicatedBooking(key, booking, records) {
-  if (!dedicatedOperationKeys.has(key) || !Array.isArray(records)) throw new Error('This booking type cannot be synchronized.');
+  if (key === marketplaceOrdersKey || !dedicatedOperationKeys.has(key) || !Array.isArray(records)) throw new Error('This booking type cannot be synchronized.');
   if (activeUserId) {
     if (dedicatedTablesReady) await writeDedicatedRecord(key, booking, booking.userId || activeUserId);
     else await writeRemote(key, records);
@@ -332,14 +325,35 @@ export async function saveMarketplaceOrder(order, records) {
   }
   if (!originalSetItem) originalSetItem = Storage.prototype.setItem;
   applyingRemoteData = true;
-  try { originalSetItem.call(localStorage, 'furgo-demo-marketplace-orders', JSON.stringify(compactReceiptRecords('furgo-demo-marketplace-orders', nextRecords))); }
+  try { originalSetItem.call(localStorage, marketplaceOrdersKey, JSON.stringify(compactReceiptRecords(marketplaceOrdersKey, nextRecords))); }
   finally { applyingRemoteData = false; }
-  window.dispatchEvent(new StorageEvent('storage', { key: 'furgo-demo-marketplace-orders' }));
+  window.dispatchEvent(new StorageEvent('storage', { key: marketplaceOrdersKey }));
 }
 
-// Writes order status/receipt changes to the shared order source before refreshing this browser's cache.
+// Admin actions submit only the intended change and the version rendered in the UI.
+export async function updateMarketplaceOrder(orderId, expectedVersion, action, payload = {}) {
+  const version = Number(expectedVersion);
+  if (expectedVersion == null || expectedVersion === '' || !Number.isSafeInteger(version) || version < 0) {
+    throw new Error('Refresh the order before making changes.');
+  }
+  const { data, error } = await supabase.rpc('update_admin_marketplace_order', {
+    p_order_id: orderId,
+    p_expected_version: version,
+    p_action: action,
+    p_payload: payload,
+  });
+  if (error) throw error;
+  const confirmedVersion = Number(data?.order_version);
+  if (data?.id !== orderId || data?.order_version == null || !Number.isSafeInteger(confirmedVersion) || confirmedVersion < version) {
+    throw new Error('The order update could not be confirmed. Refresh the order before trying again.');
+  }
+  try { applyDedicatedRow(marketplaceOrdersKey, data); }
+  catch (cacheError) { console.warn('The Marketplace order was saved, but its local cache could not be updated:', cacheError); }
+}
+
+// Writes service order status/receipt changes before refreshing this browser's cache.
 export async function saveOrderRecords(key, order, records) {
-  if (!key || !order?.id || !Array.isArray(records)) throw new Error('This order update cannot be synchronized.');
+  if (!key || key === marketplaceOrdersKey || !order?.id || !Array.isArray(records)) throw new Error('This order update cannot be synchronized.');
   order = compactReceiptOrder(order);
   records = compactReceiptRecords(key, records);
   if (activeUserId) {
@@ -386,7 +400,8 @@ export async function refreshMarketplaceCatalogFromDatabase({ notify = true } = 
 
 function dedicatedRecordFromRow(key, row, items = []) {
   const record = { ...(row.details || {}), id: row.id, userId: row.user_id, reference: row.reference, status: row.status, createdAt: row.created_at };
-  if (key === 'furgo-demo-marketplace-orders') {
+  if (key === marketplaceOrdersKey) {
+    record._orderVersion = row.order_version;
     record.paymentStatus = row.payment_status;
     record.total = Number(row.total) || 0;
     record.outlet = row.outlet || record.outlet || '';
@@ -453,7 +468,7 @@ async function loadDedicatedOperations(userId, role) {
     items.forEach((item) => { item.returnRequest = returnsByLine.get(`${orderId}:${item.lineNumber}`) || null; });
   }
   const values = new Map([
-    ['furgo-demo-marketplace-orders', (marketResult.data || []).map((row) => dedicatedRecordFromRow('furgo-demo-marketplace-orders', row, itemsByOrder.get(row.id) || []))],
+    [marketplaceOrdersKey, (marketResult.data || []).map((row) => dedicatedRecordFromRow(marketplaceOrdersKey, row, itemsByOrder.get(row.id) || []))],
     ['furgo-demo-hotel-bookings', (hotelResult.data || []).map((row) => dedicatedRecordFromRow('furgo-demo-hotel-bookings', row))],
     ['furgo-demo-daycare-bookings', (daycareResult.data || []).map((row) => dedicatedRecordFromRow('furgo-demo-daycare-bookings', row))],
   ]);
@@ -470,7 +485,10 @@ async function loadDedicatedOperations(userId, role) {
     for (const [key, records] of values) {
       if (records.length) continue;
       const localRecords = Array.isArray(localValues.get(key)) ? localValues.get(key).filter(belongsToCustomer) : [];
-      for (const record of localRecords) await writeDedicatedRecord(key, record, userId);
+      for (const record of localRecords) {
+        if (key === marketplaceOrdersKey && record.id) await restoreLegacyMarketplaceOrder(record, userId);
+        else if (key !== marketplaceOrdersKey) await writeDedicatedRecord(key, record, userId);
+      }
       if (localRecords.length) values.set(key, localRecords.map((record) => ({ ...record, userId })));
     }
   }
@@ -484,22 +502,29 @@ async function loadDedicatedOperations(userId, role) {
   return values;
 }
 
-function applyDedicatedRow(key, row, items = [], removed = false) {
+function applyDedicatedRow(key, row, items, removed = false) {
   if (!row?.id) return;
-  const current = readLocal(key);
-  const records = (Array.isArray(current) ? current : []).filter((item) => String(item.id) !== String(row.id));
-  if (!removed) records.push(dedicatedRecordFromRow(key, row, items));
-  applyingRemoteData = true;
-  originalSetItem.call(localStorage, key, JSON.stringify(records));
-  applyingRemoteData = false;
-  window.dispatchEvent(new StorageEvent('storage', { key }));
+  const cached = readLocal(key);
+  const records = Array.isArray(cached) ? cached : [];
+  const index = records.findIndex((item) => String(item.id) === String(row.id));
+  const previous = records[index];
+  if (key === marketplaceOrdersKey && !removed && Number(previous?._orderVersion) > Number(row.order_version)) return;
+  if (removed) {
+    if (index === -1) return;
+    records.splice(index, 1);
+  } else {
+    const record = dedicatedRecordFromRow(key, row, items ?? previous?.items);
+    if (index === -1) records.push(record);
+    else records[index] = record;
+  }
+  cacheSyncedRecords(key, records);
 }
 
 async function refreshDedicatedMarketplaceOrder(orderId, removed = false) {
   const { data: order, error } = await supabase.from('marketplace_orders').select('*').eq('id', orderId).maybeSingle();
   if (error) throw error;
   if (!order) {
-    applyDedicatedRow('furgo-demo-marketplace-orders', { id: orderId }, [], true);
+    applyDedicatedRow(marketplaceOrdersKey, { id: orderId }, [], true);
     return;
   }
   const { data: items, error: itemsError } = await supabase.from('marketplace_order_items').select('line_number,item').eq('order_id', orderId).order('line_number');
@@ -512,7 +537,7 @@ async function refreshDedicatedMarketplaceOrder(orderId, removed = false) {
     refundAmount: Number(itemReturn.refund_amount) || 0, supplierResponse: itemReturn.supplier_response || '',
     decisionReason: itemReturn.decision_reason || '', requestedAt: itemReturn.requested_at, refundedAt: itemReturn.refunded_at,
   }]));
-  applyDedicatedRow('furgo-demo-marketplace-orders', order, (items || []).map((row) => ({ ...row.item, lineNumber: Number(row.line_number), returnRequest: returnByLine.get(Number(row.line_number)) || null })), removed);
+  applyDedicatedRow(marketplaceOrdersKey, order, (items || []).map((row) => ({ ...row.item, lineNumber: Number(row.line_number), returnRequest: returnByLine.get(Number(row.line_number)) || null })), removed);
 }
 
 function groupOperationsByOwner(items) {
@@ -557,7 +582,7 @@ function installStorageMirror(userId, role) {
       }
       return;
     }
-    if (this !== localStorage || !allSyncedKeys.has(key)) return;
+    if (this !== localStorage || key === marketplaceOrdersKey || !allSyncedKeys.has(key)) return;
     let parsed = value;
     try { parsed = JSON.parse(value); } catch { /* Keep ordinary string values as strings. */ }
     void writeRemote(key, parsed).catch((error) => console.warn(`Could not sync ${key} to Supabase:`, error));
@@ -568,7 +593,7 @@ function installStorageMirror(userId, role) {
       void writeMarketplaceSupplierContacts([]).catch((error) => console.warn('Could not clear marketplace store contacts in Supabase:', error));
       return;
     }
-    if (this !== localStorage || !allSyncedKeys.has(key) || !activeUserId || applyingRemoteData) return;
+    if (this !== localStorage || key === marketplaceOrdersKey || !allSyncedKeys.has(key) || !activeUserId || applyingRemoteData) return;
     if (dedicatedTablesReady && dedicatedOperationKeys.has(key)) return;
     const scope = getScope(key);
     if (scope === 'shared' && !canManageSharedKey(activeRole, key)) return;
