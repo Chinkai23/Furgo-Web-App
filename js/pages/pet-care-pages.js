@@ -4,6 +4,7 @@ import { formatPetDate, localPetDate, loadPetRecords, loadPetReminders, petServi
 import { loadGroomingBookings } from './grooming-data.js';
 import { loadHotelBookings } from './hotel-data.js';
 import { loadDaycareBookings } from './daycare-data.js';
+import { createPetReminderInboxNotification, showPortalBrowserNotification } from '../portal-notifications.js';
 
 const icon = (file) => `Image/Icon/${encodeURIComponent(file)}`;
 const getPet = (petId) => loadPetProfiles().find((pet) => String(pet.id) === String(petId)) || null;
@@ -694,12 +695,17 @@ export function setupPetCarePages() {
         milestone: reminderForm.elements['show-milestone'].checked,
         custom: reminderForm.elements['show-custom'].checked,
       },
-      customReminders: [...(customReminderList?.querySelectorAll('[data-custom-reminder-row]') || [])].map((row) => ({
-        id: row.dataset.reminderId,
-        title: row.querySelector('[data-custom-reminder-title]').value.trim(),
-        date: row.querySelector('[data-custom-reminder-date]').value,
-        time: row.querySelector('[data-custom-reminder-time]').value,
-      })).filter((reminder) => reminder.title && reminder.date),
+      customReminders: [...(customReminderList?.querySelectorAll('[data-custom-reminder-row]') || [])].map((row) => {
+        const id = row.dataset.reminderId;
+        const previousReminder = (current.customReminders || []).find((item) => String(item.id) === String(id));
+        return {
+          id,
+          title: row.querySelector('[data-custom-reminder-title]').value.trim(),
+          date: row.querySelector('[data-custom-reminder-date]').value,
+          time: row.querySelector('[data-custom-reminder-time]').value,
+          lastNotifiedDate: previousReminder?.lastNotifiedDate || '',
+        };
+      }).filter((reminder) => reminder.title && reminder.date),
       foodWeight: null,
     });
     feedback.textContent = 'Reminders and home speech bubble settings saved.';
@@ -818,42 +824,56 @@ export function setupPetCarePages() {
 
 function setupMedicineReminderScheduler() {
   if (medicineReminderInterval) return;
-  const scan = () => {
+  const scan = async () => {
     const now = Date.now();
     const today = localPetDate();
-    loadPetProfiles().forEach((pet) => {
+    for (const pet of loadPetProfiles()) {
       const settings = loadPetReminders(pet.id);
-      if (settings.showInAssistant?.medicine === false) return;
+      if (settings.showInAssistant?.medicine === false) continue;
       let changed = false;
-      const medicines = medicineDetailsList(settings).map((medicine) => {
-        if (!medicine?.name || !medicine.startDate || !medicine.endDate || today < medicine.startDate || today > medicine.endDate) return medicine;
+      const medicines = [];
+      for (const medicine of medicineDetailsList(settings)) {
+        if (!medicine?.name || !medicine.startDate || !medicine.endDate || today < medicine.startDate || today > medicine.endDate) { medicines.push(medicine); continue; }
         const interval = Math.max(1, Number(medicine.frequencyInterval) || parseMedicineFrequency(medicine.frequency).interval);
         const unit = medicine.frequencyUnit || parseMedicineFrequency(medicine.frequency).unit;
         const cadenceMs = interval * (unit === 'hours' ? 60 * 60 * 1000 : 24 * 60 * 60 * 1000);
         const anchor = Date.parse(medicine.scheduleAnchorAt || medicine.savedAt || '');
-        if (!Number.isFinite(anchor)) return medicine;
+        if (!Number.isFinite(anchor)) { medicines.push(medicine); continue; }
         const lastReminder = Date.parse(medicine.lastReminderAt || '');
         const dueAt = Number.isFinite(lastReminder) ? lastReminder + cadenceMs : anchor + cadenceMs;
-        if (now < dueAt) return medicine;
+        if (now < dueAt) { medicines.push(medicine); continue; }
         const message = `${medicine.name}${medicine.dosage ? ` · ${medicine.dosage}` : ''} is due for ${pet.name}.`;
-        let delivered = false;
-        if (window.Notification?.permission === 'granted') {
-          try {
-            const notification = new Notification('Medicine & Supplement Reminder', { body: message, tag: `furgo-medicine-${pet.id}-${medicine.id}` });
-            notification.onclick = () => { window.focus(); window.location.hash = `#pet-record?id=${encodeURIComponent(pet.id)}`; notification.close(); };
-            delivered = true;
-          } catch { /* Fall back to an in-app reminder when native notifications are unavailable. */ }
-        }
+        let delivered = await createPetReminderInboxNotification('Medicine & Supplement Reminder', message, `medicine:${pet.id}:${medicine.id}:${dueAt}`);
+        if (!delivered) delivered = await showPortalBrowserNotification('pet_reminder', 'Medicine & Supplement Reminder', message, {
+          tag: `furgo-medicine-${pet.id}-${medicine.id}`,
+          data: { url: `#pet-record?id=${encodeURIComponent(pet.id)}` },
+        });
         if (!delivered && !document.hidden) {
           showMedicineReminderToast(message, pet.id);
-          delivered = true;
         }
-        if (!delivered) return medicine;
+        if (!delivered && document.hidden) { medicines.push(medicine); continue; }
         changed = true;
-        return { ...medicine, lastReminderAt: new Date(now).toISOString() };
-      });
-      if (changed) savePetReminders(pet.id, { ...settings, medicines, medicine: medicines[0] || null });
-    });
+        medicines.push({ ...medicine, lastReminderAt: new Date(now).toISOString() });
+      }
+      const customReminders = [];
+      for (const reminder of settings.customReminders || []) {
+        if (!reminder?.title || reminder.date !== today || reminder.lastNotifiedDate === today) { customReminders.push(reminder); continue; }
+        const reminderTime = reminder.time || '09:00';
+        const due = new Date(`${reminder.date}T${reminderTime}:00`).getTime();
+        if (!Number.isFinite(due) || now < due) { customReminders.push(reminder); continue; }
+        const message = `${reminder.title} · ${pet.name}`;
+        let delivered = await createPetReminderInboxNotification('Pet Reminder', message, `custom:${pet.id}:${reminder.id}:${today}`);
+        if (!delivered) delivered = await showPortalBrowserNotification('pet_reminder', 'Pet Reminder', message, {
+          tag: `furgo-custom-reminder-${pet.id}-${reminder.id}-${today}`,
+          data: { url: `#pet-profile?id=${encodeURIComponent(pet.id)}&section=settings` },
+        });
+        if (!delivered && !document.hidden) showMedicineReminderToast(message, pet.id);
+        if (!delivered && document.hidden) { customReminders.push(reminder); continue; }
+        changed = true;
+        customReminders.push({ ...reminder, lastNotifiedDate: today });
+      }
+      if (changed) savePetReminders(pet.id, { ...settings, medicines, medicine: medicines[0] || null, customReminders });
+    }
   };
   scan();
   medicineReminderInterval = window.setInterval(scan, 30_000);

@@ -4,25 +4,27 @@ import { customerOrderStatus, statusCategory } from './order-status.js';
 export function adminOrderStage(order) {
   const status = customerOrderStatus(order);
   if (['completed', 'canceled', 'no-show'].includes(statusCategory(status))) return 'completed';
-  if (order.serviceId === 'marketplace') return status === 'In Progress' ? 'progressing' : 'new';
+  if (order.serviceId === 'marketplace') return ['Received Order', 'Shipped'].includes(status) ? 'progressing' : 'new';
   return order.receipt || !['New Order', 'Pending Payment'].includes(status) ? 'progressing' : 'new';
 }
 
 export function adminOrderStageFilters(orders, serviceId, selectedStage = 'new') {
   const stages = [
-    { id: 'new', label: 'New Order' },
-    { id: 'progressing', label: 'Progressing Order' },
-    { id: 'completed', label: 'Completed Order' },
+    { id: 'all', label: 'All Orders', count: orders.length },
+    { id: 'new', label: 'New Order', count: orders.filter((order) => ['New Order', 'Pending Payment'].includes(customerOrderStatus(order))).length },
+    { id: 'received', label: 'Received Order', count: orders.filter((order) => customerOrderStatus(order) === 'Received Order').length },
+    { id: 'checked-in', label: 'Checked-In', count: orders.filter((order) => customerOrderStatus(order) === 'Checked-In').length },
+    { id: 'completed', label: 'Completed', count: orders.filter((order) => statusCategory(customerOrderStatus(order)) === 'completed').length },
   ];
-  return `<nav class="my-orders-status-tabs admin-order-stage-tabs" aria-label="Filter ${escapeHTML(serviceId)} orders">${stages.map((stage) => `<a class="my-orders-status-tab ${selectedStage === stage.id ? 'is-active' : ''}" href="#admin-${encodeURIComponent(serviceId)}?stage=${stage.id}" ${selectedStage === stage.id ? 'aria-current="page"' : ''}>${stage.label}<span>${orders.filter((order) => adminOrderStage(order) === stage.id).length}</span></a>`).join('')}</nav>`;
+  return `<nav class="my-orders-status-tabs admin-order-stage-tabs" aria-label="Filter ${escapeHTML(serviceId)} orders">${stages.map((stage) => `<a class="my-orders-status-tab ${selectedStage === stage.id ? 'is-active' : ''}" href="#admin-orders?service=${encodeURIComponent(serviceId)}&status=${stage.id}" ${selectedStage === stage.id ? 'aria-current="page"' : ''}>${stage.label}<span>${stage.count}</span></a>`).join('')}</nav>`;
 }
 
 export function adminOtherServiceOrderLinks(currentService = '') {
   const services = [
-    { id: 'grooming', label: 'Grooming Orders', href: '#admin-grooming' },
-    { id: 'hotel', label: 'Pet Hotel Orders', href: '#admin-hotel' },
-    { id: 'daycare', label: 'Pet Daycare Orders', href: '#admin-daycare' },
-    { id: 'marketplace', label: 'Marketplace Orders', href: '#admin-marketplace' },
+    { id: 'grooming', label: 'Grooming Orders', href: '#admin-orders?service=grooming' },
+    { id: 'hotel', label: 'Pet Hotel Orders', href: '#admin-orders?service=hotel' },
+    { id: 'daycare', label: 'Pet Daycare Orders', href: '#admin-orders?service=daycare' },
+    { id: 'marketplace', label: 'Marketplace Orders', href: '#admin-orders?service=marketplace' },
   ].filter((service) => service.id !== currentService);
   return `<nav class="admin-other-service-orders" aria-label="Other service order pages"><h2>Other Service Orders</h2><div>${services.map((service) => `<a class="button button-light" href="${service.href}">${service.label}</a>`).join('')}</div></nav>`;
 }
@@ -53,12 +55,12 @@ export function adminOrderProgressMarkup(order) {
   let steps;
   if (currentStatus === 'Pending Payment') {
     steps = order.serviceId === 'marketplace'
-      ? ['Pending Payment', 'New Order', 'In Progress', 'Completed']
+      ? ['Pending Payment', 'New Order', 'Received Order', 'Shipped', 'Completed']
       : ['Pending Payment', 'New Order', ...(taxiEnabled ? ['Received Order', 'Pet Taxi Delivering...', 'Checked-In', 'Service Complete · Awaiting Pickup', 'Pet Taxi Delivering...', 'Completed'] : ['Received Order', 'Checked-In', 'Completed'])];
   } else if (currentStatus === 'Cancelled' || currentStatus === 'No-Show') {
     steps = ['New Order', ...(order.serviceId !== 'marketplace' && order.receipt ? ['Received Order'] : []), currentStatus];
   } else if (order.serviceId === 'marketplace') {
-    steps = ['New Order', 'In Progress', 'Completed'];
+    steps = ['New Order', 'Received Order', 'Shipped', 'Completed'];
   } else if (taxiEnabled) {
     steps = ['New Order', 'Received Order', 'Pet Taxi Delivering...', 'Checked-In', 'Service Complete · Awaiting Pickup', 'Pet Taxi Delivering...', 'Completed'];
   } else {
@@ -95,7 +97,7 @@ export function adminOrderStatusControl(order, storageKey = order.storageKey || 
   const taxiEnabled = Boolean(order.includeTaxi || order.taxi?.pickup || order.taxi?.dropoff)
     || ['Pet Taxi Delivering...', 'Service Complete · Awaiting Pickup'].includes(current);
   const options = marketplace
-    ? ['New Order', 'Pending Payment', 'In Progress', 'Completed', 'Cancelled']
+    ? ['New Order', 'Pending Payment', 'Completed', 'Cancelled']
     : ['New Order', 'Pending Payment', 'Received Order', ...(taxiEnabled ? ['Pet Taxi Delivering...', 'Checked-In', 'Service Complete · Awaiting Pickup'] : ['Checked-In']), 'Completed', 'Cancelled'];
   if (!marketplace && canMarkOrderNoShow(order)) options.push('No-Show');
   if (current && !options.includes(current)) options.unshift(current);
@@ -103,6 +105,9 @@ export function adminOrderStatusControl(order, storageKey = order.storageKey || 
 }
 
 export function canMarkOrderNoShow(order, now = new Date()) {
+  // Array callbacks pass (item, index, array). Ignore a non-Date second arg
+  // so using this helper directly in a filter cannot treat the index as time.
+  if (!(now instanceof Date) || Number.isNaN(now.getTime())) now = new Date();
   const status = customerOrderStatus(order);
   if (['Pending Payment', 'Completed', 'Cancelled', 'No-Show', 'Checked-In', 'Pet Taxi Delivering...', 'Service Complete · Awaiting Pickup'].includes(status)) return false;
   const date = order.serviceId === 'hotel'
@@ -127,16 +132,15 @@ export function canMarkOrderNoShow(order, now = new Date()) {
 }
 
 export function isOrderCurrentToday(order, now = new Date()) {
+  // Array.prototype.filter passes the item's index as the second argument.
+  // Only accept an actual Date for the optional clock override.
+  if (!(now instanceof Date) || Number.isNaN(now.getTime())) now = new Date();
   const status = customerOrderStatus(order);
-  if (['completed', 'canceled', 'no-show'].includes(statusCategory(status)) || status === 'Pending Payment') return false;
+  if (status === 'Checked-In') return true;
+  if (status !== 'Received Order') return false;
   const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-  if (order.serviceId === 'marketplace') return false;
-  if (order.serviceId === 'hotel') {
-    const start = order.checkIn || order.startDate || '';
-    const end = order.checkOut || order.endDate || start;
-    return /^\d{4}-\d{2}-\d{2}$/.test(start) && start <= today && end >= today;
-  }
-  const date = order.date || order.visitDate || order.bookingDate || '';
-  const currentlyInCare = ['Checked-In', 'Pet Taxi Delivering...', 'Service Complete · Awaiting Pickup'].includes(status);
-  return currentlyInCare || date === today;
+  const date = order.serviceId === 'hotel'
+    ? order.checkIn || order.startDate || order.date || order.bookingDate || ''
+    : order.date || order.visitDate || order.bookingDate || order.checkIn || '';
+  return String(date).slice(0, 10) === today;
 }

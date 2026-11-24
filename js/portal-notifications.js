@@ -2,14 +2,32 @@ import { escapeHTML } from './shared.js';
 import { supabase } from './supabase.js';
 
 const notificationCopy = {
-  marketplace_product_request: { action: 'Review product request', href: '#admin-marketplace-manage' },
+  marketplace_product_request: { action: 'Review seller request', href: '#admin-seller-management' },
   marketplace_order: { action: 'Open orders', tab: 'orders' },
   marketplace_product_status: { action: 'View products', tab: 'home' },
+  marketplace_order_status: { action: 'View order', href: '#orders' },
+  service_booking_update: { action: 'View booking', href: '#orders' },
+  pet_reminder: { action: 'View pet care', href: '#pet-profile' },
+  pet_care_update: { action: 'View pet profile', href: '#pet-profile' },
+  furgo_update: { action: 'Explore Furgo', href: '#home' },
 };
 const notificationPreferenceEvents = {
-  marketplace_product_request: { title: 'Marketplace product requests', description: 'Supplier submissions waiting for Admin review.' },
-  marketplace_order: { title: 'New Marketplace orders', description: 'Orders assigned to your Supplier account.' },
+  marketplace_product_request: { title: 'Marketplace product requests', description: 'Seller product submissions waiting for Admin review.' },
+  marketplace_order: { title: 'New Marketplace orders', description: 'Orders assigned to your Store account.' },
   marketplace_product_status: { title: 'Marketplace listing updates', description: 'Furgo changes to your product listing visibility.' },
+};
+const customerNotificationCategories = {
+  orders_services: { title: 'Orders & services', description: 'Marketplace orders, grooming, pet hotel, and daycare booking updates.' },
+  pet_reminders: { title: 'Pet reminders', description: 'Medicine and supplement reminders, plus reminders you create for your pets.' },
+  pet_care_updates: { title: 'Pet care updates', description: 'Changes and updates to your pets’ profiles and care records.' },
+  furgo_updates: { title: 'Furgo updates', description: 'Product news, service announcements, and important Furgo updates.' },
+};
+const notificationCategoryByEvent = {
+  marketplace_order_status: 'orders_services',
+  service_booking_update: 'orders_services',
+  pet_reminder: 'pet_reminders',
+  pet_care_update: 'pet_care_updates',
+  furgo_update: 'furgo_updates',
 };
 let activeNotificationRoot = null;
 let activeNotificationChannel = null;
@@ -20,13 +38,105 @@ let notificationEscapeHandler = null;
 const notificationPreferencesByUser = new Map();
 
 export function notificationPreferencesMarkup(portal = 'customer') {
-  const applicableEvents = portal === 'admin'
+  const applicableEvents = portal === 'customer'
+    ? Object.entries(customerNotificationCategories)
+    : portal === 'admin'
     ? Object.entries(notificationPreferenceEvents).filter(([eventType]) => eventType === 'marketplace_product_request')
     : portal === 'supplier'
       ? Object.entries(notificationPreferenceEvents).filter(([eventType]) => eventType === 'marketplace_order' || eventType === 'marketplace_product_status')
       : [[`__default`, { title: portal === 'driver' ? 'Driver route and schedule notifications' : 'Customer order and booking notifications', description: `Choose where notifications sent to your ${portal} portal should appear.` }]];
-  const rows = applicableEvents.map(([eventType, event]) => `<fieldset class="portal-notification-preference" data-notification-preference="${eventType}"><legend>${escapeHTML(event.title)}</legend><p>${escapeHTML(event.description)}</p><label><input type="checkbox" data-notification-channel="website" checked /> Website</label><label><input type="checkbox" data-notification-channel="browser" /> Browser / phone</label></fieldset>`).join('');
-  return `<section class="admin-market-panel portal-notification-preferences" data-notification-preferences="${escapeHTML(portal)}"><div class="admin-market-panel-heading"><div><span>Alerts &amp; preferences</span><h2>Notification Settings</h2></div><p>Choose where each type of notification appears.</p></div><div class="portal-notification-preference-list">${rows}</div><p class="portal-notification-preference-note">Browser alerts require permission and appear while Furgo is open. Alerts while the browser or app is closed need push delivery to be configured.</p><p class="portal-notification-preference-feedback" data-notification-preference-feedback role="status" aria-live="polite"></p></section>`;
+  const rows = applicableEvents.map(([eventType, event]) => `<fieldset class="portal-notification-preference" data-notification-preference="${escapeHTML(eventType)}"><legend>${escapeHTML(event.title)}</legend><p>${escapeHTML(event.description)}</p><label><input type="checkbox" data-notification-channel="website" checked /> Website inbox</label><label><input type="checkbox" data-notification-channel="browser" /> Browser / phone alerts</label></fieldset>`).join('');
+  const pushNote = portal === 'customer'
+    ? 'Browser and phone alerts need notification permission. Background delivery also requires Furgo push setup; on iPhone, install Furgo to the Home Screen first.'
+    : 'Browser alerts require permission and appear while Furgo is open. Background delivery needs push setup.';
+  return `<section class="admin-market-panel portal-notification-preferences" data-notification-preferences="${escapeHTML(portal)}"><div class="admin-market-panel-heading"><div><span>Alerts &amp; preferences</span><h2>Notification Settings</h2></div><p>Choose where each type of notification appears.</p></div><div class="portal-notification-preference-list">${rows}</div><p class="portal-notification-preference-note">${pushNote}</p><p class="portal-notification-preference-feedback" data-notification-preference-feedback role="status" aria-live="polite"></p></section>`;
+}
+
+function getNotificationPreference(preferences, eventType) {
+  const category = notificationCategoryByEvent[eventType];
+  return preferences[category] || preferences[eventType] || preferences.__default || {};
+}
+
+async function subscribeForPush(userId) {
+  if (!('serviceWorker' in navigator) || !('PushManager' in window)) return { enabled: false, reason: 'This browser does not support background push alerts.' };
+  try {
+    const { data, error } = await supabase.functions.invoke('notification-config');
+    if (error || !data?.vapidPublicKey) return { enabled: false, reason: 'Background push setup is not complete yet.' };
+    const registration = await navigator.serviceWorker.ready;
+    let subscription = await registration.pushManager.getSubscription();
+    if (!subscription) subscription = await registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: decodeVapidKey(data.vapidPublicKey) });
+    const json = subscription.toJSON();
+    const { error: saveError } = await supabase.rpc('save_portal_push_subscription', {
+      p_endpoint: json.endpoint,
+      p_p256dh: json.keys?.p256dh,
+      p_auth: json.keys?.auth,
+      p_user_agent: navigator.userAgent,
+    });
+    if (saveError) return { enabled: false, reason: 'Push subscription storage is not ready. Apply the notification migration.' };
+    return { enabled: true };
+  } catch (error) {
+    return { enabled: false, reason: error?.message || 'Background push could not be enabled on this device.' };
+  }
+}
+
+function decodeVapidKey(value) {
+  const base64 = value.replace(/-/g, '+').replace(/_/g, '/');
+  const padded = base64.padEnd(Math.ceil(base64.length / 4) * 4, '=');
+  return Uint8Array.from(atob(padded), (character) => character.charCodeAt(0));
+}
+
+export async function showPortalBrowserNotification(eventType, title, body, options = {}) {
+  if (!('Notification' in window) || Notification.permission !== 'granted' || !('serviceWorker' in navigator)) return false;
+  try {
+    const { data: auth } = await supabase.auth.getUser();
+    const userId = auth.user?.id;
+    if (!userId) return false;
+    let preferences = notificationPreferencesByUser.get(userId);
+    if (!preferences) {
+      const { data } = await supabase.from('portal_notification_preferences').select('preferences').eq('user_id', userId).maybeSingle();
+      preferences = data?.preferences || {};
+      notificationPreferencesByUser.set(userId, preferences);
+    }
+    if (!getNotificationPreference(preferences, eventType).browser) return false;
+    const registration = await navigator.serviceWorker.ready;
+    await registration.showNotification(title, { body, icon: 'Image/Icon/Logo.png', ...options });
+    return true;
+  } catch (error) {
+    console.warn('Browser notification could not be shown:', error);
+    return false;
+  }
+}
+
+export async function createPetReminderInboxNotification(title, body, entityId) {
+  try {
+    const { data: auth } = await supabase.auth.getUser();
+    const userId = auth.user?.id;
+    if (!userId) return false;
+    const { error } = await supabase.rpc('create_customer_pet_reminder_notification', {
+      p_title: title,
+      p_message: body,
+      p_entity_id: entityId,
+    });
+    if (error) throw error;
+    return true;
+  } catch (error) {
+    console.warn('Pet reminder could not be added to the notification inbox:', error);
+    return false;
+  }
+}
+
+async function unsubscribeFromPush(userId) {
+  if (!('serviceWorker' in navigator)) return;
+  try {
+    const registration = await navigator.serviceWorker.ready;
+    const subscription = await registration.pushManager.getSubscription();
+    if (!subscription) return;
+    const endpoint = subscription.endpoint;
+    await subscription.unsubscribe();
+    await supabase.from('portal_push_subscriptions').delete().eq('user_id', userId).eq('endpoint', endpoint);
+  } catch (error) {
+    console.warn('Push subscription could not be removed:', error);
+  }
 }
 
 async function setupPortalNotificationPreferences() {
@@ -50,7 +160,7 @@ async function setupPortalNotificationPreferences() {
   }
   const controls = [...root.querySelectorAll('[data-notification-preference]')];
   const syncControls = () => controls.forEach((row) => {
-    const saved = preferences[row.dataset.notificationPreference] || {};
+    const saved = preferences[row.dataset.notificationPreference] || (root.dataset.notificationPreferences === 'customer' ? preferences.__default : null) || {};
     row.querySelector('[data-notification-channel="website"]').checked = saved.website !== false;
     row.querySelector('[data-notification-channel="browser"]').checked = saved.browser === true;
   });
@@ -71,6 +181,14 @@ async function setupPortalNotificationPreferences() {
           input.checked = false;
           if (feedback) feedback.textContent = 'Allow notifications in your browser settings to enable browser alerts.';
           return;
+        }
+      }
+      if (root.dataset.notificationPreferences === 'customer') {
+        const pushResult = await subscribeForPush(userId);
+        if (pushResult.enabled) {
+          if (feedback) feedback.textContent = 'This device is ready for browser and phone alerts.';
+        } else if (feedback) {
+          feedback.textContent = `${pushResult.reason} Alerts will appear while Furgo is open when supported.`;
         }
       }
     }
@@ -94,6 +212,9 @@ async function setupPortalNotificationPreferences() {
       if (feedback) feedback.textContent = 'Could not save settings. Apply the latest account preferences migration and try again.';
       console.warn('Notification preferences could not save:', saveError);
       return;
+    }
+    if (root.dataset.notificationPreferences === 'customer' && !Object.values(next).some((item) => item.browser)) {
+      await unsubscribeFromPush(userId);
     }
     if (feedback) feedback.textContent = 'Notification settings saved.';
   });
@@ -145,7 +266,7 @@ export function setupPortalNotifications() {
     }
     const rows = itemsResult.data || [];
     preferences = notificationPreferencesByUser.get(userId) || preferences;
-    const websiteEnabled = (eventType) => (preferences[eventType] || preferences.__default)?.website !== false;
+    const websiteEnabled = (eventType) => getNotificationPreference(preferences, eventType).website !== false;
     const visibleRows = rows.filter((item) => websiteEnabled(item.event_type));
     const unread = visibleRows.filter((item) => !item.read_at).length;
     count.hidden = unread === 0;
@@ -190,9 +311,9 @@ export function setupPortalNotifications() {
         void render();
         const item = payload.eventType === 'INSERT' ? payload.new : null;
         preferences = notificationPreferencesByUser.get(userId) || preferences;
-        const browserEnabled = (preferences[item?.event_type] || preferences.__default)?.browser === true;
+        const browserEnabled = getNotificationPreference(preferences, item?.event_type || '').browser === true;
         if (item && browserEnabled && 'Notification' in window && Notification.permission === 'granted') {
-          new Notification(item.title, { body: item.message, icon: 'Image/Icon/Logo.png', tag: item.id });
+          void showPortalBrowserNotification(item.event_type, item.title, item.message, { tag: item.id });
         }
       })
       .subscribe();

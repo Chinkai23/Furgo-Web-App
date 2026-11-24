@@ -66,7 +66,7 @@ export function loadMarketplaceProducts() {
   } catch { return starterCatalog; }
 }
 
-// Returns saved supplier contacts plus suppliers already referenced by catalog variants.
+// Returns saved store contacts plus stores already referenced by catalog variants.
 export function loadMarketplaceSuppliers(products = loadMarketplaceProducts()) {
   let saved = [];
   try {
@@ -156,7 +156,7 @@ export function marketplaceLine(cartItem, products = loadMarketplaceProducts()) 
 export function marketplaceSubscriptionLine(cartItem, products = loadMarketplaceProducts()) {
   const line = marketplaceLine(cartItem, products);
   if (!line || Number(line.variant.stock) < 1) return null;
-  const interval = ['week', 'month'].includes(cartItem.interval) ? cartItem.interval : 'month';
+    const interval = ['day', 'week', 'month'].includes(cartItem.interval) ? cartItem.interval : 'month';
   const intervalCount = Math.max(1, Math.min(12, Number(cartItem.intervalCount) || (Number(cartItem.intervalWeeks) ? 1 : 1)));
   return { ...line, interval, intervalCount };
 }

@@ -9,7 +9,7 @@ import { onboardingPage } from './pages/onboarding.js';
 import { profilePage } from './pages/profile.js';
 import { notificationSettingsPage } from './pages/notification-settings.js';
 import { changePasswordPage, editProfilePage } from './pages/edit-profile.js';
-import { helpCenterPage, setupRoleApplication } from './pages/help-center.js';
+import { helpCenterPage } from './pages/help-center.js';
 import { feedbackPage } from './pages/feedback.js';
 import { addressPage } from './pages/address.js';
 import { paymentMethodPage } from './pages/payment-method.js';
@@ -18,7 +18,7 @@ import { coinTopupPage, setupTokensPage, tokensPage } from './pages/tokens.js';
 import { marketplaceFavoritesPage, marketplacePage, marketplaceProductPage, marketplaceSellerPage } from './pages/marketplace.js';
 import { marketplaceCartPage, marketplaceCheckoutPage } from './pages/cart.js';
 import { adminMarketplaceManagePage, adminMarketplacePage, adminMarketplaceProductsPage } from './pages/admin-marketplace.js';
-import { marketplaceSupplierPage, marketplaceSupplierProductEditPage, matchesSupplierOrderStatus, supplierOrderRows, supplierProductRows } from './pages/marketplace-supplier.js';
+import { marketplaceSupplierPage, marketplaceSupplierProductEditPage, matchesSupplierOrderStatus, supplierDefaultCourierStorageKey, supplierOrderRows, supplierTrackingForm, supplierProductRows } from './pages/marketplace-supplier.js';
 import { setupPortalNotifications } from './portal-notifications.js';
 import { loadMarketplaceCart, loadMarketplaceCartSelection, loadMarketplaceFavorites, loadMarketplaceOfferSettings, loadMarketplaceOrders, loadMarketplaceProducts, loadMarketplaceSubscriptionCart, loadMarketplaceSubscriptions, marketplaceCartKey, marketplaceCartLineKey, marketplaceCartSelectionKey, marketplaceCheckoutSelectionKey, marketplaceFavoritesKey, marketplaceLine, marketplaceOfferSettingsKey, marketplaceOrdersKey, marketplaceProductsKey, marketplaceSubscriptionCartKey, marketplaceSubscriptionsKey, marketplaceSubscriptionLine, safeMarketplaceImage } from './pages/marketplace-data.js';
 import { marketplaceSubscriptionsPage } from './pages/marketplace-subscriptions.js';
@@ -41,7 +41,7 @@ import { loadPetTaxiSettings, matchPetTaxiRoute, petTaxiRouteFare, petTaxiSettin
 import { setupPetTaxiAddressPicker } from './pages/pet-taxi-addresses.js';
 import { defaultGroomingSettings, groomingBookingsKey, groomingSettingsKey, groomingWeightTier, loadGroomingBookings, loadGroomingSettings } from './pages/grooming-data.js';
 import { myOrdersPage, setupMyOrders } from './pages/my-orders.js';
-import { adminOrdersPage, setupAdminOrders } from './pages/admin-orders.js';
+import { adminOrdersPage, adminCurrentOrderPage, setupAdminOrders } from './pages/admin-orders.js';
 import { checkInPage, extractCheckInCode, formatCheckInToken, refreshCheckInTokens, setupCheckInInteractions } from './pages/check-in.js';
 import { adminBottomNavigation, bottomNavigation, driverBottomNavigation, escapeHTML } from './shared.js';
 import { adminEnquiriesPage, setupAdminEnquiries } from './pages/admin-enquiries.js';
@@ -57,9 +57,11 @@ import { localFinderFavoritesPage, localFinderListPage, localFinderPage, localFi
 import { adminLocalFinderPage, setupAdminLocalFinder } from './pages/admin-local-finder.js';
 import { supabase, toMalaysianE164 } from './supabase.js';
 import { refreshSharedOutlets } from './pages/outlet-directory.js';
-import { cacheSyncedRecords, loadCloudAppData, saveMarketplaceOrder, saveOrderRecords } from './app-data-sync.js';
+import { cacheSyncedRecords, loadCloudAppData, refreshMarketplaceCatalogFromDatabase, saveMarketplaceOrder, saveOrderRecords, saveSharedAppData } from './app-data-sync.js';
 import { refreshFurgoCoinBalance } from './coin-wallet.js';
 import { startQRScanner } from './qr-scanner.js';
+import { adminSellerManagementPage, adminSellerPayoutFeePage, sellerPortalPage, setupAdminSellerManagement, setupAdminSellerPayoutFee, setupSellerPortal } from './pages/seller-portal.js';
+import { adminFeeRulesPage, setupAdminFeeRules } from './pages/admin-fee-rules.js';
 
 // Section: Supabase-backed authentication state
 // Function: Prevent protected routes rendering before the persisted Supabase session is read.
@@ -545,12 +547,13 @@ function friendlyAuthError(error) {
 // Function: Load the signed-in user's trusted role, profile, and account status from Supabase.
 async function loadSupabaseIdentity(user) {
   activeSupabaseUserId = user.id;
-  const [{ data: roleRows, error: roleError }, { data: profile, error: profileError }, { data: account, error: accountError }, portalAccessResult, supplierAccessResult] = await Promise.all([
+  const [{ data: roleRows, error: roleError }, { data: profile, error: profileError }, { data: account, error: accountError }, portalAccessResult, supplierAccessResult, sellerAccessResult] = await Promise.all([
     supabase.from('user_roles').select('role').eq('user_id', user.id),
     supabase.from('profiles').select('display_name,email,phone_e164').eq('id', user.id).maybeSingle(),
     supabase.from('account_controls').select('status').eq('user_id', user.id).maybeSingle(),
     supabase.from('portal_access').select('level,outlet_id,admin_outlets(name,shortform)').eq('user_id', user.id).maybeSingle(),
     supabase.from('marketplace_supplier_access').select('supplier_name').eq('supplier_user_id', user.id).maybeSingle(),
+    supabase.rpc('seller_portal_has_access'),
   ]);
   if (roleError) throw roleError;
   if (profileError) throw profileError;
@@ -566,7 +569,7 @@ async function loadSupabaseIdentity(user) {
   const legacyPortalRole = roleRows?.some(({ role: value }) => value === 'admin') ? 'director'
     : roleRows?.some(({ role: value }) => value === 'staff') ? 'executive' : '';
   const role = ['executive', 'manager', 'director'].includes(portalLevel) ? portalLevel
-    : legacyPortalRole || (roleRows?.some(({ role: value }) => value === 'driver') ? 'driver' : supplierAccessResult.data?.supplier_name ? 'supplier' : 'customer');
+    : legacyPortalRole || (roleRows?.some(({ role: value }) => value === 'driver') ? 'driver' : sellerAccessResult.data === true ? 'seller' : supplierAccessResult.data?.supplier_name ? 'supplier' : 'customer');
   const phone = user.phone || profile?.phone_e164 || user.user_metadata?.phone_e164 || '';
   const snapshot = {
     id: user.id,
@@ -585,7 +588,7 @@ async function loadSupabaseIdentity(user) {
   sessionStorage.setItem('furgo-demo-profile-complete', 'true');
   sessionStorage.setItem('furgo-demo-user-role', role);
   sessionStorage.setItem('furgo-demo-auth-channel', snapshot.authChannel);
-  if (role === 'supplier') return snapshot;
+  if (role === 'supplier' || role === 'seller') return snapshot;
   try {
     await loadCloudAppData(user.id, role);
   } catch (error) {
@@ -2020,7 +2023,7 @@ function setupMarketplaceInteractions() {
     supplierCard.querySelector('[data-marketplace-supplier-name]').textContent = name || 'Furgo Marketplace';
     const supplier = supplierProfilesByName.get(name.toLocaleLowerCase());
     const image = supplierCard.querySelector('[data-marketplace-supplier-photo]');
-    image.alt = `${name || 'Supplier'} profile photo`;
+    image.alt = `${name || 'Store'} profile photo`;
     image.src = supplier?.avatar_path
       ? supabase.storage.from('supplier-profile-photos').getPublicUrl(supplier.avatar_path).data.publicUrl
       : 'Image/Other%20Image/Supplier%20Profile%20Picture.png';
@@ -2031,24 +2034,53 @@ function setupMarketplaceInteractions() {
       if (error) throw error;
       supplierProfilesByName = new Map((data || []).map((supplier) => [String(supplier.supplier_name || '').toLocaleLowerCase(), supplier]));
       updateSupplierCard(supplierCard.dataset.marketplaceSupplierProfile);
-    }).catch((error) => console.warn('Marketplace supplier profiles could not load:', error));
+    }).catch((error) => console.warn('Marketplace store profiles could not load:', error));
   }
   const updateVariant = () => {
     if (!variantSelect) return;
     const option = variantSelect.selectedOptions[0];
+    if (!option) return;
     document.querySelector('[data-pdp-price]').textContent = `MYR ${Number(option.dataset.price).toFixed(2)}`;
     document.querySelector('[data-pdp-stock]').textContent = `${Number(option.dataset.stock)} in stock`;
     const quantity = document.querySelector('[data-product-quantity]');
-    quantity.max = option.dataset.stock;
-    quantity.value = '1';
+    if (quantity) {
+      quantity.max = option.dataset.stock;
+      quantity.value = '1';
+    }
     document.querySelector('[data-add-to-cart]').disabled = Number(option.dataset.stock) < 1;
     const buyNowButton = document.querySelector('[data-buy-now]');
     if (buyNowButton) buyNowButton.disabled = Number(option.dataset.stock) < 1;
     const subscribeButton = document.querySelector('[data-add-to-subscription]');
     if (subscribeButton) subscribeButton.disabled = Number(option.dataset.stock) < 1;
+    document.querySelectorAll('[data-pdp-option], [data-sheet-variant]').forEach((button) => {
+      const selected = button.dataset.pdpOption === option.value || button.dataset.sheetVariant === option.value;
+      button.classList.toggle('is-selected', selected);
+      button.setAttribute('aria-pressed', String(selected));
+    });
     updateSupplierCard(option.dataset.supplier);
+    const optionImage = option.dataset.image;
+    const productImage = document.querySelector('[data-pdp-image]');
+    if (productImage && optionImage) {
+      productImage.src = optionImage;
+      const matchingGalleryImage = [...document.querySelectorAll('[data-gallery-image]')].find((button) => button.dataset.imageSrc === optionImage);
+      if (matchingGalleryImage) document.querySelectorAll('[data-gallery-image]').forEach((button) => button.classList.toggle('selected', button === matchingGalleryImage));
+    }
   };
   variantSelect?.addEventListener('change', updateVariant);
+  document.querySelectorAll('[data-pdp-option], [data-sheet-variant]').forEach((button) => button.addEventListener('click', () => {
+    if (button.disabled || !variantSelect) return;
+    variantSelect.value = button.dataset.pdpOption || button.dataset.sheetVariant;
+    variantSelect.dispatchEvent(new Event('change', { bubbles: true }));
+  }));
+  if (variantSelect) {
+    const initialOption = variantSelect.selectedOptions[0];
+    document.querySelectorAll('[data-pdp-option], [data-sheet-variant]').forEach((button) => {
+      const selected = button.dataset.pdpOption === variantSelect.value || button.dataset.sheetVariant === variantSelect.value;
+      button.classList.toggle('is-selected', selected);
+      button.setAttribute('aria-pressed', String(selected));
+    });
+    document.querySelector('[data-product-quantity]')?.setAttribute('max', initialOption?.dataset.stock || '1');
+  }
   document.querySelectorAll('[data-gallery-image]').forEach((button) => button.addEventListener('click', () => {
     const image = document.querySelector('[data-pdp-image]');
     if (image && button.dataset.imageSrc) {
@@ -2064,22 +2096,29 @@ function setupMarketplaceInteractions() {
     const nextIndex = (currentIndex + Number(button.dataset.galleryStep) + dots.length) % dots.length;
     dots[nextIndex].click();
   }));
-  document.querySelector('[data-add-to-cart]')?.addEventListener('click', (event) => {
-    const productId = event.currentTarget.dataset.addToCart;
-    const variantId = variantSelect.value;
-    const quantity = Math.max(1, Number(document.querySelector('[data-product-quantity]').value) || 1);
-    const variant = loadMarketplaceProducts().find((product) => product.id === productId)?.variants.find((item) => item.id === variantId);
-    if (!variant || variant.frozen || variant.stock < quantity) { toast('That quantity is not currently available.'); return; }
-    const cart = loadMarketplaceCart();
-    const existing = cart.find((item) => item.productId === productId && item.variantId === variantId);
-    if (existing) existing.quantity = Math.min(variant.stock, Number(existing.quantity) + quantity);
-    else cart.push({ productId, variantId, quantity });
-    localStorage.setItem(marketplaceCartKey, JSON.stringify(cart));
-    localStorage.removeItem(marketplaceCheckoutSelectionKey);
-    window.location.hash = '#cart';
+  const optionSheet = document.querySelector('[data-option-sheet]');
+  let purchaseMode = 'add';
+  const openOptionSheet = (mode) => {
+    if (!optionSheet) return;
+    purchaseMode = mode;
+    const confirm = optionSheet.querySelector('[data-option-sheet-confirm]');
+    if (confirm) confirm.textContent = mode === 'buy' ? 'Buy Now' : 'Add to Cart';
+    optionSheet.hidden = false;
+    document.body.classList.add('market-option-sheet-open');
+  };
+  const closeOptionSheet = () => {
+    if (!optionSheet) return;
+    optionSheet.hidden = true;
+    document.body.classList.remove('market-option-sheet-open');
+  };
+  document.querySelector('[data-add-to-cart]')?.addEventListener('click', () => openOptionSheet('add'));
+  document.querySelector('[data-buy-now]')?.addEventListener('click', () => openOptionSheet('buy'));
+  optionSheet?.querySelectorAll('[data-option-sheet-close]').forEach((button) => button.addEventListener('click', closeOptionSheet));
+  optionSheet?.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && optionSheet && !optionSheet.hidden) closeOptionSheet();
   });
-  document.querySelector('[data-buy-now]')?.addEventListener('click', (event) => {
-    const productId = event.currentTarget.dataset.buyNow;
+  optionSheet?.querySelector('[data-option-sheet-confirm]')?.addEventListener('click', () => {
+    const productId = document.querySelector('[data-add-to-cart]')?.dataset.addToCart;
     const variantId = variantSelect?.value;
     const quantity = Math.max(1, Number(document.querySelector('[data-product-quantity]')?.value) || 1);
     const variant = loadMarketplaceProducts().find((product) => product.id === productId)?.variants.find((item) => item.id === variantId);
@@ -2090,7 +2129,8 @@ function setupMarketplaceInteractions() {
     else cart.push({ productId, variantId, quantity });
     localStorage.setItem(marketplaceCartKey, JSON.stringify(cart));
     localStorage.removeItem(marketplaceCheckoutSelectionKey);
-    window.location.hash = '#checkout';
+    closeOptionSheet();
+    window.location.hash = purchaseMode === 'buy' ? '#checkout' : '#cart';
   });
   document.querySelector('[data-add-to-subscription]')?.addEventListener('click', (event) => {
     const productId = event.currentTarget.dataset.addToSubscription;
@@ -2102,16 +2142,52 @@ function setupMarketplaceInteractions() {
     const subscriptions = loadMarketplaceSubscriptionCart();
     const existing = subscriptions.find((item) => item.productId === productId && item.variantId === variantId);
     if (existing) existing.quantity = Math.min(Number(variant.stock), Number(existing.quantity || 0) + quantity);
-    else subscriptions.push({ productId, variantId, quantity, interval: 'month', intervalCount: 1 });
+    else subscriptions.push({ productId, variantId, quantity, interval: 'day', intervalCount: 1 });
     localStorage.setItem(marketplaceSubscriptionCartKey, JSON.stringify(subscriptions));
     window.location.hash = '#subscriptions';
   });
+  const subscriptionAddress = (group, index) => {
+    const card = document.querySelector(`[data-subscription-address="${group}:${index}"]`)?.closest('.market-subscription-item');
+    const select = card?.querySelector(`[data-subscription-address="${group}:${index}"]`);
+    if (!card || !select) return { error: 'Choose or enter a delivery address for this subscription.' };
+    let address;
+    if (select.value !== 'manual') {
+      try { address = JSON.parse(localStorage.getItem('furgo-demo-addresses') || '[]')[Number(select.value)]; } catch { address = null; }
+    } else {
+      const value = (name) => card.querySelector(`[data-subscription-address-fields="${group}:${index}"] [name="${name}"]`)?.value.trim() || '';
+      address = { name: value('recipient'), phone: value('phone'), street: value('street'), postcode: value('postcode'), city: value('city'), state: value('state') };
+      if (Object.values(address).some((value) => !value)) return { error: 'Complete all delivery address fields before continuing.' };
+    }
+    if (!address || !address.street) return { error: 'Choose or enter a valid delivery address.' };
+    return { address, saveToProfile: select.value === 'manual' && Boolean(card.querySelector('[name="saveAddress"]')?.checked) };
+  };
+  const persistSubscriptionAddress = ({ address, saveToProfile }) => {
+    if (saveToProfile) {
+      const addresses = (() => { try { const result = JSON.parse(localStorage.getItem('furgo-demo-addresses') || '[]'); return Array.isArray(result) ? result : []; } catch { return []; } })();
+      const existing = addresses.find((entry) => ['name', 'phone', 'street', 'postcode', 'city', 'state'].every((key) => String(entry[key] || '').trim().toLowerCase() === String(address[key] || '').trim().toLowerCase()));
+      if (!existing) addresses.push({ label: 'Delivery', ...address });
+      localStorage.setItem('furgo-demo-addresses', JSON.stringify(addresses));
+    }
+  };
+  document.querySelectorAll('[data-subscription-address]').forEach((select) => select.addEventListener('change', () => {
+    const groupIndex = select.dataset.subscriptionAddress;
+    const fields = select.closest('.market-subscription-item')?.querySelector(`[data-subscription-address-fields="${groupIndex}"]`);
+    if (!fields) return;
+    const useSaved = select.value !== 'manual';
+    fields.hidden = useSaved;
+    fields.querySelectorAll('input:not([type="checkbox"])').forEach((input) => { input.disabled = useSaved; });
+  }));
   document.querySelectorAll('[data-subscription-confirm]').forEach((button) => button.addEventListener('click', () => {
     const cart = loadMarketplaceSubscriptionCart();
     const item = cart[Number(button.dataset.subscriptionConfirm)];
     const line = item && marketplaceSubscriptionLine(item);
     if (!item || !line || line.variant.frozen || Number(line.variant.stock) < Number(item.quantity)) { toast('This product is no longer available in the selected quantity.'); return; }
-    if (!window.confirm(`Subscribe to ${line.product.name} (${line.variant.label || 'Standard'}) every ${item.intervalCount || 1} month${Number(item.intervalCount || 1) === 1 ? '' : 's'}? This preview will not charge your card or place an order.`)) return;
+    const resolvedAddress = subscriptionAddress('subscription-cart', Number(button.dataset.subscriptionConfirm));
+    if (resolvedAddress.error) { toast(resolvedAddress.error); return; }
+    item.deliveryAddress = resolvedAddress.address;
+    const frequencyText = item.interval === 'day' ? `every ${item.intervalCount || 1} day${Number(item.intervalCount || 1) === 1 ? '' : 's'}` : `every ${item.intervalCount || 1} month${Number(item.intervalCount || 1) === 1 ? '' : 's'}`;
+    if (!window.confirm(`Subscribe to ${line.product.name} (${line.variant.label || 'Standard'}) ${frequencyText}? This is a schedule preview; automatic orders and payments are not active yet.`)) return;
+    persistSubscriptionAddress(resolvedAddress);
     const active = loadMarketplaceSubscriptions();
     const existing = active.find((entry) => entry.productId === item.productId && entry.variantId === item.variantId);
     if (existing) existing.quantity = Math.min(Number(line.variant.stock), Number(existing.quantity || 0) + Number(item.quantity || 1));
@@ -2139,10 +2215,16 @@ function setupMarketplaceInteractions() {
     if (!item || !line) return;
     const quantity = Math.max(1, Math.min(Number(line.variant.stock), Number(item.draftQuantity) || 1));
     const frequency = Number(item.draftIntervalCount) || 1;
-    if (!window.confirm(`Save this subscription as every ${frequency} month${frequency === 1 ? '' : 's'}, quantity ${quantity}?`)) return;
+    const resolvedAddress = subscriptionAddress('active-subscription', Number(button.dataset.subscriptionSave));
+    if (resolvedAddress.error) { toast(resolvedAddress.error); return; }
+    const unit = item.draftInterval || 'month';
+    const frequencyText = unit === 'day' ? `every ${frequency} day${frequency === 1 ? '' : 's'}` : `every ${frequency} month${frequency === 1 ? '' : 's'}`;
+    if (!window.confirm(`Save this subscription as ${frequencyText}, quantity ${quantity}?`)) return;
+    persistSubscriptionAddress(resolvedAddress);
     item.interval = item.draftInterval || 'month';
     item.intervalCount = frequency;
     item.quantity = quantity;
+    item.deliveryAddress = resolvedAddress.address;
     delete item.draftInterval;
     delete item.draftIntervalCount;
     delete item.draftQuantity;
@@ -2265,10 +2347,6 @@ function setupMarketplaceInteractions() {
     const shipping = subtotal >= freeShippingMinimum ? 0 : Number(offerSettings.deliveryFee) || 0;
     const discountRow = form.querySelector('[data-checkout-discount]');
     const shippingDiscountRow = form.querySelector('[data-checkout-shipping-discount]');
-    const shopVoucherTarget = form.querySelector('[data-marketplace-shop-vouchers]');
-    const shopVoucherFeedback = form.querySelector('[data-shop-voucher-feedback]');
-    let shopVouchers = [];
-    let appliedShopVoucher = null;
     let appliedFurgoVoucher = null;
     const allocateCents = (amount, weights) => {
       const cents = Math.max(0, Math.round(Number(amount || 0) * 100));
@@ -2284,38 +2362,11 @@ function setupMarketplaceInteractions() {
     };
     const lineTotals = lines.map((line) => Math.max(0, Number(line.total) || 0));
     const allocatedShippingBase = allocateCents(shipping, lineTotals);
-    const lineSupplierName = (line) => String(line.variant.supplierId || line.variant.supplier || '').trim();
-    const lineMatchesSupplier = (line, supplierName) => lineSupplierName(line).toLowerCase() === String(supplierName || '').trim().toLowerCase();
-    const cartSupplierNames = new Set(lines.map(lineSupplierName).filter(Boolean).map((name) => name.toLowerCase()));
-    const shopEligibleSubtotal = (voucher) => lines.reduce((sum, line) => sum + (lineMatchesSupplier(line, voucher.supplier_name) ? Number(line.total) || 0 : 0), 0);
     const currentFurgoDiscount = () => Number(form.dataset.furgoDiscount || 0);
     const currentFurgoShippingDiscount = () => form.dataset.furgoFreeShipping === 'true' ? shipping : 0;
-    const currentShopDiscount = () => {
-      if (!appliedShopVoucher || appliedShopVoucher.discount_type === 'free_shipping') return 0;
-      const eligible = shopEligibleSubtotal(appliedShopVoucher);
-      if (eligible < Number(appliedShopVoucher.minimum_spend || 0)) return 0;
-      const raw = appliedShopVoucher.discount_type === 'percent' ? eligible * Number(appliedShopVoucher.discount_value) / 100 : Number(appliedShopVoucher.discount_value);
-      const furgoCents = Math.max(0, Math.round(currentFurgoDiscount() * 100));
-      let allocatedFurgoCents = 0;
-      let eligibleFurgoCents = 0;
-      lines.forEach((line, index) => {
-        const share = index === lines.length - 1
-          ? furgoCents - allocatedFurgoCents
-          : subtotal ? Math.floor(furgoCents * (Number(line.total) || 0) / subtotal) : Math.floor(furgoCents / lines.length);
-        allocatedFurgoCents += share;
-        if (lineMatchesSupplier(line, appliedShopVoucher.supplier_name)) eligibleFurgoCents += share;
-      });
-      const remainingEligible = Math.max(0, eligible - eligibleFurgoCents / 100);
-      return Math.min(eligible, Math.max(0, subtotal - currentFurgoDiscount()), remainingEligible, Math.round(raw * 100) / 100);
-    };
-    const currentShopShippingDiscount = () => {
-      if (!appliedShopVoucher || appliedShopVoucher.discount_type !== 'free_shipping' || form.dataset.furgoFreeShipping === 'true') return 0;
-      if (shopEligibleSubtotal(appliedShopVoucher) < Number(appliedShopVoucher.minimum_spend || 0)) return 0;
-      return allocatedShippingBase.reduce((sum, amount, index) => sum + (lineMatchesSupplier(lines[index], appliedShopVoucher.supplier_name) ? amount : 0), 0);
-    };
     const updateTotals = () => {
-      const discount = Math.min(subtotal, currentFurgoDiscount() + currentShopDiscount());
-      const shippingDiscount = Math.min(shipping, currentFurgoShippingDiscount() + currentShopShippingDiscount());
+      const discount = Math.min(subtotal, currentFurgoDiscount());
+      const shippingDiscount = Math.min(shipping, currentFurgoShippingDiscount());
       form.dataset.discount = String(discount);
       form.dataset.shippingDiscount = String(shippingDiscount);
       const payableShipping = Math.max(0, shipping - shippingDiscount);
@@ -2325,13 +2376,6 @@ function setupMarketplaceInteractions() {
       shippingDiscountRow.hidden = shippingDiscount <= 0;
       shippingDiscountRow.querySelector('b').textContent = `− MYR ${shippingDiscount.toFixed(2)}`;
       form.querySelector('[data-checkout-total]').textContent = `MYR ${Math.max(0, subtotal + shipping - discount - shippingDiscount).toFixed(2)}`;
-      if (appliedShopVoucher && shopVoucherFeedback) {
-        const eligible = shopEligibleSubtotal(appliedShopVoucher);
-        shopVoucherFeedback.textContent = eligible < Number(appliedShopVoucher.minimum_spend || 0)
-          ? `${appliedShopVoucher.code} needs MYR ${Number(appliedShopVoucher.minimum_spend).toFixed(2)} of ${appliedShopVoucher.supplier_name} products.`
-          : `${appliedShopVoucher.code} from ${appliedShopVoucher.supplier_name} applied.`;
-        shopVoucherFeedback.className = `market-coupon-feedback ${eligible < Number(appliedShopVoucher.minimum_spend || 0) ? 'error' : 'success'}`;
-      }
     };
     const updateAddressFields = () => {
       const saved = addressSelect && addressSelect.value !== 'manual';
@@ -2348,43 +2392,6 @@ function setupMarketplaceInteractions() {
     updateAddressFields();
     updateTransferField();
     updateTotals();
-    if (shopVoucherTarget) {
-      void supabase.rpc('get_marketplace_shop_vouchers').then(({ data, error }) => {
-        if (error) throw error;
-        shopVouchers = (data || []).filter((voucher) => cartSupplierNames.has(String(voucher.supplier_name || '').trim().toLowerCase()));
-        shopVoucherTarget.innerHTML = shopVouchers.length ? shopVouchers.map((voucher) => {
-          const expiry = voucher.expires_at ? ` · Expires ${new Date(`${voucher.expires_at}T00:00:00`).toLocaleDateString()}` : '';
-          const discountLabel = voucher.discount_type === 'free_shipping' ? 'Free shipping' : voucher.discount_type === 'percent' ? `${Number(voucher.discount_value)}% off` : `MYR ${Number(voucher.discount_value).toFixed(2)} off`;
-          return `<article class="market-shop-voucher-card"><div><span>${escapeHTML(voucher.supplier_name)}</span><strong>${escapeHTML(voucher.code)}</strong><small>${escapeHTML(discountLabel)}${Number(voucher.minimum_spend) ? ` · Min. MYR ${Number(voucher.minimum_spend).toFixed(2)}` : ''}${escapeHTML(expiry)}</small></div><button type="button" data-apply-shop-voucher="${escapeHTML(voucher.id)}">${appliedShopVoucher?.id === voucher.id ? 'Applied' : 'Apply'}</button></article>`;
-        }).join('') : '<p class="market-checkout-note">No active Shop Vouchers are available right now.</p>';
-      }).catch((error) => { shopVoucherTarget.innerHTML = `<p class="market-checkout-note">Shop Vouchers could not be loaded: ${escapeHTML(error.message || 'Please try again later.')}</p>`; });
-      shopVoucherTarget.addEventListener('click', (event) => {
-        const button = event.target.closest('[data-apply-shop-voucher]');
-        if (!button) return;
-        const voucher = shopVouchers.find((entry) => entry.id === button.dataset.applyShopVoucher);
-        if (!voucher) return;
-        if (appliedShopVoucher?.id === voucher.id) {
-          appliedShopVoucher = null;
-          shopVoucherFeedback.textContent = `${voucher.code} removed.`;
-          shopVoucherFeedback.className = 'market-coupon-feedback';
-          shopVoucherTarget.querySelectorAll('[data-apply-shop-voucher]').forEach((item) => { item.textContent = 'Apply'; });
-          updateTotals();
-          return;
-        }
-        const eligible = shopEligibleSubtotal(voucher);
-        if (eligible < Number(voucher.minimum_spend || 0)) {
-          appliedShopVoucher = null;
-          shopVoucherFeedback.textContent = `Add more products from ${voucher.supplier_name} to meet the MYR ${Number(voucher.minimum_spend).toFixed(2)} minimum spend.`;
-          shopVoucherFeedback.className = 'market-coupon-feedback error';
-        } else {
-          appliedShopVoucher = voucher;
-          shopVoucherFeedback.textContent = `${voucher.code} from ${voucher.supplier_name} applied.`;
-          shopVoucherFeedback.className = 'market-coupon-feedback success';
-        }
-        shopVoucherTarget.querySelectorAll('[data-apply-shop-voucher]').forEach((item) => { item.textContent = appliedShopVoucher?.id === item.dataset.applyShopVoucher ? 'Applied' : 'Apply'; });
-        updateTotals();
-      });
-    }
     form.querySelector('[data-apply-coupon]')?.addEventListener('click', () => {
       const code = form.querySelector('[data-market-coupon]').value.trim().toUpperCase();
       const message = form.querySelector('[data-coupon-feedback]');
@@ -2425,10 +2432,8 @@ function setupMarketplaceInteractions() {
       const payment = form.elements.payment.value;
       const discount = Number(form.dataset.discount || 0);
       const furgoDiscount = Math.min(currentFurgoDiscount(), discount);
-      const shopDiscount = Math.max(0, discount - furgoDiscount);
       const shippingDiscount = Number(form.dataset.shippingDiscount || 0);
       const furgoShippingDiscount = currentFurgoShippingDiscount();
-      const shopShippingDiscount = Math.max(0, shippingDiscount - furgoShippingDiscount);
       const total = Math.max(0, subtotal + shipping - discount - shippingDiscount);
       if (payment === 'wallet') {
         const balance = Number(localStorage.getItem('furgo-demo-credit-balance') || 0);
@@ -2453,19 +2458,13 @@ function setupMarketplaceInteractions() {
       }
       const products = loadMarketplaceProducts();
       const allocatedFurgoDiscounts = allocateCents(furgoDiscount, lineTotals);
-      const shopWeights = lines.map((line) => appliedShopVoucher && lineMatchesSupplier(line, appliedShopVoucher.supplier_name) ? line.total : 0);
-      const allocatedShopDiscounts = allocateCents(shopDiscount, shopWeights);
-      const allocatedDiscounts = lineTotals.map((_, index) => Math.min(lineTotals[index], (allocatedFurgoDiscounts[index] || 0) + (allocatedShopDiscounts[index] || 0)));
-      const allocatedShipping = allocatedShippingBase.map((amount, index) => {
-        if (form.dataset.furgoFreeShipping === 'true') return 0;
-        if (appliedShopVoucher?.discount_type === 'free_shipping' && lineMatchesSupplier(lines[index], appliedShopVoucher.supplier_name)) return 0;
-        return amount;
-      });
+      const allocatedDiscounts = allocatedFurgoDiscounts;
+      const allocatedShipping = allocatedShippingBase.map((amount) => form.dataset.furgoFreeShipping === 'true' ? 0 : amount);
       const items = lines.map(({ product, variant, quantity, total: lineTotal }, index) => {
         const allocatedDiscount = allocatedDiscounts[index] || 0;
         const shippingFeeAllocated = allocatedShipping[index] || 0;
         const paidAmount = Math.max(0, Math.round((Number(lineTotal) - allocatedDiscount) * 100) / 100);
-        return { lineNumber: index + 1, productId: product.id, variantId: variant.id, name: product.name, category: product.category || 'Uncategorised', nutrition: product.nutrition || '', ingredients: product.ingredients || '', variantLabel: variant.label, supplierId: variant.supplierId || variant.supplier || '', cost: Number(variant.cost) || 0, quantity, unitPrice: variant.price, total: lineTotal, allocatedDiscount, shippingFeeAllocated, paidAmount, refundableAmount: Math.round((paidAmount + shippingFeeAllocated) * 100) / 100 };
+        return { lineNumber: index + 1, productId: product.id, variantId: variant.id, imageUrl: variant.imageUrl || product.images?.[0] || '', name: product.name, category: product.category || 'Uncategorised', nutrition: product.nutrition || '', ingredients: product.ingredients || '', variantLabel: variant.label, supplierId: variant.supplierId || variant.supplier || '', cost: Number(variant.cost) || 0, quantity, unitPrice: variant.price, total: lineTotal, allocatedDiscount, shippingFeeAllocated, paidAmount, refundableAmount: Math.round((paidAmount + shippingFeeAllocated) * 100) / 100 };
       });
       const profile = JSON.parse(sessionStorage.getItem('furgo-demo-user-profile') || '{}');
       const reference = `FG-${new Date().toISOString().slice(2, 10).replace(/-/g, '')}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
@@ -2474,7 +2473,7 @@ function setupMarketplaceInteractions() {
       const status = payment === 'bank-transfer' ? 'Pending Payment Verification' : awaitingOnlinePayment ? 'Pending Payment' : 'Paid / Processing';
       const orders = loadMarketplaceOrders();
       const orderDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-      const order = { id: `order-${Date.now()}`, userId: profile.id || '', reference, date: orderDate, createdAt: now.toISOString(), customerEmail: profile.email || '', customerName: profile.name || address.name, customerPhone: profile.phone || address.phone, deliveryPhone: address.phone, address: { name: address.name, phone: address.phone, street: address.street, postcode: address.postcode, city: address.city, state: address.state }, items, subtotal, shipping, shippingDiscount, discount, furgoVoucherDiscount: furgoDiscount, furgoShippingDiscount, furgoVoucherId: appliedFurgoVoucher?.id || '', shopVoucherDiscount: shopDiscount, shopShippingDiscount, shopVoucher: appliedShopVoucher ? { id: appliedShopVoucher.id, code: appliedShopVoucher.code, supplierName: appliedShopVoucher.supplier_name } : null, total, paymentMethod: payment === 'wallet' ? 'Furgo Credit' : payment === 'gateway' ? 'Online Payment' : 'Manual bank transfer', paymentStatus: payment === 'bank-transfer' ? 'Pending Payment Verification' : awaitingOnlinePayment ? 'Pending Payment' : 'Paid', paymentDeadlineAt: awaitingOnlinePayment ? new Date(now.getTime() + 60 * 60 * 1000).toISOString() : '', transferSlip, status, coupon: appliedFurgoVoucher && (furgoDiscount || furgoShippingDiscount) ? String(appliedFurgoVoucher.code || '').toUpperCase() : '', trackingNumber: '', courier: '', trackingUrl: '' };
+      const order = { id: `order-${Date.now()}`, userId: profile.id || '', reference, date: orderDate, createdAt: now.toISOString(), customerEmail: profile.email || '', customerName: profile.name || address.name, customerPhone: profile.phone || address.phone, deliveryPhone: address.phone, address: { name: address.name, phone: address.phone, street: address.street, postcode: address.postcode, city: address.city, state: address.state }, items, subtotal, shipping, shippingDiscount, discount, furgoVoucherDiscount: furgoDiscount, furgoShippingDiscount, furgoVoucherId: appliedFurgoVoucher?.id || '', total, paymentMethod: payment === 'wallet' ? 'Furgo Credit' : payment === 'gateway' ? 'Online Payment' : 'Manual bank transfer', paymentStatus: payment === 'bank-transfer' ? 'Pending Payment Verification' : awaitingOnlinePayment ? 'Pending Payment' : 'Paid', paymentDeadlineAt: awaitingOnlinePayment ? new Date(now.getTime() + 60 * 60 * 1000).toISOString() : '', transferSlip, status, coupon: appliedFurgoVoucher && (furgoDiscount || furgoShippingDiscount) ? String(appliedFurgoVoucher.code || '').toUpperCase() : '', trackingNumber: '', courier: '', trackingUrl: '' };
       orders.unshift(order);
       const placeOrderButton = form.querySelector('[type="submit"]');
       if (placeOrderButton) { placeOrderButton.disabled = true; placeOrderButton.textContent = 'Saving Order…'; }
@@ -2495,11 +2494,8 @@ function setupMarketplaceInteractions() {
         transactions.unshift({ label: `Marketplace order ${reference}`, amount: -total, date: new Date().toLocaleDateString() });
         localStorage.setItem('furgo-demo-credit-transactions', JSON.stringify(transactions));
       }
-      if (!awaitingOnlinePayment) items.forEach((item) => {
-        const variant = products.find((product) => product.id === item.productId)?.variants.find((entry) => entry.id === item.variantId);
-        if (variant) variant.stock = Math.max(0, Number(variant.stock) - item.quantity);
-      });
-      localStorage.setItem(marketplaceProductsKey, JSON.stringify(products));
+      try { await refreshMarketplaceCatalogFromDatabase(); }
+      catch (error) { console.warn('Marketplace stock cache refresh deferred:', error); }
       const purchasedKeys = new Set(checkoutSelection || cartAtCheckout.map(marketplaceCartLineKey));
       const remainingCart = loadMarketplaceCart().filter((item) => !purchasedKeys.has(marketplaceCartLineKey(item)));
       localStorage.setItem(marketplaceCartKey, JSON.stringify(remainingCart));
@@ -2618,6 +2614,75 @@ function setupAdminMarketplace() {
     };
     sortRows();
     filterRows();
+    const livePhotoStates = new WeakMap();
+    const livePhotoState = (form) => {
+      if (!livePhotoStates.has(form)) {
+        const product = loadMarketplaceProducts().find((entry) => entry.id === form.dataset.liveProductExtraDetails);
+        livePhotoStates.set(form, (product?.images || []).map((url) => ({ url, previewUrl: safeMarketplaceImage(url) })));
+      }
+      return livePhotoStates.get(form);
+    };
+    const renderLiveProductPhotos = (form) => {
+      const list = form.querySelector('[data-admin-live-product-photo-list]');
+      if (!list) return;
+      const photos = livePhotoState(form);
+      list.hidden = photos.length === 0;
+      list.innerHTML = photos.map((photo, index) => `<article class="supplier-photo-item"><img src="${escapeHTML(photo.previewUrl || safeMarketplaceImage(photo.url) || '')}" alt="Product photo ${index + 1}" /><span>${index === 0 ? 'Cover photo' : `Photo ${index + 1}`}</span><label class="supplier-photo-change">Change<input type="file" accept="image/png,image/jpeg,image/webp,image/gif" data-replace-admin-product-photo="${index}" aria-label="Change product photo ${index + 1}" /></label><button type="button" data-remove-admin-product-photo="${index}" aria-label="Delete product photo ${index + 1}">Delete</button></article>`).join('');
+    };
+    const validateAdminProductPhotos = async (files, totalCount) => {
+      if (totalCount > 5) return 'A product can have up to five photos.';
+      for (const file of files) {
+        if (!['image/png', 'image/jpeg', 'image/webp', 'image/gif'].includes(file.type)) return `${file.name} is not a supported image.`;
+        if (file.size > 2 * 1024 * 1024) return `${file.name} is larger than 2 MB.`;
+        const previewUrl = URL.createObjectURL(file);
+        const dimensions = await new Promise((resolve) => {
+          const image = new Image();
+          image.onload = () => resolve({ width: image.naturalWidth, height: image.naturalHeight });
+          image.onerror = () => resolve(null);
+          image.src = previewUrl;
+        });
+        URL.revokeObjectURL(previewUrl);
+        if (!dimensions) return `${file.name} could not be read as an image.`;
+        if (dimensions.width !== dimensions.height) return `${file.name} must be square (1:1).`;
+        if (dimensions.width < 500 || dimensions.width > 2000) return `${file.name} must be between 500 × 500 and 2000 × 2000 pixels.`;
+      }
+      return '';
+    };
+    const liveProductRows = document.querySelector('[data-live-product-rows]');
+    liveProductRows?.querySelectorAll('[data-live-product-extra-details]').forEach(renderLiveProductPhotos);
+    liveProductRows?.addEventListener('change', async (event) => {
+      const form = event.target.closest('[data-live-product-extra-details]');
+      if (!form) return;
+      const photos = livePhotoState(form);
+      const addInput = event.target.closest('input[name="photos"]');
+      const replaceInput = event.target.closest('[data-replace-admin-product-photo]');
+      const files = addInput ? [...addInput.files] : replaceInput?.files?.[0] ? [replaceInput.files[0]] : [];
+      if (!files.length) return;
+      const totalCount = addInput ? photos.length + files.length : photos.length;
+      const validationError = await validateAdminProductPhotos(files, totalCount);
+      if (addInput) addInput.value = '';
+      if (replaceInput) replaceInput.value = '';
+      const feedback = form.querySelector('.admin-live-product-save-feedback');
+      if (validationError) { feedback.textContent = validationError; return; }
+      if (addInput) photos.push(...files.map((file) => ({ file, previewUrl: URL.createObjectURL(file) })));
+      else {
+        const index = Number(replaceInput.dataset.replaceAdminProductPhoto);
+        if (photos[index]?.previewUrl?.startsWith('blob:')) URL.revokeObjectURL(photos[index].previewUrl);
+        photos[index] = { file: files[0], previewUrl: URL.createObjectURL(files[0]) };
+      }
+      renderLiveProductPhotos(form);
+      feedback.textContent = 'Photo changes will apply when you save the product.';
+    });
+    liveProductRows?.addEventListener('click', (event) => {
+      const removeButton = event.target.closest('[data-remove-admin-product-photo]');
+      if (!removeButton) return;
+      const form = removeButton.closest('[data-live-product-extra-details]');
+      const photos = livePhotoState(form);
+      const [removed] = photos.splice(Number(removeButton.dataset.removeAdminProductPhoto), 1);
+      if (removed?.previewUrl?.startsWith('blob:')) URL.revokeObjectURL(removed.previewUrl);
+      renderLiveProductPhotos(form);
+      form.querySelector('.admin-live-product-save-feedback').textContent = 'Photo removed. Save the product to apply the change.';
+    });
     document.querySelector('[data-live-product-rows]')?.addEventListener('click', async (event) => {
       const detailsButton = event.target.closest('[data-live-product-details]');
       if (detailsButton) {
@@ -2645,25 +2710,75 @@ function setupAdminMarketplace() {
         return;
       }
       if (Array.isArray(data)) cacheSyncedRecords(marketplaceProductsKey, data);
-      toastAdmin(frozen ? 'Product frozen. The supplier was notified.' : 'Product is live again. The supplier was notified.');
+      toastAdmin(frozen ? 'Product hidden from the Marketplace. The store was notified.' : 'Product is visible in the Marketplace again. The store was notified.');
       render();
     });
-    document.querySelector('[data-live-product-rows]')?.addEventListener('submit', (event) => {
+    document.querySelector('[data-live-product-rows]')?.addEventListener('submit', async (event) => {
       const form = event.target.closest('[data-live-product-extra-details]');
       if (!form) return;
       event.preventDefault();
       const products = loadMarketplaceProducts();
       const product = products.find((entry) => entry.id === form.dataset.liveProductExtraDetails);
       if (!product) return;
-      product.suitableBreeds = form.elements.suitableBreeds.value.trim();
-      product.issues = form.elements.issues.value.trim();
-      product.extraDescription = form.elements.extraDescription.value.trim();
-      product.petTypes = form.elements.petTypes.value.trim();
-      product.ingredients = form.elements.ingredients.value.trim();
-      product.nutrition = form.elements.nutrition.value.trim();
-      localStorage.setItem(marketplaceProductsKey, JSON.stringify(products));
-      render();
-      toastAdmin('Product details saved.');
+      const fields = form.elements;
+      const variant = (form.dataset.variantId
+        ? (product.variants || []).find((item) => String(item.id || '') === form.dataset.variantId)
+        : null) || product.variants?.[Number(form.dataset.variantIndex)];
+      if (!variant) return;
+      const feedback = form.querySelector('.admin-live-product-save-feedback');
+      const photos = livePhotoState(form);
+      const photoValidationError = await validateAdminProductPhotos(photos.filter((photo) => photo.file).map((photo) => photo.file), photos.length);
+      if (photoValidationError) {
+        feedback.textContent = photoValidationError;
+        return;
+      }
+      product.name = fields.name.value.trim();
+      product.category = fields.category.value.trim();
+      product.description = fields.description.value.trim();
+      product.petTypes = fields.petTypes.value.trim();
+      product.suitableBreeds = fields.suitableBreeds.value.trim();
+      product.issues = fields.issues.value.trim();
+      product.extraDescription = fields.extraDescription.value.trim();
+      product.ingredients = fields.ingredients.value.trim();
+      product.nutrition = fields.nutrition.value.trim();
+      const supplierName = fields.supplierName.value.trim();
+      variant.label = fields.variantLabel.value.trim();
+      variant.supplierId = supplierName;
+      variant.supplier = supplierName;
+      variant.price = Number(fields.price.value);
+      // Linked Marketplace stock is derived from warehouse lots by Supabase.
+      // Keep the catalogue cache from sending an editable/stale quantity.
+      if (fields.stock) variant.stock = Number(fields.stock.value);
+      variant.cost = Number(fields.cost.value) || 0;
+      variant.sku = fields.sku.value.trim();
+      variant.supplierSku = fields.supplierSku.value.trim();
+      const submit = form.querySelector('[type="submit"]');
+      submit.disabled = true;
+      feedback.textContent = 'Saving product details…';
+      try {
+        const { data: authData, error: authError } = await supabase.auth.getUser();
+        if (authError || !authData.user) throw authError || new Error('Sign in to manage product photos.');
+        const images = [];
+        const uploadBatch = crypto.randomUUID();
+        for (const [index, photo] of photos.entries()) {
+          if (!photo.file) { images.push(photo.url); continue; }
+          const extension = photo.file.type === 'image/jpeg' ? 'jpg' : photo.file.type.split('/')[1];
+          const path = `${authData.user.id}/admin/${uploadBatch}/${index + 1}.${extension}`;
+          const { error: uploadError } = await supabase.storage.from('marketplace-submissions').upload(path, photo.file, { contentType: photo.file.type, upsert: false });
+          if (uploadError) throw uploadError;
+          images.push(supabase.storage.from('marketplace-submissions').getPublicUrl(path).data.publicUrl);
+        }
+        product.images = images;
+        await saveSharedAppData(marketplaceProductsKey, products);
+        try { await refreshMarketplaceCatalogFromDatabase(); }
+        catch (stockRefreshError) { console.warn('Saved Marketplace product, but could not refresh its warehouse stock total:', stockRefreshError); }
+        photos.forEach((photo) => { if (photo.previewUrl?.startsWith('blob:')) URL.revokeObjectURL(photo.previewUrl); });
+        render();
+        toastAdmin('All product details saved.');
+      } catch (error) {
+        submit.disabled = false;
+        feedback.textContent = error.message || 'Product details could not be saved.';
+      }
     });
   }
   const returnCasesTarget = document.querySelector('[data-marketplace-return-cases]');
@@ -2675,7 +2790,7 @@ function setupAdminMarketplace() {
       return;
     }
     const cases = data || [];
-    returnCasesTarget.innerHTML = cases.length ? `<div class="admin-market-return-case-list">${cases.map((itemReturn) => `<article class="admin-market-return-case"><header><strong>${escapeHTML(itemReturn.productName || 'Product')} · ${escapeHTML(itemReturn.variantLabel || 'Variant')} × ${Number(itemReturn.quantity) || 1}</strong><span>${escapeHTML(itemReturn.status)}</span></header><p>Order ${escapeHTML(itemReturn.orderReference || itemReturn.orderId)} · Supplier ${escapeHTML(itemReturn.supplierName || '—')}</p><p>Customer: ${escapeHTML(itemReturn.customerName || '—')} · ${escapeHTML(itemReturn.customerPhone || '—')}</p><p>Reason: ${escapeHTML(itemReturn.reason || '—')}</p>${itemReturn.supplierResponse ? `<p>Supplier response: ${escapeHTML(itemReturn.supplierResponse)}</p>` : ''}<b>Refund: MYR ${Number(itemReturn.refundAmount || 0).toFixed(2)} (product ${Number(itemReturn.paidAmount || 0).toFixed(2)} + shipping ${Number(itemReturn.shippingRefund || 0).toFixed(2)})</b>${itemReturn.photoPath ? `<a href="#" data-marketplace-return-photo="${escapeHTML(itemReturn.photoPath)}" target="_blank" rel="noopener noreferrer">View customer photo</a>` : ''}<div class="admin-market-return-actions">${itemReturn.status === 'Admin Review' ? `<button type="button" class="button button-primary" data-admin-return-action="approve" data-return-id="${escapeHTML(itemReturn.returnId)}">Approve Return</button><button type="button" class="button button-light" data-admin-return-action="reject" data-return-id="${escapeHTML(itemReturn.returnId)}">Reject Return</button>` : `<button type="button" class="button button-light" data-admin-return-action="refunded" data-return-id="${escapeHTML(itemReturn.returnId)}">Mark Refund Sent</button><small>Use only after the refund has been sent through the original payment method.</small>`}</div></article>`).join('')}</div>` : '<p class="admin-market-empty">No return cases need Manager or Director review.</p>';
+    returnCasesTarget.innerHTML = cases.length ? `<div class="admin-market-return-case-list">${cases.map((itemReturn) => `<article class="admin-market-return-case"><header><strong>${escapeHTML(itemReturn.productName || 'Product')} · ${escapeHTML(itemReturn.variantLabel || 'Variant')} × ${Number(itemReturn.quantity) || 1}</strong><span>${escapeHTML(itemReturn.status)}</span></header><p>Order ${escapeHTML(itemReturn.orderReference || itemReturn.orderId)} · Store ${escapeHTML(itemReturn.supplierName || '—')}</p><p>Customer: ${escapeHTML(itemReturn.customerName || '—')} · ${escapeHTML(itemReturn.customerPhone || '—')}</p><p>Reason: ${escapeHTML(itemReturn.reason || '—')}</p>${itemReturn.supplierResponse ? `<p>Store response: ${escapeHTML(itemReturn.supplierResponse)}</p>` : ''}<b>Refund: MYR ${Number(itemReturn.refundAmount || 0).toFixed(2)} (product ${Number(itemReturn.paidAmount || 0).toFixed(2)} + shipping ${Number(itemReturn.shippingRefund || 0).toFixed(2)})</b>${itemReturn.photoPath ? `<a href="#" data-marketplace-return-photo="${escapeHTML(itemReturn.photoPath)}" target="_blank" rel="noopener noreferrer">View customer photo</a>` : ''}<div class="admin-market-return-actions">${itemReturn.status === 'Admin Review' ? `<button type="button" class="button button-primary" data-admin-return-action="approve" data-return-id="${escapeHTML(itemReturn.returnId)}">Approve Return</button><button type="button" class="button button-light" data-admin-return-action="reject" data-return-id="${escapeHTML(itemReturn.returnId)}">Reject Return</button>` : `<button type="button" class="button button-light" data-admin-return-action="refunded" data-return-id="${escapeHTML(itemReturn.returnId)}">Mark Refund Sent</button><small>Use only after the refund has been sent through the original payment method.</small>`}</div></article>`).join('')}</div>` : '<p class="admin-market-empty">No return cases need Manager or Director review.</p>';
     for (const link of returnCasesTarget.querySelectorAll('[data-marketplace-return-photo]')) {
       const { data: signed } = await supabase.storage.from('marketplace-return-evidence').createSignedUrl(link.dataset.marketplaceReturnPhoto, 300);
       if (signed?.signedUrl) link.href = signed.signedUrl;
@@ -2690,7 +2805,7 @@ function setupAdminMarketplace() {
     const action = button.dataset.adminReturnAction;
     const reason = action === 'reject' ? window.prompt('Enter the reason for rejecting this return request.') : '';
     if (action === 'reject' && !reason?.trim()) return;
-    if (action !== 'reject' && !window.confirm(action === 'approve' ? 'Approve this return? The supplier will coordinate the return shipment.' : 'Confirm that the refund has already been sent through the original payment method?')) return;
+    if (action !== 'reject' && !window.confirm(action === 'approve' ? 'Approve this return? The store will coordinate the return shipment.' : 'Confirm that the refund has already been sent through the original payment method?')) return;
     button.disabled = true;
     const result = action === 'refunded'
       ? await supabase.rpc('complete_marketplace_item_refund', { p_return_id: button.dataset.returnId })
@@ -2700,7 +2815,7 @@ function setupAdminMarketplace() {
       toastAdmin(result.error.message || 'The return request could not be updated.');
       return;
     }
-    toastAdmin(action === 'approve' ? 'Return approved. The supplier can coordinate its return.' : action === 'reject' ? 'Return rejected with the recorded reason.' : 'Refund marked as sent.');
+    toastAdmin(action === 'approve' ? 'Return approved. The store can coordinate its return.' : action === 'reject' ? 'Return rejected with the recorded reason.' : 'Refund marked as sent.');
     await loadReturnCases();
   });
   const orderList = document.querySelector('.admin-market-order-list');
@@ -2733,7 +2848,7 @@ function setupAdminMarketplace() {
       const action = button.dataset.adminReturnAction;
       const reason = action === 'reject' ? window.prompt('Enter the reason for rejecting this return request.') : '';
       if (action === 'reject' && !reason?.trim()) return;
-      if (action !== 'reject' && !window.confirm(action === 'approve' ? 'Approve the return request? The supplier will coordinate the return shipment.' : 'Confirm that the refund has already been sent through the original payment method?')) return;
+      if (action !== 'reject' && !window.confirm(action === 'approve' ? 'Approve the return request? The store will coordinate the return shipment.' : 'Confirm that the refund has already been sent through the original payment method?')) return;
       button.disabled = true;
       const result = action === 'refunded'
         ? await supabase.rpc('complete_marketplace_item_refund', { p_return_id: button.dataset.returnId })
@@ -2743,7 +2858,7 @@ function setupAdminMarketplace() {
         toastAdmin(result.error.message || 'The return request could not be updated.');
         return;
       }
-      toastAdmin(action === 'approve' ? 'Return approved. The supplier can coordinate its return.' : action === 'reject' ? 'Return rejected with the recorded reason.' : 'Refund marked as sent.');
+      toastAdmin(action === 'approve' ? 'Return approved. The store can coordinate its return.' : action === 'reject' ? 'Return rejected with the recorded reason.' : 'Refund marked as sent.');
       window.setTimeout(() => window.dispatchEvent(new Event('hashchange')), 400);
     });
   }
@@ -2915,14 +3030,14 @@ function setupAdminMarketplace() {
       const itemSupplier = item.supplierId || variant?.supplierId || variant?.supplier || 'Unassigned';
       if (String(itemSupplier).toLowerCase() === supplierName.toLowerCase()) supplierProducts.push(item);
     });
-    if (!supplierProducts.length) { toastAdmin('No order products were found for this supplier.'); return; }
+    if (!supplierProducts.length) { toastAdmin('No order products were found for this store.'); return; }
     const recipientName = order.address?.name || order.customerName || 'Not provided';
     const recipientPhone = order.deliveryPhone || order.address?.phone || order.customerPhone || 'Not provided';
     const recipientAddress = [order.address?.street, order.address?.postcode, order.address?.city, order.address?.state].filter(Boolean).join(', ') || 'Not provided';
     const orderDate = order.createdAt ? new Date(order.createdAt).toLocaleDateString('en-MY') : order.date || 'Not provided';
     const text = [
       'FURGO ORDER DETAILS',
-      `Supplier : ${supplierName}`,
+      `Store : ${supplierName}`,
       `Order No: ${order.reference || order.id || 'Not provided'}`,
       `Date: ${orderDate}`,
       '',
@@ -2932,8 +3047,8 @@ function setupAdminMarketplace() {
       'Products:',
       ...supplierProducts.map((item) => `- ${item.name} — ${item.variantLabel} × ${item.quantity}`),
     ].join('\n');
-    try { await navigator.clipboard.writeText(text); toastAdmin('Supplier order details copied.'); }
-    catch { const field = document.createElement('textarea'); field.value = text; document.body.append(field); field.select(); document.execCommand('copy'); field.remove(); toastAdmin('Supplier order details copied.'); }
+    try { await navigator.clipboard.writeText(text); toastAdmin('Store order details copied.'); }
+    catch { const field = document.createElement('textarea'); field.value = text; document.body.append(field); field.select(); document.execCommand('copy'); field.remove(); toastAdmin('Store order details copied.'); }
   }));
   document.querySelectorAll('[data-tracking-form]').forEach((form) => form.addEventListener('submit', (event) => {
     event.preventDefault();
@@ -2965,21 +3080,12 @@ function setupAdminMarketplace() {
       const reason = window.prompt('Enter a reason for rejecting this transfer:');
       if (!reason?.trim()) return;
       order.paymentStatus = 'Payment Rejected'; order.status = 'Payment Rejected'; order.paymentRejectionReason = reason.trim();
-      order.inventoryRestoredAt = new Date().toISOString();
-      const products = loadMarketplaceProducts();
-      order.items.forEach((item) => { const variant = products.find((product) => product.id === item.productId)?.variants.find((entry) => entry.id === item.variantId); if (variant) variant.stock = Number(variant.stock) + Number(item.quantity); });
-      localStorage.setItem(marketplaceProductsKey, JSON.stringify(products));
     } else {
-      if (order.inventoryRestoredAt) {
-        const products = loadMarketplaceProducts();
-        order.items.forEach((item) => { const variant = products.find((product) => product.id === item.productId)?.variants.find((entry) => entry.id === item.variantId); if (variant) variant.stock = Math.max(0, Number(variant.stock) - Number(item.quantity)); });
-        localStorage.setItem(marketplaceProductsKey, JSON.stringify(products));
-        delete order.inventoryRestoredAt;
-      }
       order.paymentStatus = 'Paid'; order.status = 'Paid / Processing';
     }
     try { await saveOrderRecords(marketplaceOrdersKey, order, orders); }
     catch (error) { toastAdmin(`Payment decision could not be saved online: ${error.message || 'Please try again.'}`); return; }
+    try { await refreshMarketplaceCatalogFromDatabase(); } catch (refreshError) { console.warn('Marketplace stock cache refresh deferred:', refreshError); }
     void recordAdminAction(button.hasAttribute('data-reject-payment') ? 'marketplace_payment_rejected' : 'marketplace_payment_approved', 'marketplace_order', order.reference || order.id, { status: order.paymentStatus });
     render();
   }));
@@ -2991,10 +3097,14 @@ function setupAdminMarketplace() {
     const orders = loadMarketplaceOrders();
     const order = orders.find((item) => item.id === input.dataset.orderReceipt);
     if (order && data) {
-      order.receipt = { name: file.name, data };
-      order.status = 'In Progress';
-      order.adminStatus = 'In Progress';
-      order.adminReceiptUploadedAt = new Date().toISOString();
+      const previousStatus = customerOrderStatus({ ...order, serviceId: 'marketplace' });
+      order.receipt = { name: file.name, data, uploadedAt: new Date().toISOString(), previousStatus };
+      order.adminReceiptUploadedAt = order.receipt.uploadedAt;
+      if (!['Shipped', 'Completed', 'Cancelled'].includes(previousStatus)) {
+        order.status = 'Received Order';
+        order.adminStatus = 'Received Order';
+        order.statusHistory = [...(order.statusHistory || []), { status: 'Received Order', previousStatus, changedAt: order.adminReceiptUploadedAt, changedBy: 'Admin receipt upload' }];
+      }
       try { await saveOrderRecords(marketplaceOrdersKey, order, orders); }
       catch (error) { toastAdmin(`Receipt could not be saved online: ${error.message || 'Please try again.'}`); return; }
       void recordAdminAction('receipt_uploaded', 'marketplace_order', order.reference || order.id);
@@ -3004,7 +3114,7 @@ function setupAdminMarketplace() {
   document.querySelector('[data-export-market-csv]')?.addEventListener('click', () => {
     const supplier = document.querySelector('[data-market-export-supplier]').value;
     const products = loadMarketplaceProducts();
-    const rows = [['Order Reference', 'Date', 'Status', 'Customer', 'Phone', 'Address', 'Supplier', 'Item', 'Variant', 'Quantity', 'Retail Unit Price', 'Cost Unit Price']];
+    const rows = [['Order Reference', 'Date', 'Status', 'Customer', 'Phone', 'Address', 'Store', 'Item', 'Variant', 'Quantity', 'Retail Unit Price', 'Cost Unit Price']];
     loadMarketplaceOrders().forEach((order) => order.items.forEach((item) => {
       const variant = products.find((product) => product.id === item.productId)?.variants.find((entry) => entry.id === item.variantId);
       const supplierName = variant?.supplierId || variant?.supplier || item.supplierId || 'Unassigned';
@@ -3026,10 +3136,71 @@ function setupAdminMarketplace() {
   });
 }
 
-// Supplier users can submit products and see only order lines assigned to their supplier.
+// Store users can submit products and see only order lines assigned to their supplier.
 function setupMarketplaceSupplierPortal() {
   setupPortalNotifications();
-  const supplierProfile = (() => { try { return JSON.parse(sessionStorage.getItem('furgo-demo-user-profile') || '{}'); } catch { return {}; } })();
+  const supplierProfile = (() => {
+    let profile = {};
+    let context = null;
+    try { profile = JSON.parse(sessionStorage.getItem('furgo-demo-user-profile') || '{}'); } catch { profile = {}; }
+    try { context = JSON.parse(sessionStorage.getItem('furgo-director-store-context') || 'null'); } catch { context = null; }
+    if (profile.role === 'director' && context?.storeName) return { ...profile, role: 'supplier', supplierName: context.storeName, supplierOwnerIds: context.ownerIds || [], directorStoreView: true };
+    return profile;
+  })();
+  const directorStoreReturnLink = document.querySelector('[data-leave-director-store]');
+  directorStoreReturnLink?.addEventListener('click', () => sessionStorage.removeItem('furgo-director-store-context'));
+  const warehouseOwnerIds = () => supplierProfile.directorStoreView
+    ? ((supplierProfile.supplierOwnerIds || []).filter(Boolean).length ? (supplierProfile.supplierOwnerIds || []).filter(Boolean) : [supplierProfile.id].filter(Boolean))
+    : [supplierProfile.id].filter(Boolean);
+  const warehouseInsertOwnerId = () => warehouseOwnerIds()[0] || supplierProfile.id;
+  const warehouseProductCodePrefix = (category) => ({
+    food: 'FD',
+    snacks: 'SN',
+    supplements: 'ST',
+    toys: 'TY',
+    grooming: 'GR',
+    other: 'OT',
+  })[String(category || '').trim().toLowerCase()] || 'OT';
+  const generateWarehouseProductCode = (category) => {
+    const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+    const bytes = crypto.getRandomValues(new Uint8Array(8));
+    const suffix = Array.from(bytes, (byte) => alphabet[byte & 31]).join('');
+    return `${warehouseProductCodePrefix(category)}-${suffix}`;
+  };
+  const buildWarehouseMarketplaceListing = (warehouseProductId, product = {}) => {
+    const images = Array.isArray(product.images) ? product.images : [];
+    const variants = Array.isArray(product.variants) ? product.variants : [];
+    return {
+      ...product,
+      id: product.id || `supplier-${crypto.randomUUID()}`,
+      warehouseProductId,
+      name: String(product.name || '').trim(),
+      images,
+      hidden: false,
+      variants: variants.map((variant, index) => ({
+        ...variant,
+        id: variant.id || `warehouse-option-${crypto.randomUUID()}-${index + 1}`,
+        label: String(variant.label || [variant.option, variant.variant].filter(Boolean).join(' · ') || 'Standard'),
+        price: Number(variant.price) || 0,
+        stock: Number.isInteger(Number(variant.stock)) && Number(variant.stock) >= 0 ? Number(variant.stock) : 0,
+        imageUrl: variant.imageUrl || images[0] || '',
+        supplierId: supplierProfile.supplierName || '',
+        supplier: supplierProfile.supplierName || '',
+        warehouseProductId,
+        warehouseVariantId: variant.id || '',
+      })),
+    };
+  };
+  const submitWarehouseMarketplaceListing = async (warehouseProductId, product) => {
+    const listing = buildWarehouseMarketplaceListing(warehouseProductId, product);
+    const { data, error } = await supabase.rpc('submit_marketplace_supplier_product', {
+      p_action: 'add', p_product_id: null, p_product_data: listing,
+    });
+    if (error) throw error;
+    return data;
+  };
+  let refreshWarehouseInventory = null;
+  let renderPackagingOrders = () => {};
   const supplierProfileForm = document.querySelector('[data-supplier-profile-form]');
   if (supplierProfileForm) {
     const photoInput = supplierProfileForm.querySelector('[data-supplier-profile-photo]');
@@ -3143,7 +3314,7 @@ function setupMarketplaceSupplierPortal() {
       const { data: authData } = await supabase.auth.getUser();
       if (!authData.user) return;
       const { data, error } = await supabase.from('profiles').select('avatar_path,supplier_contact_phone').eq('id', authData.user.id).maybeSingle();
-      if (error) { console.warn('Supplier profile details could not load:', error); return; }
+      if (error) { console.warn('Store profile details could not load:', error); return; }
       const phoneInput = supplierProfileForm.elements.contactPhone;
       if (phoneInput && data?.supplier_contact_phone) phoneInput.value = data.supplier_contact_phone;
       if (data?.avatar_path) {
@@ -3181,7 +3352,7 @@ function setupMarketplaceSupplierPortal() {
         const { error: profileError } = await supabase.from('profiles').update(updates).eq('id', authData.user.id);
         if (profileError) throw profileError;
         const { error: metadataError } = await supabase.auth.updateUser({ data: { display_name: displayName } });
-        if (metadataError) console.warn('Supplier profile name saved, but Auth metadata could not be refreshed:', metadataError);
+        if (metadataError) console.warn('Store profile name saved, but Auth metadata could not be refreshed:', metadataError);
         if (uploadedPath && existing?.avatar_path) await supabase.storage.from('supplier-profile-photos').remove([existing.avatar_path]);
         const savedProfile = { ...supplierProfile, name: displayName, supplierContactPhone: contactPhone, ...(uploadedPath ? { avatarPath: uploadedPath } : {}) };
         sessionStorage.setItem('furgo-demo-user-profile', JSON.stringify(savedProfile));
@@ -3196,25 +3367,61 @@ function setupMarketplaceSupplierPortal() {
         setProfileFeedback('Profile saved.');
       } catch (error) {
         if (uploadedPath) await supabase.storage.from('supplier-profile-photos').remove([uploadedPath]);
-        console.error('Supplier profile could not be saved:', error);
+        console.error('Store profile could not be saved:', error);
         setProfileFeedback(error.message || 'Your profile could not be saved. Please try again.', true);
       } finally { saveButton.disabled = false; }
     });
   }
-  const directorNotification = document.querySelector('[data-marketplace-director-notification]');
-  if (directorNotification) {
-    void supabase.from('marketplace_product_submissions').select('id', { count: 'exact', head: true }).eq('status', 'Pending Review')
-      .then(({ count, error }) => {
-        if (error) throw error;
-        if (!count) { directorNotification.hidden = true; return; }
-        directorNotification.hidden = false;
-        directorNotification.textContent = String(count);
-        directorNotification.setAttribute('aria-label', `${count} supplier product requests need review`);
-      }).catch((error) => console.warn('Director Marketplace notification could not load:', error));
-  }
+  const supplierEditor = document.querySelector('[data-supplier-editor]');
   const supplierForm = document.querySelector('[data-marketplace-supplier-product]');
   const supplierPhotoList = document.querySelector('[data-supplier-photo-list]');
+  const supplierVariantRows = supplierForm?.querySelector('[data-supplier-variant-rows]');
+  const warehouseProductCodeInput = supplierForm?.elements.warehouseProductCode;
+  supplierForm?.elements.category?.addEventListener('change', () => {
+    if (warehouseProductCodeInput?.dataset.autoGeneratedCode === 'true') {
+      warehouseProductCodeInput.value = generateWarehouseProductCode(supplierForm.elements.category.value);
+    }
+  });
   let supplierEditorImages = [];
+  const composeSupplierVariantLabel = (option, variant) => [String(option || '').trim(), String(variant || '').trim()].filter(Boolean).join(' · ') || 'Standard';
+  const readSupplierVariantRows = () => [...(supplierVariantRows?.querySelectorAll('[data-supplier-variant-row]') || [])].map((row) => ({
+    id: row.querySelector('[name="variantRowId"]')?.value || '',
+    option: row.querySelector('[name="variantOption"]')?.value || '',
+    variant: row.querySelector('[name="variantLabel"]')?.value || '',
+    label: row.querySelector('[name="variantLabel"]')?.value || '',
+    price: row.querySelector('[name="price"]')?.value ?? '',
+    stock: row.querySelector('[name="stock"]')?.value ?? '',
+    imageIndex: row.querySelector('[name="variantImageIndex"]')?.value || '0',
+  }));
+  const renderSupplierVariantRows = (variants = [{}]) => {
+    if (!supplierVariantRows) return;
+    const rows = variants.length ? variants : [{}];
+    const warehouseCreate = supplierForm?.elements.warehouseProductCreate?.value === 'true';
+    const warehouseEdit = Boolean(supplierForm?.elements.warehouseProductId?.value);
+    const photoOptions = supplierEditorImages.length
+      ? supplierEditorImages.map((photo, index) => `<option value="${index}">${index === 0 ? 'Product cover photo' : `Product photo ${index + 1}`}</option>`).join('')
+      : '<option value="0">Product cover photo (add below)</option>';
+    supplierVariantRows.innerHTML = rows.map((variant) => {
+      const imageIndex = variant.imageIndex != null ? String(variant.imageIndex) : String(Math.max(0, supplierEditorImages.findIndex((photo) => photo.url && photo.url === variant.imageUrl)));
+      const stockValue = variant.stock == null ? 0 : Number(variant.stock);
+      const optionValue = variant.option || '';
+      const variantValue = variant.variant || variant.label || '';
+      const stockField = warehouseCreate
+        ? ''
+        : warehouseEdit
+          ? `<label class="supplier-variant-stock-readonly">Stock on hand<output>${stockValue.toLocaleString()} units</output><input type="hidden" name="stock" value="${stockValue}" /></label>`
+          : `<label>Stock<input name="stock" type="number" min="0" step="1" required value="${variant.stock == null ? '' : stockValue}" /></label>`;
+      const rowMode = warehouseCreate ? ' is-warehouse-create' : warehouseEdit ? ' is-warehouse-edit' : '';
+      return `<div class="supplier-variant-row${rowMode}" data-supplier-variant-row><input type="hidden" name="variantRowId" value="${escapeHTML(variant.id || '')}" /><label>Option<input name="variantOption" maxlength="100" placeholder="e.g. Chicken Flavour (optional)" value="${escapeHTML(optionValue)}" /></label><label>Variant<input name="variantLabel" required maxlength="100" placeholder="e.g. 100 g" value="${escapeHTML(variantValue)}" /></label><label>Price (MYR)<input name="price" type="number" min="0" step="0.01" required value="${variant.price == null ? '' : Number(variant.price)}" /></label>${stockField}<label class="supplier-variant-image-field">Option photo<select name="variantImageIndex" aria-label="Photo for ${escapeHTML(composeSupplierVariantLabel(optionValue, variantValue))}">${photoOptions}</select></label><button type="button" class="supplier-variant-remove" data-remove-variant aria-label="Remove ${escapeHTML(composeSupplierVariantLabel(optionValue, variantValue))}"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M4 7h16M9 7V4h6v3m3 0-.8 13H6.8L6 7m4 4v5m4-5v5" /></svg></button></div>`;
+    }).join('');
+    [...supplierVariantRows.querySelectorAll('[data-supplier-variant-row]')].forEach((row, index) => {
+      const select = row.querySelector('[name="variantImageIndex"]');
+      if (select) select.value = String(Math.min(Number(rows[index]?.imageIndex ?? select.value ?? 0), Math.max(0, supplierEditorImages.length - 1)));
+    });
+    const removeButtons = [...supplierVariantRows.querySelectorAll('[data-remove-variant]')];
+    removeButtons.forEach((button) => { button.disabled = removeButtons.length === 1; });
+  };
+  renderSupplierVariantRows([{}]);
   const clearSupplierPhotoPreviews = () => supplierEditorImages.forEach((photo) => {
     if (photo.previewUrl?.startsWith('blob:')) URL.revokeObjectURL(photo.previewUrl);
   });
@@ -3223,7 +3430,7 @@ function setupMarketplaceSupplierPortal() {
     supplierPhotoList.hidden = supplierEditorImages.length === 0;
     supplierPhotoList.innerHTML = supplierEditorImages.map((photo, index) => {
       const preview = photo.previewUrl?.startsWith('blob:') ? photo.previewUrl : safeMarketplaceImage(photo.url);
-      return `<article class="supplier-photo-item"><img src="${escapeHTML(preview || '')}" alt="Product photo ${index + 1}" /><span>${index === 0 ? 'Cover photo' : `Photo ${index + 1}`}</span><label class="supplier-photo-change">Change<input type="file" accept="image/png,image/jpeg,image/webp,image/gif" data-replace-supplier-photo="${index}" aria-label="Change product photo ${index + 1}" /></label><button type="button" data-remove-supplier-photo="${index}" aria-label="Delete product photo ${index + 1}">Delete</button></article>`;
+      return `<article class="supplier-photo-item" draggable="true" data-supplier-photo-index="${index}" aria-label="Product photo ${index + 1}; drag to reorder"><span class="supplier-photo-drag-handle" aria-hidden="true">⠿</span><img src="${escapeHTML(preview || '')}" alt="Product photo ${index + 1}" draggable="false" /><span>${index === 0 ? 'Product cover photo' : `Product photo ${index + 1}`}</span><label class="supplier-photo-change">Change<input type="file" accept="image/png,image/jpeg,image/webp,image/gif" data-replace-supplier-photo="${index}" aria-label="Change product photo ${index + 1}" /></label><button type="button" data-remove-supplier-photo="${index}" aria-label="Delete product photo ${index + 1}">Delete</button></article>`;
     }).join('');
   };
   const resetSupplierEditor = () => {
@@ -3235,11 +3442,28 @@ function setupMarketplaceSupplierPortal() {
       supplierForm.elements.productId.value = '';
       supplierForm.elements.variantId.value = '';
       supplierForm.elements.pendingSubmissionId.value = '';
+      if (supplierForm.elements.warehouseProductId) supplierForm.elements.warehouseProductId.value = '';
+      if (supplierForm.elements.warehouseProductCreate) supplierForm.elements.warehouseProductCreate.value = '';
+      if (supplierForm.elements.warehouseProductCode) supplierForm.elements.warehouseProductCode.value = '';
+      if (supplierForm.elements.warehouseProductCode) delete supplierForm.elements.warehouseProductCode.dataset.autoGeneratedCode;
+      const warehouseCodeField = supplierForm.querySelector('[data-warehouse-product-code-field]');
+      if (warehouseCodeField) warehouseCodeField.hidden = true;
+      const formKicker = supplierEditor?.querySelector('[data-supplier-form-kicker]');
+      if (formKicker) formKicker.textContent = 'Product listing';
+      renderSupplierVariantRows([{}]);
       supplierForm.querySelector('[data-supplier-submit-label]').textContent = 'Submit Product';
       supplierForm.querySelector('[data-supplier-cancel-edit]').textContent = 'Cancel';
     }
-    const title = document.querySelector('[data-supplier-form-title]');
+    const title = supplierEditor?.querySelector('[data-supplier-form-title]');
     if (title) title.textContent = 'Add a Product';
+    const variantHeading = supplierForm?.querySelector('#supplier-variants-heading');
+    const variantHelp = supplierForm?.querySelector('.supplier-variant-editor-heading p');
+    if (variantHeading) variantHeading.textContent = 'Options & Variants';
+    if (variantHelp) variantHelp.textContent = 'Enter an option title and variant when needed. Leave the option title blank to use the variant as the customer-facing option.';
+    const formNote = supplierForm?.querySelector('.supplier-form-note');
+    if (formNote) formNote.textContent = 'Choose a suggested pet type or type your own. Separate multiple pet types with commas. Add up to 5 product photos; the first photo is the product cover photo. Each photo must be square (1:1), between 500 × 500 and 2000 × 2000 pixels, and no larger than 2 MB.';
+    const dangerZone = supplierForm?.querySelector('[data-product-details-danger-zone]');
+    if (dangerZone) { dangerZone.hidden = true; dangerZone.open = false; }
   };
   const navigateToSupplierProductEditor = (params = {}) => {
     const query = new URLSearchParams(Object.entries(params).filter(([, value]) => value));
@@ -3251,6 +3475,7 @@ function setupMarketplaceSupplierPortal() {
     const variant = product?.variants?.find((entry) => entry.id === variantId) || product?.variants?.[0];
     if (!product || !variant) return false;
     const fields = supplierForm.elements;
+    if (warehouseSupplierFields) warehouseSupplierFields.hidden = true;
     fields.productId.value = product.id;
     fields.variantId.value = variant.id || '';
     fields.pendingSubmissionId.value = '';
@@ -3260,26 +3485,134 @@ function setupMarketplaceSupplierPortal() {
     fields.petTypes.value = product.petTypes || '';
     fields.ingredients.value = product.ingredients || '';
     fields.nutrition.value = product.nutrition || '';
-    fields.price.value = Number(variant.price || 0);
-    fields.variantLabel.value = variant.label || '';
-    fields.stock.value = Number(variant.stock || 0);
+    if (supplierForm.querySelector('[data-product-details-danger-zone]')) supplierForm.querySelector('[data-product-details-danger-zone]').hidden = true;
     clearSupplierPhotoPreviews();
     supplierEditorImages = (product.images || []).map((url) => ({ url }));
+    renderSupplierVariantRows(product.variants || [variant]);
     renderSupplierPhotoList();
     document.querySelector('[data-supplier-form-title]').textContent = `Edit ${product.name}`;
     supplierForm.querySelector('[data-supplier-submit-label]').textContent = 'Save Product';
     return true;
   };
-  document.querySelector('[data-supplier-add-product]')?.addEventListener('click', () => {
-    navigateToSupplierProductEditor();
+  const openWarehouseProductEditor = (row, { stockTotal = 0, stockByVariant = {} } = {}) => {
+    if (!row || !supplierForm) return false;
+    const fields = supplierForm.elements;
+    const data = row.product_data && typeof row.product_data === 'object' ? row.product_data : {};
+    fields.productId.value = '';
+    fields.variantId.value = '';
+    fields.pendingSubmissionId.value = '';
+    fields.warehouseProductCreate.value = '';
+    fields.warehouseProductId.value = row.id;
+    fields.name.value = row.name || '';
+    fields.category.value = data.category || 'Other';
+    fields.description.value = data.description || '';
+    fields.petTypes.value = data.petTypes || '';
+    fields.ingredients.value = data.ingredients || '';
+    fields.nutrition.value = data.nutrition || '';
+    fields.warehouseProductCode.value = data.productCode || generateWarehouseProductCode(fields.category.value);
+    fields.warehouseProductCode.dataset.autoGeneratedCode = data.productCode ? 'false' : 'true';
+    const codeField = supplierForm.querySelector('[data-warehouse-product-code-field]');
+    if (codeField) codeField.hidden = false;
+    const formKicker = supplierEditor?.querySelector('[data-supplier-form-kicker]');
+    if (formKicker) formKicker.textContent = 'Warehouse Operations';
+    const variantHeading = supplierForm.querySelector('#supplier-variants-heading');
+    if (variantHeading) variantHeading.textContent = 'Options / Variants';
+    const variantHelp = supplierForm.querySelector('.supplier-variant-editor-heading p');
+    if (variantHelp) variantHelp.textContent = 'Add each size, flavour, or other option with its price and photo. Stock quantities are added separately from the product list.';
+    const formNote = supplierForm.querySelector('.supplier-form-note');
+    if (formNote) formNote.textContent = 'Add up to 5 product photos; the first photo is the product cover photo. Each photo must be square (1:1), between 500 × 500 and 2000 × 2000 pixels, and no larger than 2 MB.';
+    clearSupplierPhotoPreviews();
+    supplierEditorImages = (Array.isArray(data.images) ? data.images : data.imageUrl ? [data.imageUrl] : []).map((url) => ({ url }));
+    const variants = Array.isArray(data.variants) && data.variants.length ? data.variants : [{ label: 'Standard', price: 0, sku: data.productCode || '' }];
+    renderSupplierVariantRows(variants.map((variant) => ({
+      ...variant,
+      stock: Number(stockByVariant[String(variant.label || 'Standard')]) || 0,
+      imageIndex: Math.max(0, supplierEditorImages.findIndex((photo) => photo.url && photo.url === variant.imageUrl)),
+    })));
+    renderSupplierPhotoList();
+    const formTitle = supplierEditor?.querySelector('[data-supplier-form-title]');
+    if (formTitle) formTitle.textContent = `Edit ${row.name}`;
+    const submitLabel = supplierForm.querySelector('[data-supplier-submit-label]');
+    if (submitLabel) submitLabel.textContent = 'Save Product Details';
+    const dangerZone = supplierForm.querySelector('[data-product-details-danger-zone]');
+    const deleteButton = supplierForm.querySelector('[data-product-details-delete]');
+    const restriction = supplierForm.querySelector('[data-product-details-delete-restriction]');
+    if (dangerZone) { dangerZone.hidden = false; dangerZone.open = false; }
+    if (deleteButton && restriction) {
+      const hasStock = Number(stockTotal) > 0;
+      deleteButton.disabled = hasStock;
+      restriction.textContent = hasStock
+        ? `This product has ${Number(stockTotal).toLocaleString()} units in stock. Reduce every stock batch to zero before deleting it.`
+        : row.marketplace_product_id
+          ? 'This product is listed in Marketplace. Deleting it will also remove its listing. Deletion is available only when stock is zero.'
+          : 'Deletion is available only when stock is zero.';
+    }
+    return true;
+  };
+  const openWarehouseProductCreateEditor = () => {
+    if (!supplierForm) return;
+    resetSupplierEditor();
+    supplierForm.elements.warehouseProductCreate.value = 'true';
+    const codeField = supplierForm.querySelector('[data-warehouse-product-code-field]');
+    if (codeField) codeField.hidden = false;
+    supplierForm.elements.warehouseProductCode.value = generateWarehouseProductCode(supplierForm.elements.category.value);
+    supplierForm.elements.warehouseProductCode.dataset.autoGeneratedCode = 'true';
+    const formKicker = supplierEditor?.querySelector('[data-supplier-form-kicker]');
+    if (formKicker) formKicker.textContent = 'Warehouse Operations';
+    const variantHeading = supplierForm.querySelector('#supplier-variants-heading');
+    if (variantHeading) variantHeading.textContent = 'Options / Variants';
+    const variantHelp = supplierForm.querySelector('.supplier-variant-editor-heading p');
+    if (variantHelp) variantHelp.textContent = 'Add each size, flavour, or other option with its price and photo. Stock quantities are added separately from the product list.';
+    const formNote = supplierForm.querySelector('.supplier-form-note');
+    if (formNote) formNote.textContent = 'Add up to 5 product photos; the first photo is the product cover photo. Each photo must be square (1:1), between 500 × 500 and 2000 × 2000 pixels, and no larger than 2 MB.';
+    const formTitle = supplierEditor?.querySelector('[data-supplier-form-title]');
+    if (formTitle) formTitle.textContent = 'Add Warehouse Product';
+    const submitLabel = supplierForm.querySelector('[data-supplier-submit-label]');
+    if (submitLabel) submitLabel.textContent = 'Save Warehouse Product';
+    const dangerZone = supplierForm.querySelector('[data-product-details-danger-zone]');
+    if (dangerZone) { dangerZone.hidden = true; dangerZone.open = false; }
+    renderSupplierVariantRows([{}]);
+  };
+  supplierForm?.querySelector('[data-product-details-delete]')?.addEventListener('click', async (event) => {
+    const button = event.currentTarget;
+    const productId = supplierForm.elements.warehouseProductId?.value;
+    if (!productId || button.disabled) return;
+    button.disabled = true;
+    try {
+      const { data: product, error: productError } = await supabase.from('warehouse_products').select('id,name,marketplace_product_id').eq('id', productId).maybeSingle();
+      if (productError) throw productError;
+      const { data: lots, error: lotError } = await supabase.from('warehouse_inventory_lots').select('quantity').eq('warehouse_product_id', productId);
+      if (lotError) throw lotError;
+      if (!product) throw new Error('This warehouse product could not be found. Refresh the Inventory page and try again.');
+      const stockTotal = (lots || []).reduce((sum, lot) => sum + (Number(lot.quantity) || 0), 0);
+      if (stockTotal > 0) {
+        setSupplierFeedback(`This product has ${stockTotal.toLocaleString()} units in stock. Reduce every stock batch to zero before deleting it.`, true);
+        return;
+      }
+      if (!window.confirm(`Delete “${product.name}” from Warehouse Stock and remove its Marketplace listing? This cannot be undone.`)) return;
+      const { error } = await supabase.rpc('delete_store_warehouse_product', { p_warehouse_product_id: productId });
+      if (error) throw error;
+      window.location.hash = '#supplier?tab=inventory';
+    } catch (error) {
+      setSupplierFeedback(error.message || 'The warehouse product could not be deleted.', true);
+    } finally { button.disabled = false; }
   });
-  document.querySelector('[data-supplier-view-shop]')?.addEventListener('click', () => {
-    document.querySelectorAll('[data-supplier-section]').forEach((section) => { section.hidden = section.dataset.supplierSection !== 'shop'; });
-    window.scrollTo({ top: 0, behavior: 'smooth' });
+  document.querySelector('[data-supplier-add-variant]')?.addEventListener('click', () => {
+    const current = readSupplierVariantRows();
+    if (current.length >= 30) { setSupplierFeedback('A product can have up to 30 options.', true); return; }
+    current.push({});
+    renderSupplierVariantRows(current);
+  });
+  supplierVariantRows?.addEventListener('click', (event) => {
+    const removeButton = event.target.closest('[data-remove-variant]');
+    if (!removeButton || removeButton.disabled) return;
+    removeButton.closest('[data-supplier-variant-row]')?.remove();
+    const removeButtons = [...supplierVariantRows.querySelectorAll('[data-remove-variant]')];
+    removeButtons.forEach((button) => { button.disabled = removeButtons.length === 1; });
   });
   document.querySelectorAll('[data-supplier-tab]').forEach((button) => button.addEventListener('click', () => {
     const target = button.dataset.supplierTab;
-    const supplierNavIcons = { home: ['Icon-01.png', 'Icon-02.png'], orders: ['Icon-03.png', 'Icon-04.png'], help: ['Icon-05.png', 'Icon-06.png'], profile: ['Icon-07.png', 'Icon-08.png'] };
+    const supplierNavIcons = { home: ['Icon-01.png', 'Icon-02.png'], packaging: ['Icon-23.png', 'Icon-24.png'], inventory: ['Icon-25.png', 'Icon-26.png'], profile: ['Icon-07.png', 'Icon-08.png'] };
     document.querySelectorAll('[data-supplier-section]').forEach((section) => { section.hidden = section.dataset.supplierSection !== target; });
     document.querySelectorAll('[data-supplier-tab]').forEach((tab) => {
       const active = tab.dataset.supplierTab === target;
@@ -3290,11 +3623,1424 @@ function setupMarketplaceSupplierPortal() {
     });
     window.history.replaceState(null, '', `#supplier?tab=${encodeURIComponent(target)}`);
     window.scrollTo({ top: 0, behavior: 'smooth' });
+    if (target === 'inventory') void refreshWarehouseInventory?.().catch((error) => console.error('Warehouse inventory load failed:', error));
   }));
+  const inventorySection = document.querySelector('[data-supplier-section="inventory"]');
+  if (inventorySection) {
+    const receivePanel = inventorySection.querySelector('.supplier-inventory-receive');
+    const receiveDialog = document.createElement('dialog');
+    receiveDialog.className = 'supplier-inventory-receive-dialog';
+    if (receivePanel) {
+      receivePanel.parentNode.insertBefore(receiveDialog, receivePanel);
+      receiveDialog.append(receivePanel);
+    }
+    const inventoryList = inventorySection.querySelector('[data-warehouse-inventory-list]');
+    let inventoryRouteFocusHandled = false;
+    const inventoryForm = inventorySection.querySelector('[data-warehouse-inventory-form]');
+    const editDialog = inventorySection.querySelector('[data-inventory-edit-dialog]');
+    const editForm = inventorySection.querySelector('[data-inventory-edit-form]');
+    const productDialog = inventorySection.querySelector('[data-warehouse-product-dialog]');
+    const productForm = inventorySection.querySelector('[data-warehouse-product-form]');
+    productForm?.elements.category?.addEventListener('change', () => {
+      if (!productForm.elements.id.value) productForm.elements.productCode.value = generateWarehouseProductCode(productForm.elements.category.value);
+    });
+    const inventoryFeedback = inventorySection.querySelector('[data-inventory-feedback]');
+    const stockDialog = document.createElement('dialog');
+    stockDialog.className = 'supplier-inventory-edit-dialog supplier-stock-details-dialog';
+    stockDialog.innerHTML = '<div class="supplier-stock-details-content" data-stock-details-content></div><div class="supplier-inventory-form-actions"><button type="button" class="button button-light" data-stock-details-close>Close</button></div>';
+    inventorySection.append(stockDialog);
+    const lowStockDialog = document.createElement('dialog');
+    lowStockDialog.className = 'supplier-inventory-edit-dialog supplier-low-stock-dialog';
+    lowStockDialog.innerHTML = '<form class="supplier-low-stock-form" data-low-stock-form><h2>Low Stock Alert</h2><p data-low-stock-option></p><label class="supplier-low-stock-toggle"><input type="checkbox" name="enabled" checked /><span>Enable low stock alert for this option</span></label><label>Alert when stock reaches or falls below<input name="threshold" type="number" min="0" step="1" value="5" required /></label><p class="supplier-portal-feedback" data-low-stock-feedback role="status" aria-live="polite"></p><div class="supplier-inventory-form-actions"><button type="button" class="button button-light" data-low-stock-cancel>Cancel</button><button type="submit" class="button button-primary">Save Low Stock Setting</button></div></form>';
+    inventorySection.append(lowStockDialog);
+    const stockAdjustmentDialog = document.createElement('dialog');
+    stockAdjustmentDialog.className = 'supplier-inventory-edit-dialog supplier-stock-adjust-dialog';
+    stockAdjustmentDialog.innerHTML = '<form class="supplier-stock-adjust-form" data-stock-adjust-form><input type="hidden" name="lotId" /><h2>Adjust Batch Stock</h2><p data-stock-adjust-summary></p><label>Quantity to deduct<span class="supplier-stock-adjust-quantity"><input name="quantity" type="number" min="1" step="1" required /><button type="button" data-stock-adjust-all>All</button></span></label><label>Deduction reason<select name="reason" required><option value="">Choose a reason</option><option>Return to supplier</option><option>Clear expired stock</option><option>Damaged / lost stock</option><option>Stock correction</option><option>Other</option></select></label><label class="supplier-stock-adjust-notes">Details<textarea name="notes" maxlength="500" placeholder="Add context for this stock change" rows="3"></textarea></label><p class="supplier-portal-feedback" data-stock-adjust-feedback role="status" aria-live="polite"></p><div class="supplier-inventory-form-actions"><button type="button" class="button button-light" data-stock-adjust-cancel>Cancel</button><button type="submit" class="button button-primary">Save Adjustment</button></div></form>';
+    inventorySection.append(stockAdjustmentDialog);
+    const stockAdjustmentForm = stockAdjustmentDialog.querySelector('[data-stock-adjust-form]');
+    const stockHistoryDialog = document.createElement('dialog');
+    stockHistoryDialog.className = 'supplier-inventory-edit-dialog supplier-stock-history-dialog';
+    stockHistoryDialog.innerHTML = '<div class="supplier-stock-history-content" data-stock-history-content></div><div class="supplier-inventory-form-actions"><button type="button" class="button button-primary" data-stock-history-close>Back to Stock Details</button></div>';
+    inventorySection.append(stockHistoryDialog);
+    const stockHistoryExportDialog = document.createElement('dialog');
+    stockHistoryExportDialog.className = 'supplier-inventory-edit-dialog supplier-stock-history-export-dialog';
+    stockHistoryExportDialog.innerHTML = '<form data-stock-history-export-form><h2>Choose Batches for PDF</h2><p class="supplier-stock-details-total">Filter by stock received date, then choose which batches to include.</p><label class="supplier-stock-export-date-filter">Received date range<select data-stock-export-date-filter><option value="all">All received dates</option><option value="month">Past month</option><option value="year">Past 12 months</option><option value="custom">Custom date range</option></select></label><div class="supplier-stock-export-custom-range" data-stock-export-custom-range hidden><label>From<input type="date" data-stock-export-from /></label><label>To<input type="date" data-stock-export-to /></label></div><p class="supplier-stock-export-selection-count" data-stock-export-selection-count></p><label class="supplier-stock-export-select-all"><input type="checkbox" data-stock-export-select-all checked /><span>Select all batches</span></label><div class="supplier-stock-export-batches" data-stock-export-batches></div><p class="supplier-portal-feedback" data-stock-export-feedback role="status" aria-live="polite"></p><div class="supplier-inventory-form-actions"><button type="button" class="button button-light" data-stock-export-back>Back to History</button><button type="button" class="button button-primary" data-stock-export-download>Download Stock Statement</button></div></form>';
+    inventorySection.append(stockHistoryExportDialog);
+    let stockHistoryExportData = null;
+    const supplierDetailsDialog = document.createElement('dialog');
+    supplierDetailsDialog.className = 'supplier-inventory-edit-dialog supplier-inventory-supplier-dialog';
+    supplierDetailsDialog.innerHTML = '<form class="supplier-stock-details-content supplier-details-form" data-supplier-details-form><h2>Seller Details</h2><p class="supplier-stock-details-total" data-supplier-details-product></p><div class="supplier-inventory-form"><label>Business name<input name="sellerName" readonly /></label><label>Contact name<input name="sellerContact" readonly /></label><label>Contact email<input name="sellerEmail" type="email" readonly /></label><label>Contact phone<input name="sellerPhone" readonly /></label><label class="supplier-inventory-notes">Business address<input name="sellerAddress" readonly /></label></div><div class="supplier-inventory-form-actions"><button type="button" class="button button-light" data-supplier-details-close>Close</button></div></form>';
+    inventorySection.append(supplierDetailsDialog);
+    stockDialog.addEventListener('cancel', () => { stockDetailContext = null; });
+    let inventoryRows = [];
+    let warehouseProducts = [];
+    let inventoryLoaded = false;
+    let productsLoaded = false;
+    let stockDetailContext = null;
+    const productData = (row) => row?.product_data && typeof row.product_data === 'object' ? row.product_data : {};
+    const productVariants = (row) => {
+      const variants = Array.isArray(productData(row).variants) ? productData(row).variants : [];
+      return variants.length ? variants : [{ id: 'standard', label: 'Standard', price: 0, sku: productData(row).productCode || '' }];
+    };
+    const supplierInfoFor = (product, variant = {}) => {
+      const data = productData(product);
+      const seller = data.sellerDetails && typeof data.sellerDetails === 'object' ? data.sellerDetails : {};
+      const supplierValue = data.supplierDetails || data.supplierName || data.supplier || variant.supplierDetails || variant.supplier || variant.supplierId || variant.supplierName || '';
+      const supplierObject = supplierValue && typeof supplierValue === 'object' ? supplierValue : {};
+      const name = String(seller.businessName || supplierObject.name || supplierObject.companyName || variant.supplierName || data.supplierName || (typeof supplierValue === 'string' ? supplierValue : '') || 'Not provided').trim();
+      const contact = String(seller.contactName || variant.supplierContact || variant.supplierPhone || supplierObject.contact || supplierObject.phone || data.supplierContact || data.supplierPhone || '').trim();
+      const email = String(seller.contactEmail || variant.supplierEmail || supplierObject.email || data.supplierEmail || '').trim();
+      const rawAddress = seller.businessAddress || variant.supplierAddress || supplierObject.address || data.supplierAddress || data.address || '';
+      const address = typeof rawAddress === 'string'
+        ? rawAddress.trim()
+        : [rawAddress?.line1 || rawAddress?.street, rawAddress?.line2, rawAddress?.postcode, rawAddress?.city, rawAddress?.state, rawAddress?.country].filter(Boolean).join(', ');
+      return { name, contact, email, address };
+    };
+    const showSupplierDetails = (product) => {
+      const form = supplierDetailsDialog.querySelector('[data-supplier-details-form]');
+      const data = productData(product);
+      const seller = data.sellerDetails && typeof data.sellerDetails === 'object' ? data.sellerDetails : {};
+      const info = supplierInfoFor(product);
+      form.elements.sellerName.value = seller.businessName || info.name || '';
+      form.elements.sellerContact.value = seller.contactName || info.contact || '';
+      form.elements.sellerEmail.value = seller.contactEmail || info.email || '';
+      form.elements.sellerPhone.value = seller.contactPhone || '';
+      form.elements.sellerAddress.value = seller.businessAddress || info.address || '';
+      form.querySelector('[data-supplier-details-product]').textContent = product?.name || 'Warehouse product';
+      supplierDetailsDialog.showModal();
+    };
+    const setInventoryFeedback = (message, isError = false) => {
+      inventoryFeedback.textContent = message;
+      inventoryFeedback.classList.toggle('is-error', isError);
+    };
+    const setProductFeedback = (message, isError = false) => {
+      const node = productForm?.querySelector('[data-warehouse-product-feedback]');
+      if (!node) return;
+      node.textContent = message;
+      node.classList.toggle('is-error', isError);
+    };
+    const inventoryDateLabel = (date) => {
+      if (!date) return 'No expiry date';
+      const parsed = new Date(`${date}T00:00:00`);
+      return Number.isNaN(parsed.getTime()) ? date : new Intl.DateTimeFormat('en-MY', { day: 'numeric', month: 'short', year: 'numeric' }).format(parsed);
+    };
+    const batchNumberFromDate = (date) => {
+      const match = String(date || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+      if (!match) return '';
+      const [, year, month, day] = match;
+      const monthNames = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
+      return `${day}${monthNames[Number(month) - 1] || ''}${year.slice(-2)}`;
+    };
+    const syncBatchNumber = (form) => {
+      if (form?.elements.batch_number) form.elements.batch_number.value = batchNumberFromDate(form.elements.received_on?.value);
+    };
+    [inventoryForm, editForm].forEach((form) => {
+      form?.elements.received_on?.addEventListener('input', () => syncBatchNumber(form));
+      form?.elements.received_on?.addEventListener('change', () => syncBatchNumber(form));
+    });
+    const inventoryExpiryState = (row) => {
+      if (!row.expires_on) return '';
+      const today = localPetDate();
+      if (row.expires_on < today) return 'expired';
+      const soonDate = new Date(`${today}T00:00:00`);
+      soonDate.setDate(soonDate.getDate() + 30);
+      const soonDateKey = `${soonDate.getFullYear()}-${String(soonDate.getMonth() + 1).padStart(2, '0')}-${String(soonDate.getDate()).padStart(2, '0')}`;
+      return row.expires_on <= soonDateKey ? 'soon' : '';
+    };
+    const warehouseProductForRow = (row) => warehouseProducts.find((product) => product.id === row?.warehouse_product_id)
+      || warehouseProducts.find((product) => product.name.trim().toLocaleLowerCase() === String(row?.product_name || '').trim().toLocaleLowerCase());
+    const optionMarkup = (selected = '') => `<option value="">Choose a warehouse product</option>${warehouseProducts.map((row) => `<option value="${escapeHTML(row.id)}"${row.id === selected ? ' selected' : ''}>${escapeHTML(row.name)}</option>`).join('')}`;
+    const fillVariantSelect = (select, productId, selected = '') => {
+      if (!select) return;
+      const product = warehouseProducts.find((entry) => entry.id === productId);
+      const variants = product ? productVariants(product) : [];
+      select.innerHTML = `<option value="">${variants.length ? 'Choose an option' : 'Choose a warehouse product first'}</option>${variants.map((variant) => `<option value="${escapeHTML(variant.id || variant.label)}"${String(variant.id || variant.label) === String(selected) ? ' selected' : ''}>${escapeHTML(variant.label || 'Standard')}</option>`).join('')}`;
+      select.disabled = !variants.length;
+    };
+    const refreshWarehouseProducts = async (force = false) => {
+      if (productsLoaded && !force) return warehouseProducts;
+      const owners = warehouseOwnerIds();
+      let productQuery = supabase.from('warehouse_products').select('id,name,product_data,marketplace_product_id').order('name');
+      if (supplierProfile.directorStoreView) productQuery = owners.length ? productQuery.in('created_by', owners) : null;
+      const { data, error } = productQuery ? await productQuery : { data: [], error: null };
+      if (error) throw error;
+      warehouseProducts = data || [];
+      productsLoaded = true;
+      const categoryFilter = inventorySection.querySelector('[data-inventory-category-filter]');
+      if (categoryFilter) {
+        const selectedCategory = categoryFilter.value || 'all';
+        const categories = [...new Set(warehouseProducts.map((row) => String(productData(row).category || 'Other').trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+        categoryFilter.innerHTML = `<option value="all">All categories</option>${categories.map((category) => `<option value="${escapeHTML(category)}">${escapeHTML(category)}</option>`).join('')}`;
+        categoryFilter.value = categories.includes(selectedCategory) ? selectedCategory : 'all';
+      }
+      const supplierFilter = inventorySection.querySelector('[data-inventory-supplier-filter]');
+      if (supplierFilter) {
+        const selectedSupplier = supplierFilter.value || 'all';
+        const suppliers = [...new Set(warehouseProducts.flatMap((product) => productVariants(product).map((variant) => supplierInfoFor(product, variant).name)).map((name) => String(name || '').trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+        supplierFilter.innerHTML = `<option value="all">All suppliers</option>${suppliers.map((supplier) => `<option value="${escapeHTML(supplier)}">${escapeHTML(supplier)}</option>`).join('')}`;
+        supplierFilter.value = suppliers.includes(selectedSupplier) ? selectedSupplier : 'all';
+      }
+      for (const select of inventorySection.querySelectorAll('[data-inventory-product-select], select[data-inventory-edit-product]')) {
+        const selected = select.value;
+        select.innerHTML = optionMarkup(selected);
+      }
+      return warehouseProducts;
+    };
+    const setProductForSelect = (productSelect, variantSelect, productId, variantId = '') => {
+      if (productSelect) productSelect.value = productId || '';
+      const product = warehouseProducts.find((entry) => entry.id === productId);
+      const match = product ? productVariants(product).find((entry) => String(entry.id || '') === String(variantId) || String(entry.label || '') === String(variantId)) : null;
+      fillVariantSelect(variantSelect, productId, match?.id || match?.label || '');
+    };
+    const renderWarehouseVariantEditor = (variants = [{}]) => {
+      const target = productForm?.querySelector('[data-warehouse-product-variants]');
+      if (!target) return;
+      const rows = variants.length ? variants : [{}];
+      target.innerHTML = rows.map((variant) => `<div class="supplier-variant-row" data-warehouse-product-variant><input type="hidden" name="warehouseVariantId" value="${escapeHTML(variant.id || '')}" /><label>Option<input name="variantOption" maxlength="100" placeholder="e.g. Chicken Flavour (optional)" value="${escapeHTML(variant.option || '')}" /></label><label>Variant<input name="variantLabel" required maxlength="100" placeholder="e.g. 100 g" value="${escapeHTML(variant.variant || variant.label || '')}" /></label><label>Retail price (MYR)<input name="price" type="number" min="0" step="0.01" required value="${variant.price == null ? '' : Number(variant.price)}" /></label><label>Option SKU<input name="variantSku" maxlength="80" value="${escapeHTML(variant.sku || '')}" /></label><label>Option photo URL<input name="variantImageUrl" type="url" placeholder="Optional image URL" value="${escapeHTML(variant.imageUrl || '')}" /></label><button type="button" class="supplier-variant-remove" data-remove-warehouse-variant aria-label="Remove option" ${rows.length === 1 ? 'disabled' : ''}>×</button></div>`).join('');
+    };
+    const openWarehouseProductForm = (row = null) => {
+      productForm.reset();
+      productForm.elements.id.value = row?.id || '';
+      const data = productData(row);
+      for (const key of ['name', 'category', 'petTypes', 'productCode', 'description', 'ingredients', 'nutrition']) {
+        if (productForm.elements[key]) productForm.elements[key].value = key === 'name' ? (row?.name || '') : (data[key] || '');
+      }
+      productForm.elements.productCode.readOnly = true;
+      if (!data.productCode) productForm.elements.productCode.value = generateWarehouseProductCode(productForm.elements.category.value);
+      productForm.elements.imageUrl.value = data.images?.[0] || data.imageUrl || '';
+      productForm.elements.coverPhoto.value = '';
+      renderWarehouseVariantEditor(row ? productVariants(row) : [{}]);
+      productForm.querySelector('[data-warehouse-product-title]').textContent = row ? `Edit ${row.name}` : 'Add Warehouse Product';
+      productForm.querySelector('[type="submit"]').textContent = row ? 'Save Product' : 'Save Warehouse Product';
+      const dangerZone = productForm.querySelector('[data-warehouse-danger-zone]');
+      const deleteButton = productForm.querySelector('[data-warehouse-delete-product]');
+      const deleteRestriction = productForm.querySelector('[data-product-delete-restriction]');
+      if (dangerZone) {
+        dangerZone.hidden = !row;
+        dangerZone.open = false;
+      }
+      if (row && deleteButton && deleteRestriction) {
+        const stockTotal = inventoryRows
+          .filter((lot) => warehouseProductForRow(lot)?.id === row.id)
+          .reduce((sum, lot) => sum + (Number(lot.quantity) || 0), 0);
+        const hasStock = stockTotal > 0;
+        deleteButton.disabled = hasStock;
+        deleteRestriction.textContent = hasStock
+          ? `This product has ${stockTotal.toLocaleString()} units in stock. Reduce every stock batch to zero before deleting it.`
+          : row.marketplace_product_id
+            ? 'This product is listed in Marketplace. Deleting it will also remove its listing. Deletion is available only when stock is zero.'
+            : 'Deletion is available only when stock is zero.';
+      }
+      setProductFeedback('');
+      productDialog.showModal();
+    };
+    const stockLotsFor = (productId, productName, variantLabel) => inventoryRows.filter((lot) => {
+      const matchedProduct = warehouseProductForRow(lot);
+      const matchesProduct = productId ? matchedProduct?.id === productId : String(lot.product_name || '') === productName;
+      return matchesProduct && String(lot.variant || 'Standard') === String(variantLabel || 'Standard');
+    }).sort((a, b) => (Number(a.pick_order) || Number.MAX_SAFE_INTEGER) - (Number(b.pick_order) || Number.MAX_SAFE_INTEGER)
+      || String(a.expires_on || '9999-12-31').localeCompare(String(b.expires_on || '9999-12-31'))
+      || String(a.received_on || '').localeCompare(String(b.received_on || '')));
+    renderPackagingOrders = () => {
+      if (!packagingTarget) return;
+      const paidOrders = supplierOrders.filter((order) => String(order.paymentStatus || '').toLowerCase() === 'paid');
+      const readyOrders = paidOrders.filter((order) => matchesSupplierOrderStatus(order, 'received'))
+        .sort((a, b) => (new Date(a.createdAt || a.date || 0).getTime() || 0) - (new Date(b.createdAt || b.date || 0).getTime() || 0));
+      const ordersByStatus = {
+        ready: readyOrders,
+        packed: paidOrders.filter((order) => matchesSupplierOrderStatus(order, 'packed')),
+        awaiting_pickup: paidOrders.filter((order) => matchesSupplierOrderStatus(order, 'awaiting_pickup')),
+        completed: paidOrders.filter((order) => matchesSupplierOrderStatus(order, 'shipped')),
+      };
+      const ordersToPack = ordersByStatus[packagingStatusFilter] || readyOrders;
+      const visiblePickupOrderIds = new Set(ordersByStatus.awaiting_pickup.map((order) => String(order.id)));
+      for (const orderId of packagingPickupSelection) if (!visiblePickupOrderIds.has(orderId)) packagingPickupSelection.delete(orderId);
+      const visibleOrderIds = new Set(readyOrders.map((order) => String(order.id)));
+      for (const orderId of packagingSelection.keys()) if (!visibleOrderIds.has(orderId)) packagingSelection.delete(orderId);
+      for (const orderId of packagingPendingSelection.keys()) if (!visibleOrderIds.has(orderId)) packagingPendingSelection.delete(orderId);
+      if (!ordersToPack.length) {
+        const emptyMessages = { ready: 'No paid orders are waiting to be packed.', packed: 'No orders are ready to ship yet.', awaiting_pickup: 'No parcels are awaiting courier pickup.', completed: 'No shipped orders yet.' };
+        if (packagingPickupToolbarTarget) packagingPickupToolbarTarget.innerHTML = '';
+        packagingTarget.innerHTML = `<p class="supplier-empty">${emptyMessages[packagingStatusFilter] || emptyMessages.ready}</p>`;
+        return;
+      }
+      const pickupToolbar = packagingStatusFilter === 'awaiting_pickup'
+        ? `<div class="supplier-pickup-toolbar"><button class="button button-primary supplier-mark-selected-shipped" type="button" data-supplier-mark-selected-shipped ${packagingPickupSelection.size ? '' : 'disabled'}>Picked Up / Dropped Off${packagingPickupSelection.size > 1 ? ` (${packagingPickupSelection.size})` : ''}</button><div class="supplier-delivery-confirmation" data-supplier-shipped-confirmation hidden><span data-pickup-confirmation-label>Confirm the selected parcel was collected or accepted by the courier?</span><div><button class="button button-primary" type="button" data-supplier-confirm-shipped>Confirm Handover</button><button class="button button-light" type="button" data-supplier-cancel-shipped>Cancel</button></div></div></div>`
+        : '';
+      if (packagingPickupToolbarTarget) packagingPickupToolbarTarget.innerHTML = pickupToolbar;
+      packagingTarget.innerHTML = ordersToPack.map((order) => {
+        const orderId = String(order.id);
+        if (packagingStatusFilter !== 'ready') {
+          const completed = packagingStatusFilter === 'completed';
+          const awaitingPickup = packagingStatusFilter === 'awaiting_pickup';
+          const supplierShipmentKey = String(supplierProfile?.supplierName || '').trim().toLowerCase();
+          const shipment = {
+            ...(order.supplierShipments?.[supplierShipmentKey] || {}),
+            ...(order.supplier_shipments?.[supplierShipmentKey] || {}),
+            ...(order.supplierShipment || {}),
+          };
+          const items = (order.products || []).map((item) => {
+            const image = safeMarketplaceImage(item.images?.[0] || item.imageUrl || item.optionImage || item.variantImage || '');
+            const details = `<span class="supplier-packaging-thumb">${image ? `<img src="${escapeHTML(image)}" alt="" />` : '<span aria-hidden="true">—</span>'}</span><span><strong>${escapeHTML(item.name || 'Product')}</strong><small>${escapeHTML(item.variantLabel || 'Variant')} × ${Number(item.quantity) || 1}</small></span>`;
+            return `<li>${details}</li>`;
+          }).join('');
+          const date = order.createdAt ? new Intl.DateTimeFormat('en-MY', { dateStyle: 'medium' }).format(new Date(order.createdAt)) : '';
+          const editParcel = awaitingPickup
+            ? `<button type="button" class="supplier-packaging-edit-parcel" data-return-to-ship="${escapeHTML(order.id)}">Return To Ship</button>`
+            : !completed ? `<button type="button" class="supplier-packaging-edit-parcel" data-edit-packed-parcel="${escapeHTML(order.id)}">Return To Pack</button>` : '';
+          const recipientDetails = !completed && !awaitingPickup ? `<section class="supplier-packaging-recipient"><h3>Recipient Details</h3><div><strong>Name</strong><span>${escapeHTML(order.recipientName || 'Not provided')}</span><button type="button" data-copy-recipient-field="${escapeHTML(order.recipientName || 'Not provided')}" aria-label="Copy recipient name" title="Copy name"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 8V5.5A1.5 1.5 0 0 1 9.5 4h9A1.5 1.5 0 0 1 20 5.5v11a1.5 1.5 0 0 1-1.5 1.5H16M5.5 8h9A1.5 1.5 0 0 1 16 9.5v11a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 4 20.5v-11A1.5 1.5 0 0 1 5.5 8Z" /></svg></button></div><div><strong>Phone</strong><span>${escapeHTML(order.recipientPhone || 'Not provided')}</span><button type="button" data-copy-recipient-field="${escapeHTML(order.recipientPhone || 'Not provided')}" aria-label="Copy recipient phone" title="Copy phone"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 8V5.5A1.5 1.5 0 0 1 9.5 4h9A1.5 1.5 0 0 1 20 5.5v11a1.5 1.5 0 0 1-1.5 1.5H16M5.5 8h9A1.5 1.5 0 0 1 16 9.5v11a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 4 20.5v-11A1.5 1.5 0 0 1 5.5 8Z" /></svg></button></div><div><strong>Address</strong><span>${escapeHTML(order.recipientAddress || 'Not provided')}</span><button type="button" data-copy-recipient-field="${escapeHTML(order.recipientAddress || 'Not provided')}" aria-label="Copy recipient address" title="Copy address"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 8V5.5A1.5 1.5 0 0 1 9.5 4h9A1.5 1.5 0 0 1 20 5.5v11a1.5 1.5 0 0 1-1.5 1.5H16M5.5 8h9A1.5 1.5 0 0 1 16 9.5v11a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 4 20.5v-11A1.5 1.5 0 0 1 5.5 8Z" /></svg></button></div><span data-packaging-copy-feedback role="status" aria-live="polite"></span></section>` : '';
+          const courierName = shipment.courier || order.courier || '';
+          const trackingNumber = shipment.trackingNumber || order.trackingNumber || '';
+          const trackingUrl = (() => { try { const url = new URL(String(shipment.trackingUrl || order.trackingUrl || '')); return ['http:', 'https:'].includes(url.protocol) ? url.href : ''; } catch { return ''; } })();
+          const isDelivered = String(shipment.status || '').toLowerCase() === 'delivered';
+          const recipientSummary = `<div class="supplier-pickup-recipient-details"><strong>Recipient</strong><span>${escapeHTML(order.recipientName || 'Name not provided')} · ${escapeHTML(order.recipientPhone || 'Phone not provided')}</span><span>${escapeHTML(order.recipientAddress || 'Address not provided')}</span></div>`;
+          const shipmentPanel = completed
+            ? `<section class="supplier-packaging-shipment supplier-pickup-tracking"><div class="supplier-shipment-summary"><span>Courier: ${escapeHTML(courierName || 'Not provided')}</span><span class="supplier-pickup-tracking-number">Tracking Number: ${escapeHTML(trackingNumber || 'Not provided')}${trackingUrl ? ` · <a href="${escapeHTML(trackingUrl)}" target="_blank" rel="noopener noreferrer">Tracking link</a>` : ''}</span></div>${recipientSummary}<div class="supplier-completed-shipment-actions"><strong>${isDelivered ? 'Delivered' : 'Shipped'}</strong><button class="button button-light supplier-return-pickup-button" type="button" data-supplier-return-pickup>Return Parcel</button><div class="supplier-delivery-confirmation" data-supplier-return-pickup-confirmation hidden><span>Return this parcel to Awaiting Pickup? It will be available to verify and hand over again.</span><div><button class="button button-primary" type="button" data-supplier-confirm-return-pickup="${escapeHTML(order.id)}">Confirm Return</button><button class="button button-light" type="button" data-supplier-cancel-return-pickup>Cancel</button></div></div>${isDelivered
+              ? `<button class="button button-light supplier-delivered-button" type="button" data-supplier-undo-delivered>Undo Delivered</button><div class="supplier-delivery-confirmation" data-supplier-undo-delivery-confirmation hidden><span>Change this shipment back to Shipped?</span><div><button class="button button-primary" type="button" data-supplier-confirm-undo-delivered="${escapeHTML(order.id)}">Confirm Revert</button><button class="button button-light" type="button" data-supplier-cancel-undo-delivery>Cancel</button></div></div>`
+              : `<button class="button button-primary supplier-delivered-button" type="button" data-supplier-mark-delivered="${escapeHTML(order.id)}">Mark Delivered</button><div class="supplier-delivery-confirmation" data-supplier-delivery-confirmation hidden><span>Confirm this shipment has been delivered?</span><div><button class="button button-primary" type="button" data-supplier-confirm-delivered="${escapeHTML(order.id)}">Confirm Delivery</button><button class="button button-light" type="button" data-supplier-cancel-delivery>Cancel</button></div></div>`}</div></section>`
+            : awaitingPickup
+              ? `<section class="supplier-packaging-shipment supplier-pickup-tracking"><div class="supplier-shipment-summary"><span>Courier: ${escapeHTML(courierName || 'Not provided')}</span><span class="supplier-pickup-tracking-number">Tracking Number: ${escapeHTML(trackingNumber || 'Not provided')}${trackingUrl ? ` · <a href="${escapeHTML(trackingUrl)}" target="_blank" rel="noopener noreferrer">Tracking link</a>` : ''}</span><button class="button button-light supplier-edit-tracking-button" type="button" data-supplier-edit-tracking>Edit Tracking Details</button></div>${recipientSummary}${supplierTrackingForm(order, shipment, 'edit_tracking')}</section>`
+              : String(shipment.status || '').toLowerCase() === 'ready to ship'
+                ? `<section class="supplier-packaging-shipment"><h3>Shipment Details</h3><div class="supplier-shipment-summary"><strong>Ready to Ship</strong><span>${escapeHTML(shipment.courier || 'Courier')} · ${escapeHTML(shipment.trackingNumber || 'Tracking number not provided')}</span>${trackingUrl ? `<a href="${escapeHTML(trackingUrl)}" target="_blank" rel="noopener noreferrer">Track shipment</a>` : ''}</div></section>`
+                : `<section class="supplier-packaging-shipment"><h3>Shipment Details</h3>${supplierTrackingForm(order, shipment)}</section>`;
+          const packedActions = `<div class="supplier-packaging-packed-actions">${shipmentPanel}</div>`;
+          const statusHeader = `<div class="supplier-packaging-status-actions">${editParcel}<b>${completed ? (isDelivered ? 'Delivered' : 'Shipped') : awaitingPickup ? 'Awaiting Pickup' : 'Ready to Ship'}</b></div>`;
+          if (awaitingPickup) {
+            const selected = packagingPickupSelection.has(orderId);
+            return `<article class="supplier-packaging-order supplier-packaging-status-card supplier-pickup-order"><header><label class="supplier-pickup-order-select"><input type="checkbox" data-pickup-order="${escapeHTML(orderId)}" ${selected ? 'checked' : ''} aria-label="Select order ${escapeHTML(order.reference || order.id)} for courier pickup"><span></span></label><div><span>Order No: ${escapeHTML(order.reference || order.id)}</span><time>${escapeHTML(date)}</time></div><b>Awaiting Pickup</b></header>${packedActions}<details class="supplier-pickup-order-details"><summary>View Products</summary><ul>${items || '<li>Order items unavailable</li>'}</ul></details></article>`;
+          }
+          if (completed) {
+            return `<article class="supplier-packaging-order supplier-packaging-status-card supplier-pickup-order supplier-completed-order"><header><div><span>Order No: ${escapeHTML(order.reference || order.id)}</span><time>${escapeHTML(date)}</time></div><b>${isDelivered ? 'Delivered' : 'Shipped'}</b></header>${packedActions}<details class="supplier-pickup-order-details"><summary>View Products</summary><ul>${items || '<li>Order items unavailable</li>'}</ul></details></article>`;
+          }
+          return `<article class="supplier-packaging-order supplier-packaging-status-card"><header><div><span>Order No: ${escapeHTML(order.reference || order.id)}</span><time>${escapeHTML(date)}</time></div>${statusHeader}</header><ul>${items || '<li>Order items unavailable</li>'}</ul>${recipientDetails}${packedActions}</article>`;
+        }
+        const packedCounts = packagingSelection.get(orderId) || new Map();
+        const pendingItems = packagingPendingSelection.get(orderId) || new Set();
+        if (!packagingSelection.has(orderId) && order.supplierShipment?.editingParcel) {
+          (order.products || []).forEach((item, index) => {
+            packedCounts.set(index, Math.max(1, Number(item.quantity) || 1));
+          });
+        }
+        packagingSelection.set(orderId, packedCounts);
+        packagingPendingSelection.set(orderId, pendingItems);
+        const rows = (order.products || []).map((item, index) => {
+          const allocations = Array.isArray(item.warehouseStockAllocations) ? item.warehouseStockAllocations : [];
+          const product = warehouseProducts.find((entry) => String(entry.marketplace_product_id || '') === String(item.productId || ''))
+            || warehouseProducts.find((entry) => String(entry.id) === String(item.warehouseProductId || allocations[0]?.warehouse_product_id || ''));
+          const requested = Math.max(1, Number(item.quantity) || 1);
+          const itemVariant = String(item.variantLabel || item.variant || 'Standard');
+          const productData = product?.product_data || {};
+          const variants = Array.isArray(productData.variants) ? productData.variants : [];
+          const matchingVariant = variants.find((variant) => item.variantId && String(variant.id || '') === String(item.variantId))
+            || variants.find((variant) => String(variant.label || [variant.option, variant.variant].filter(Boolean).join(' · ') || 'Standard') === itemVariant);
+          let remaining = requested;
+          let hasMissingLocation = false;
+          for (const allocation of allocations) {
+            if (remaining <= 0) break;
+            const picked = Math.min(remaining, Number(allocation.quantity) || 0);
+            if (picked > 0) {
+              hasMissingLocation ||= !String(allocation.location || '').trim();
+              const batch = allocation.batch_number ? ` · Batch ${escapeHTML(allocation.batch_number)}` : '';
+            }
+            remaining -= picked;
+          }
+          // Packing consumes the order snapshot only; marketplace checkout has
+          // already deducted stock. Missing live warehouse allocation data is
+          // a location warning for staff, not a reason to prevent packing.
+          const allocationUnavailable = !product || !allocations.length || remaining > 0 || hasMissingLocation;
+          const rackMarkupFor = (quantity, offset = 0) => {
+            if (allocationUnavailable) return '<span class="supplier-packaging-racks is-warning">Saved rack or batch allocation is unavailable. Verify the product location before packing.</span>';
+            let position = 0;
+            const rangeEnd = Math.min(requested, offset + quantity);
+            const locations = [];
+            for (const allocation of allocations) {
+              const allocationQuantity = Math.max(0, Number(allocation.quantity) || 0);
+              const overlapStart = Math.max(position, offset);
+              const overlapEnd = Math.min(position + allocationQuantity, rangeEnd);
+              if (overlapEnd > overlapStart) {
+                const batch = allocation.batch_number ? ` · Batch ${escapeHTML(allocation.batch_number)}` : '';
+                locations.push(`${escapeHTML(allocation.location || 'Location not set')}${batch}`);
+              }
+              position += allocationQuantity;
+              if (position >= rangeEnd) break;
+            }
+            return `<span class="supplier-packaging-racks">${locations.join(' → ')}</span>`;
+          };
+          const image = safeMarketplaceImage(matchingVariant?.imageUrl || item.imageUrl || item.optionImage || item.variantImage || productData.imageUrl || productData.images?.[0] || item.images?.[0] || '');
+          const cardFor = (quantity, offset = 0) => `<span class="supplier-packaging-thumb">${image ? `<img src="${escapeHTML(image)}" alt="" />` : '<span aria-hidden="true">—</span>'}</span><span class="supplier-packaging-item-copy"><strong>${escapeHTML(item.name || product?.name || 'Product')}</strong><span>${escapeHTML(itemVariant)}</span>${rackMarkupFor(quantity, offset)}</span><span class="supplier-packaging-quantity"><strong>${quantity}</strong><small>Unit:</small></span>`;
+          return { index, allocationUnavailable, requested, cardFor };
+        });
+        const pickItems = rows.filter((row) => row.requested - (packedCounts.get(row.index) || 0) > 0)
+          .map((row) => {
+            const isSelected = pendingItems.has(row.index);
+            const remaining = row.requested - (packedCounts.get(row.index) || 0);
+            const addAction = isSelected ? `<button type="button" class="supplier-packaging-add-to-parcel" data-package-add="${row.index}" data-package-requested="${row.requested}">Add to Parcel</button>` : '';
+            return `<div class="supplier-packaging-pick-entry${isSelected ? ' is-selected' : ''}"><div class="supplier-packaging-pick-card"><button type="button" class="supplier-packaging-item supplier-packaging-pick-item" data-package-select="${row.index}" aria-pressed="${isSelected}">${row.cardFor(remaining, packedCounts.get(row.index) || 0)}</button></div>${addAction}</div>`;
+          }).join('');
+        const packedItems = rows.filter((row) => (packedCounts.get(row.index) || 0) > 0)
+          .map((row) => `<div class="supplier-packaging-packed-entry"><div class="supplier-packaging-item is-packed-item">${row.cardFor(packedCounts.get(row.index))}</div><button type="button" class="supplier-packaging-remove" data-package-remove="${row.index}" aria-label="Remove one packed unit">Remove</button></div>`).join('');
+        const overpackedRows = rows.filter((row) => (packedCounts.get(row.index) || 0) > row.requested);
+        const allPacked = (order.products || []).length > 0 && !overpackedRows.length
+          && rows.every((row) => (packedCounts.get(row.index) || 0) === row.requested);
+        const overpackWarning = overpackedRows.length
+          ? `<p class="supplier-packaging-overpack-warning">Packed quantity is above the order requirement. Remove ${overpackedRows.length === 1 ? 'a unit' : 'units'} until it matches the requested quantity.</p>`
+          : '';
+        const pickTotalItems = rows.reduce((sum, row) => sum + Math.max(0, row.requested - (packedCounts.get(row.index) || 0)), 0);
+        const parcelTotalItems = Array.from(packedCounts.values()).reduce((sum, quantity) => sum + quantity, 0);
+        return `<article class="supplier-packaging-order" data-packaging-order="${escapeHTML(order.id)}"><header><div><span>Order No: ${escapeHTML(order.reference || order.id)}</span><time>${escapeHTML(order.createdAt ? new Intl.DateTimeFormat('en-MY', { dateStyle: 'medium' }).format(new Date(order.createdAt)) : '')}</time></div><b>Ready to pack</b></header><div class="supplier-packaging-workspace"><section class="supplier-packaging-pick-list"><div class="supplier-packaging-section-heading"><h3>Pick from Warehouse</h3><span class="supplier-packaging-total-items">Total Items <b>${pickTotalItems}</b></span></div><div class="supplier-packaging-items">${pickItems}${!pickItems.length ? '<p class="supplier-empty">All items are in the parcel.</p>' : ''}</div></section><section class="supplier-packaging-parcel"><div class="supplier-packaging-section-heading"><h3>Parcel Box</h3><span class="supplier-packaging-total-items">Total Items <b>${parcelTotalItems}</b></span></div><div class="supplier-packaging-parcel-interior">${packedItems || '<p class="supplier-packaging-parcel-empty">Tap items on the left to place them here.</p>'}</div></section></div>${overpackWarning}<button class="button button-primary supplier-mark-packed" type="button" data-mark-packed="${escapeHTML(order.id)}" ${allPacked ? '' : 'disabled'}>Done Packed</button><p class="supplier-packaging-card-feedback" role="status" aria-live="polite"></p></article>`;
+      }).join('');
+    };
+    const renderStockDetails = (productId, productName, variantLabel, variantId = '') => {
+      const product = warehouseProducts.find((entry) => entry.id === productId) || warehouseProducts.find((entry) => entry.name === productName);
+      const selectedVariant = productVariants(product).find((entry) => String(entry.id || entry.label || 'Standard') === String(variantId || '') || String(entry.label || 'Standard') === String(variantLabel || 'Standard'));
+      const lots = stockLotsFor(productId, productName, variantLabel);
+      const activeLots = lots.filter((lot) => (Number(lot.quantity) || 0) > 0);
+      const total = lots.reduce((sum, lot) => sum + (Number(lot.quantity) || 0), 0);
+      const lowStockThreshold = Math.max(0, Number(selectedVariant?.lowStockThreshold ?? selectedVariant?.low_stock_threshold ?? 5) || 0);
+      const lowStockEnabled = selectedVariant?.lowStockAlertEnabled ?? selectedVariant?.low_stock_alert_enabled ?? true;
+      const lowStockNotice = lowStockEnabled && total <= lowStockThreshold
+        ? `<p class="supplier-stock-low-stock-notice" role="status">Low stock · ${total.toLocaleString()} units remaining (alert at ${lowStockThreshold.toLocaleString()})</p>`
+        : '';
+      stockDetailContext = { productId, productName, variantLabel, variantId: selectedVariant?.id || selectedVariant?.label || variantId || 'Standard' };
+      const activeBatchCards = activeLots.map((lot) => `<article class="supplier-stock-batch" data-stock-batch data-stock-batch-id="${escapeHTML(lot.id)}"><button type="button" class="supplier-stock-batch-drag-handle" data-stock-batch-drag aria-label="Rearrange ${escapeHTML(lot.batch_number || 'stock batch')}" title="Drag to rearrange"><span aria-hidden="true">⋮</span></button><div class="supplier-stock-batch-main"><div class="supplier-stock-batch-heading"><strong>${escapeHTML(lot.batch_number || 'No batch number')}</strong><span>${Number(lot.quantity) || 0} units</span></div><p>Received: ${lot.received_on ? inventoryDateLabel(lot.received_on) : '—'} · Expiry: ${lot.expires_on ? inventoryDateLabel(lot.expires_on) : 'No expiry date'}</p><p>Location: ${escapeHTML(lot.location || '—')}${lot.notes ? ` · ${escapeHTML(lot.notes)}` : ''}</p><div class="supplier-stock-batch-actions"><button type="button" class="supplier-stock-edit-button" data-stock-batch-edit="${escapeHTML(lot.id)}">Edit Batch Details</button><button type="button" data-stock-batch-adjust="${escapeHTML(lot.id)}">Adjust Stock</button></div></div></article>`).join('');
+      stockDialog.querySelector('[data-stock-details-content]').innerHTML = `<div class="supplier-stock-details-heading"><h2>${escapeHTML(productName)} · ${escapeHTML(variantLabel || 'Standard')} Stock</h2><div class="supplier-stock-details-heading-actions"><button type="button" class="supplier-stock-low-stock-button" data-stock-low-stock-open ${product?.id ? '' : 'disabled'}>Low Stock</button><button type="button" class="supplier-stock-history-button" data-stock-history-open>History</button></div></div><p class="supplier-stock-details-total">${total.toLocaleString()} units on hand across ${activeLots.length} active batch${activeLots.length === 1 ? '' : 'es'}.</p>${lowStockNotice}<p class="supplier-stock-details-hint">Batches are picked from top to bottom. New stock is arranged by closest expiry; drag the handle to set a manual order.</p><section class="supplier-stock-batch-section"><h3>Active Batches <span>${activeLots.length}</span></h3>${activeLots.length ? `<div class="supplier-stock-batches">${activeBatchCards}</div>` : '<p class="supplier-stock-empty">No active stock batches for this option.</p>'}</section><div class="supplier-stock-details-actions"><button type="button" class="button supplier-inventory-receive-action supplier-stock-receive-button" data-stock-details-receive="${escapeHTML(product?.id || productId || '')}" data-stock-details-variant="${escapeHTML(variantLabel || 'Standard')}">Add Stock</button></div>`;
+    };
+    const openLowStockSettings = () => {
+      if (!stockDetailContext?.productId) return;
+      const product = warehouseProducts.find((entry) => String(entry.id) === String(stockDetailContext.productId));
+      if (!product) return;
+      const variant = productVariants(product).find((entry) => String(entry.id || entry.label || 'Standard') === String(stockDetailContext.variantId || '')
+        || String(entry.label || 'Standard') === String(stockDetailContext.variantLabel || 'Standard'));
+      if (!variant) return;
+      const form = lowStockDialog.querySelector('[data-low-stock-form]');
+      form.elements.enabled.checked = variant.lowStockAlertEnabled ?? variant.low_stock_alert_enabled ?? true;
+      form.elements.threshold.value = String(Math.max(0, Number(variant.lowStockThreshold ?? variant.low_stock_threshold ?? 5) || 0));
+      lowStockDialog.querySelector('[data-low-stock-option]').textContent = `${product.name} · ${stockDetailContext.variantLabel || 'Standard'}`;
+      lowStockDialog.querySelector('[data-low-stock-feedback]').textContent = '';
+      stockDialog.close();
+      lowStockDialog.showModal();
+    };
+    const lowStockForm = lowStockDialog.querySelector('[data-low-stock-form]');
+    lowStockDialog.querySelector('[data-low-stock-cancel]')?.addEventListener('click', () => {
+      lowStockDialog.close();
+      if (stockDetailContext) {
+        renderStockDetails(stockDetailContext.productId, stockDetailContext.productName, stockDetailContext.variantLabel, stockDetailContext.variantId);
+        stockDialog.showModal();
+      }
+    });
+    lowStockForm?.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      if (!stockDetailContext?.productId || !lowStockForm.reportValidity()) return;
+      const context = { ...stockDetailContext };
+      const product = warehouseProducts.find((entry) => String(entry.id) === String(context.productId));
+      if (!product) return;
+      const variantIndex = productVariants(product).findIndex((entry) => String(entry.id || entry.label || 'Standard') === String(context.variantId || '')
+        || String(entry.label || 'Standard') === String(context.variantLabel || 'Standard'));
+      if (variantIndex < 0) return;
+      const formFields = lowStockForm.elements;
+      const threshold = Math.max(0, Math.floor(Number(formFields.threshold.value) || 0));
+      const nextData = { ...productData(product) };
+      const variants = productVariants(product).map((entry) => ({ ...entry }));
+      variants[variantIndex] = {
+        ...variants[variantIndex],
+        lowStockThreshold: threshold,
+        lowStockAlertEnabled: Boolean(formFields.enabled.checked),
+      };
+      nextData.variants = variants;
+      const submit = lowStockForm.querySelector('[type="submit"]');
+      const feedback = lowStockDialog.querySelector('[data-low-stock-feedback]');
+      submit.disabled = true;
+      feedback.textContent = 'Saving low stock setting…';
+      feedback.classList.remove('is-error');
+      try {
+        const { error } = await supabase.from('warehouse_products')
+          .update({ product_data: nextData, updated_at: new Date().toISOString() })
+          .eq('id', product.id);
+        if (error) throw error;
+        warehouseProducts = warehouseProducts.map((entry) => String(entry.id) === String(product.id)
+          ? { ...entry, product_data: nextData }
+          : entry);
+        lowStockDialog.close();
+        renderInventory();
+        renderStockDetails(context.productId, context.productName, context.variantLabel, context.variantId);
+        stockDialog.showModal();
+      } catch (error) {
+        feedback.textContent = error.message || 'The low stock setting could not be saved.';
+        feedback.classList.add('is-error');
+      } finally {
+        submit.disabled = false;
+      }
+    });
+    const setStockHistoryContent = (html) => { stockHistoryDialog.querySelector('[data-stock-history-content]').innerHTML = html; };
+    const makeStockHistoryPdf = (report) => {
+      const pages = [];
+      let commands = [];
+      let y = 0;
+      const ascii = (value) => String(value ?? '').replace(/[–—]/g, '-').normalize('NFKD').replace(/[^\x20-\x7E]/g, '').replace(/\\/g, '\\\\').replace(/\(/g, '\\(').replace(/\)/g, '\\)');
+      const drawText = (value, x, baseline, size = 9, bold = false, color = '0.16 0.15 0.14 rg') => {
+        commands.push(color, `BT /${bold ? 'F2' : 'F1'} ${size} Tf ${x} ${baseline} Td (${ascii(value)}) Tj ET`);
+      };
+      const drawLine = (x1, y1, x2, y2, color = '0.91 0.85 0.80 RG') => commands.push(color, `${x1} ${y1} m ${x2} ${y2} l S`);
+      const drawRect = (x, bottom, width, height, color) => commands.push(color, `${x} ${bottom} ${width} ${height} re f`);
+      const wrapText = (value, maxChars) => {
+        const words = String(value || '—').replace(/\s+/g, ' ').trim().split(' ');
+        const lines = [];
+        let line = '';
+        words.forEach((word) => {
+          while (word.length > maxChars) {
+            if (line) { lines.push(line); line = ''; }
+            lines.push(word.slice(0, maxChars));
+            word = word.slice(maxChars);
+          }
+          if (!word) return;
+          if (line && `${line} ${word}`.length > maxChars) { lines.push(line); line = word; }
+          else line = line ? `${line} ${word}` : word;
+        });
+        if (line) lines.push(line);
+        return lines.length ? lines : ['—'];
+      };
+      const startPage = () => {
+        if (commands.length) pages.push(commands.join('\n'));
+        commands = [];
+        commands.push('0.996 0.471 0.004 rg', '0 547 842 48 re f');
+        drawText('WAREHOUSE STOCK HISTORY', 36, 570, 17, true, '1 1 1 rg');
+        drawText(`${report.productName} - ${report.variantLabel || 'Standard'}`, 36, 530, 12, true);
+        drawText(`Generated ${new Date().toLocaleString('en-MY')}`, 36, 514, 8, false, '0.42 0.38 0.35 rg');
+        y = 492;
+      };
+      const ensureSpace = (height) => { if (y - height < 40) startPage(); };
+      const drawTableHeader = () => {
+        const xs = [36, 136, 231, 481, 591, 656];
+        const labels = ['DATE / TIME', 'BATCH NO.', 'MOVEMENT / REASON', 'ORDER NO.', 'CHANGE', 'BALANCE'];
+        drawRect(36, y - 5, 770, 21, '0.996 0.95 0.91 rg');
+        labels.forEach((label, index) => drawText(label, xs[index] + 5, y + 2, 7, true, '0.38 0.30 0.25 rg'));
+        y -= 21;
+      };
+      const drawMovementRows = (batch) => {
+        const xs = [36, 136, 231, 481, 591, 656];
+        drawTableHeader();
+        batch.movements.forEach((movement, index) => {
+          const dateLines = wrapText(movement.date, 18);
+          const batchLines = wrapText(batch.batchNumber, 16);
+          const movementLines = [
+            ...wrapText(`${movement.change > 0 ? 'Stock added' : 'Stock deducted'} - ${movement.reason || 'Reason not recorded'}`, 42),
+            ...(movement.notes ? wrapText(`Details: ${movement.notes}`, 42) : []),
+          ];
+          const orderLines = wrapText(movement.orderNumber || '—', 18);
+          const lineCount = Math.max(dateLines.length, batchLines.length, movementLines.length, orderLines.length, 1);
+          const rowHeight = Math.max(25, lineCount * 10 + 8);
+          if (y - rowHeight < 42) {
+            startPage();
+            drawText(`${batch.batchNumber} - continued`, 36, y, 9, true, '0.67 0.29 0.03 rg');
+            y -= 17;
+            drawTableHeader();
+          }
+          if (index % 2 === 1) drawRect(36, y - rowHeight + 4, 770, rowHeight, '0.985 0.974 0.961 rg');
+          const baseline = y - 9;
+          dateLines.forEach((line, lineIndex) => drawText(line, xs[0] + 5, baseline - lineIndex * 10, 7.5));
+          batchLines.forEach((line, lineIndex) => drawText(line, xs[1] + 5, baseline - lineIndex * 10, 7.5));
+          movementLines.forEach((line, lineIndex) => drawText(line, xs[2] + 5, baseline - lineIndex * 10, 7.5));
+          orderLines.forEach((line, lineIndex) => drawText(line, xs[3] + 5, baseline - lineIndex * 10, 7.5));
+          drawText(`${movement.change > 0 ? '+' : ''}${movement.change}`, xs[4] + 5, baseline, 8, true, movement.change > 0 ? '0.15 0.52 0.32 rg' : '0.72 0.25 0.20 rg');
+          drawText(`${movement.before} -> ${movement.after}`, xs[5] + 5, baseline, 7.5);
+          y -= rowHeight;
+          drawLine(36, y + 3, 806, y + 3);
+        });
+      };
+      startPage();
+      report.batches.forEach((batch) => {
+        const infoLines = [
+          `Status: ${batch.depleted ? 'Depleted' : 'Active'}    Current stock: ${batch.quantity} units`,
+          `Received: ${batch.received || '—'}    Expiry: ${batch.expiry || 'No expiry date'}`,
+          `Location: ${batch.location || '—'}${batch.notes ? `    Notes: ${batch.notes}` : ''}`,
+        ].flatMap((line) => wrapText(line, 112));
+        ensureSpace(44 + infoLines.length * 11);
+        drawRect(36, y - 19, 770, 23, '0.996 0.95 0.91 rg');
+        drawText(batch.batchNumber || 'Unlabelled batch', 44, y - 11, 10, true, '0.67 0.29 0.03 rg');
+        y -= 30;
+        infoLines.forEach((line) => { drawText(line, 44, y, 8); y -= 11; });
+        y -= 5;
+        if (batch.movements.length) drawMovementRows(batch);
+        else drawText('No movements recorded for this batch.', 44, y, 8, false, '0.42 0.38 0.35 rg');
+        y -= 24;
+      });
+      if (commands.length) pages.push(commands.join('\n'));
+      const objects = ['<< /Type /Catalog /Pages 2 0 R >>', '', '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>', '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>'];
+      const pageRefs = [];
+      pages.forEach((stream, index) => {
+        const pageObject = objects.length + 1;
+        const contentObject = pageObject + 1;
+        pageRefs.push(`${pageObject} 0 R`);
+        objects.push(`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 842 595] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents ${contentObject} 0 R >>`);
+        objects.push(`<< /Length ${stream.length} >>\nstream\n${stream}\nendstream`);
+      });
+      objects[1] = `<< /Type /Pages /Kids [${pageRefs.join(' ')}] /Count ${pageRefs.length} >>`;
+      let pdf = '%PDF-1.4\n';
+      const offsets = [0];
+      objects.forEach((object, index) => { offsets.push(pdf.length); pdf += `${index + 1} 0 obj\n${object}\nendobj\n`; });
+      const xrefOffset = pdf.length;
+      pdf += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`;
+      offsets.slice(1).forEach((offset) => { pdf += `${String(offset).padStart(10, '0')} 00000 n \n`; });
+      pdf += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xrefOffset}\n%%EOF`;
+      return pdf;
+    };
+    const stockExportDateBounds = () => {
+      const mode = stockHistoryExportDialog.querySelector('[data-stock-export-date-filter]')?.value || 'all';
+      if (mode === 'all') return { from: '', to: '', invalid: false };
+      if (mode === 'custom') {
+        const from = stockHistoryExportDialog.querySelector('[data-stock-export-from]')?.value || '';
+        const to = stockHistoryExportDialog.querySelector('[data-stock-export-to]')?.value || '';
+        return { from, to, invalid: !from || !to || from > to };
+      }
+      const today = localPetDate();
+      const [year, month, day] = today.split('-').map(Number);
+      const start = new Date(year, month - 1, day);
+      if (mode === 'month') start.setMonth(start.getMonth() - 1);
+      else start.setFullYear(start.getFullYear() - 1);
+      const from = `${start.getFullYear()}-${String(start.getMonth() + 1).padStart(2, '0')}-${String(start.getDate()).padStart(2, '0')}`;
+      return { from, to: today, invalid: false };
+    };
+    const renderStockHistoryExportChooser = ({ checkVisibleByDefault = true } = {}) => {
+      const list = stockHistoryExportDialog.querySelector('[data-stock-export-batches]');
+      if (!list || !stockHistoryExportData) return;
+      const mode = stockHistoryExportDialog.querySelector('[data-stock-export-date-filter]')?.value || 'all';
+      const customRange = stockHistoryExportDialog.querySelector('[data-stock-export-custom-range]');
+      if (customRange) customRange.hidden = mode !== 'custom';
+      const { from, to, invalid } = stockExportDateBounds();
+      const filteredBatches = stockHistoryExportData.batches.filter((batch) => {
+        if (mode === 'all') return true;
+        return !invalid && Boolean(batch.receivedDate) && batch.receivedDate >= from && batch.receivedDate <= to;
+      });
+      list.innerHTML = filteredBatches.length
+        ? filteredBatches.map((batch) => `<label class="supplier-stock-export-batch"><input type="checkbox" data-stock-export-batch value="${escapeHTML(batch.id)}" ${checkVisibleByDefault ? 'checked' : ''} /><span><strong>${escapeHTML(batch.batchNumber)}</strong><small>${batch.depleted ? 'Depleted' : 'Active'} · ${batch.quantity} units · Received: ${escapeHTML(batch.received)} · Expiry: ${escapeHTML(batch.expiry)}</small></span></label>`).join('')
+        : `<p class="supplier-stock-export-empty">${invalid ? 'Choose a valid start and end date to list batches.' : 'No batches were received within this date range.'}</p>`;
+      const count = stockHistoryExportDialog.querySelector('[data-stock-export-selection-count]');
+      if (count) count.textContent = `${filteredBatches.length} batch${filteredBatches.length === 1 ? '' : 'es'} in this date range`;
+      const selectAll = stockHistoryExportDialog.querySelector('[data-stock-export-select-all]');
+      if (selectAll) { selectAll.checked = checkVisibleByDefault && filteredBatches.length > 0; selectAll.indeterminate = false; }
+      syncStockExportSelectAll();
+      const feedback = stockHistoryExportDialog.querySelector('[data-stock-export-feedback]');
+      if (feedback) { feedback.textContent = ''; feedback.classList.remove('is-error'); }
+    };
+    const syncStockExportSelectAll = () => {
+      const boxes = [...stockHistoryExportDialog.querySelectorAll('[data-stock-export-batch]')];
+      const selectAll = stockHistoryExportDialog.querySelector('[data-stock-export-select-all]');
+      if (!selectAll) return;
+      const selectedCount = boxes.filter((box) => box.checked).length;
+      selectAll.checked = boxes.length > 0 && selectedCount === boxes.length;
+      selectAll.indeterminate = selectedCount > 0 && selectedCount < boxes.length;
+      const count = stockHistoryExportDialog.querySelector('[data-stock-export-selection-count]');
+      if (count) count.textContent = `${selectedCount} of ${boxes.length} batch${boxes.length === 1 ? '' : 'es'} selected`;
+    };
+    const loadStockHistory = async (openBatchId = null) => {
+      if (!stockDetailContext) return;
+      const { productId, productName, variantLabel } = stockDetailContext;
+      stockHistoryExportData = null;
+      setStockHistoryContent(`<h2>${escapeHTML(productName)} · ${escapeHTML(variantLabel || 'Standard')} History</h2><p class="supplier-stock-details-total">Loading stock movements…</p>`);
+      stockHistoryDialog.showModal();
+      try {
+        const { data, error } = await supabase.from('warehouse_inventory_stock_history')
+          .select('id, lot_id, batch_number, product_name, sku, variant, quantity_delta, quantity_before, quantity_after, reason, order_number, notes, created_at')
+          .eq('warehouse_product_id', productId)
+          .eq('variant', variantLabel || 'Standard')
+          .order('created_at', { ascending: false });
+        if (error) throw error;
+        const entries = Array.isArray(data) ? data : [];
+        const currentLots = stockLotsFor(productId, productName, variantLabel);
+        const lotsById = new Map(currentLots.map((lot) => [String(lot.id), lot]));
+        const lotsByBatch = new Map(currentLots.filter((lot) => lot.batch_number).map((lot) => [String(lot.batch_number), lot]));
+        const groups = new Map();
+        entries.forEach((entry) => {
+          const key = entry.lot_id ? `lot:${entry.lot_id}` : `batch:${entry.batch_number || 'unlabelled'}`;
+          if (!groups.has(key)) groups.set(key, { batchNumber: entry.batch_number || 'Unlabelled batch', lot: lotsById.get(String(entry.lot_id || '')) || lotsByBatch.get(String(entry.batch_number || '')) || null, entries: [] });
+          groups.get(key).entries.push(entry);
+        });
+        if (openBatchId && ![...groups.values()].some((group) => String(group.lot?.id || '') === String(openBatchId))) {
+          const lot = lotsById.get(String(openBatchId));
+          if (lot) groups.set(`lot:${openBatchId}`, { batchNumber: lot.batch_number || 'Unlabelled batch', lot, entries: [] });
+        }
+        const dateLabel = (value) => value ? new Date(value).toLocaleString('en-MY', { day: 'numeric', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit' }) : '—';
+        const renderedGroups = [...groups.entries()].map(([key, group]) => {
+          const lot = group.lot;
+          const depleted = !lot || (Number(lot.quantity) || 0) <= 0;
+          const batchInfo = lot
+            ? `<div class="supplier-stock-history-batch-meta"><span>Current stock: ${Number(lot.quantity) || 0} units</span><span>Received: ${lot.received_on ? escapeHTML(inventoryDateLabel(lot.received_on)) : '—'}</span><span>Expiry: ${lot.expires_on ? escapeHTML(inventoryDateLabel(lot.expires_on)) : 'No expiry date'}</span><span>Location: ${escapeHTML(lot.location || '—')}${lot.notes ? ` · ${escapeHTML(lot.notes)}` : ''}</span></div>`
+            : `<div class="supplier-stock-history-batch-meta"><span>Current stock: 0 units</span><span>Batch inventory record is no longer active.</span></div>`;
+          const movements = group.entries.map((entry) => {
+            const delta = Number(entry.quantity_delta) || 0;
+            return `<article class="supplier-stock-history-entry ${delta < 0 ? 'is-out' : 'is-in'}"><strong>${delta > 0 ? '+' : ''}${delta} Stock ${delta < 0 ? 'From' : 'To'} Batch ${escapeHTML(group.batchNumber)}</strong><p>Date: ${escapeHTML(dateLabel(entry.created_at))}</p><p>Reason: ${escapeHTML(entry.reason || '—')}</p>${entry.order_number ? `<p>Order number: ${escapeHTML(entry.order_number)}</p>` : ''}${entry.notes ? `<p>Details: ${escapeHTML(entry.notes)}</p>` : ''}<small>Balance: ${Number(entry.quantity_before) || 0} → ${Number(entry.quantity_after) || 0}</small></article>`;
+          }).join('');
+          const shouldOpen = openBatchId && (String(lot?.id || '') === String(openBatchId) || key === `lot:${openBatchId}`) ? ' open' : '';
+          const html = `<details class="supplier-stock-history-batch"${shouldOpen}><summary><span class="supplier-stock-history-batch-summary-heading"><strong>${escapeHTML(group.batchNumber)}</strong><span>${group.entries.length} movement${group.entries.length === 1 ? '' : 's'}</span></span>${batchInfo}</summary><div class="supplier-stock-history-movements">${movements || '<p class="supplier-stock-empty">No stock movements have been recorded for this batch yet.</p>'}</div></details>`;
+          return { depleted, lotId: lot?.id ? String(lot.id) : '', html };
+        });
+        const activeGroups = renderedGroups.filter((group) => !group.depleted);
+        const depletedGroups = renderedGroups.filter((group) => group.depleted);
+        const initialTab = openBatchId && renderedGroups.some((group) => group.depleted && group.lotId === String(openBatchId)) ? 'depleted' : 'active';
+        stockHistoryExportData = {
+          productName,
+          variantLabel: variantLabel || 'Standard',
+          batches: [...groups.entries()].map(([id, group]) => {
+            const lot = group.lot;
+            return {
+              id,
+              batchNumber: group.batchNumber,
+              depleted: !lot || (Number(lot.quantity) || 0) <= 0,
+              quantity: Number(lot?.quantity) || 0,
+              receivedDate: lot?.received_on || '',
+              received: lot?.received_on ? inventoryDateLabel(lot.received_on) : '—',
+              expiry: lot?.expires_on ? inventoryDateLabel(lot.expires_on) : 'No expiry date',
+              location: lot?.location || '—',
+              notes: lot?.notes || '',
+              movements: group.entries.map((entry) => ({
+                date: dateLabel(entry.created_at),
+                change: Number(entry.quantity_delta) || 0,
+                before: Number(entry.quantity_before) || 0,
+                after: Number(entry.quantity_after) || 0,
+                reason: entry.reason || '—',
+                orderNumber: entry.order_number || '',
+                notes: entry.notes || '',
+              })),
+            };
+          }),
+        };
+        const panel = (name, groups) => `<div class="supplier-stock-history-panel" role="tabpanel" data-stock-history-panel="${name}"${initialTab === name ? '' : ' hidden'}>${groups.length ? groups.map((group) => group.html).join('') : `<p class="supplier-stock-empty">No ${name} batches with stock history.</p>`}</div>`;
+        setStockHistoryContent(`<div class="supplier-stock-history-title-row"><h2>${escapeHTML(productName)} · ${escapeHTML(variantLabel || 'Standard')} History</h2><button type="button" data-stock-history-download ${stockHistoryExportData.batches.length ? '' : 'disabled'}>Download Statement</button></div><div class="supplier-stock-history-tabs" role="tablist" aria-label="Batch history"><button type="button" role="tab" aria-selected="${initialTab === 'active'}" data-stock-history-tab="active" class="${initialTab === 'active' ? 'is-active' : ''}">Active Batches (${activeGroups.length})</button><button type="button" role="tab" aria-selected="${initialTab === 'depleted'}" data-stock-history-tab="depleted" class="${initialTab === 'depleted' ? 'is-active' : ''}">Depleted Batches (${depletedGroups.length})</button></div><div class="supplier-stock-history-list">${panel('active', activeGroups)}${panel('depleted', depletedGroups)}</div>`);
+      } catch (error) {
+        setStockHistoryContent(`<h2>Stock History</h2><p class="supplier-portal-feedback">${escapeHTML(error.message || 'Stock history could not be loaded. Apply the stock history database migration, then try again.')}</p>`);
+      }
+    };
+    stockHistoryDialog.addEventListener('click', (event) => {
+      const downloadButton = event.target.closest('[data-stock-history-download]');
+      const tab = event.target.closest('[data-stock-history-tab]');
+      if (downloadButton && stockHistoryExportData) {
+        stockHistoryExportDialog.querySelector('[data-stock-export-date-filter]').value = 'all';
+        stockHistoryExportDialog.querySelector('[data-stock-export-from]').value = '';
+        stockHistoryExportDialog.querySelector('[data-stock-export-to]').value = '';
+        renderStockHistoryExportChooser();
+        stockHistoryDialog.close();
+        stockHistoryExportDialog.showModal();
+      } else if (tab) {
+        const name = tab.dataset.stockHistoryTab;
+        stockHistoryDialog.querySelectorAll('[data-stock-history-tab]').forEach((button) => {
+          const selected = button === tab;
+          button.classList.toggle('is-active', selected);
+          button.setAttribute('aria-selected', String(selected));
+        });
+        stockHistoryDialog.querySelectorAll('[data-stock-history-panel]').forEach((content) => {
+          content.hidden = content.dataset.stockHistoryPanel !== name;
+        });
+      } else if (event.target.closest('[data-stock-history-close]')) {
+        stockHistoryDialog.close();
+        if (stockDetailContext) { renderStockDetails(stockDetailContext.productId, stockDetailContext.productName, stockDetailContext.variantLabel); stockDialog.showModal(); }
+      }
+    });
+    stockHistoryExportDialog.addEventListener('change', (event) => {
+      const selectAll = event.target.closest('[data-stock-export-select-all]');
+      if (selectAll) {
+        stockHistoryExportDialog.querySelectorAll('[data-stock-export-batch]').forEach((checkbox) => { checkbox.checked = selectAll.checked; });
+        syncStockExportSelectAll();
+      } else if (event.target.closest('[data-stock-export-date-filter], [data-stock-export-from], [data-stock-export-to]')) renderStockHistoryExportChooser();
+      else if (event.target.closest('[data-stock-export-batch]')) syncStockExportSelectAll();
+    });
+    stockHistoryExportDialog.addEventListener('cancel', (event) => {
+      event.preventDefault();
+      stockHistoryExportDialog.close();
+      stockHistoryDialog.showModal();
+    });
+    stockHistoryExportDialog.addEventListener('click', (event) => {
+      if (event.target.closest('[data-stock-export-back]')) {
+        stockHistoryExportDialog.close();
+        stockHistoryDialog.showModal();
+        return;
+      }
+      if (!event.target.closest('[data-stock-export-download]') || !stockHistoryExportData) return;
+      const selectedIds = new Set([...stockHistoryExportDialog.querySelectorAll('[data-stock-export-batch]:checked')].map((checkbox) => checkbox.value));
+      const selectedBatches = stockHistoryExportData.batches.filter((batch) => selectedIds.has(String(batch.id)));
+      const feedback = stockHistoryExportDialog.querySelector('[data-stock-export-feedback]');
+      if (!selectedBatches.length) {
+        feedback.textContent = 'Choose at least one batch to include.';
+        feedback.classList.add('is-error');
+        return;
+      }
+      const report = { ...stockHistoryExportData, batches: selectedBatches };
+      const pdf = makeStockHistoryPdf(report);
+      const url = URL.createObjectURL(new Blob([pdf], { type: 'application/pdf' }));
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `stock-history-${[report.productName, report.variantLabel].join('-').replace(/[^a-z0-9-_]+/gi, '-').replace(/^-+|-+$/g, '') || 'furgo'}.pdf`;
+      link.click();
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+      stockHistoryExportDialog.close();
+      stockHistoryDialog.showModal();
+    });
+    const renderInventory = () => {
+      const inventoryRouteParams = new URLSearchParams(window.location.hash.split('?')[1] || '');
+      const routeProductId = inventoryRouteParams.get('productId') || '';
+      const routeMarketplaceProductId = inventoryRouteParams.get('marketplaceProductId') || '';
+      const routeProductName = inventoryRouteParams.get('productName') || '';
+      const routeProduct = !inventoryRouteFocusHandled && (routeProductId || routeMarketplaceProductId || routeProductName)
+        ? warehouseProducts.find((product) => (routeProductId && String(product.id) === routeProductId)
+          || (routeMarketplaceProductId && String(product.marketplace_product_id || '') === routeMarketplaceProductId)
+          || (routeProductName && String(product.name || '').toLocaleLowerCase() === routeProductName.toLocaleLowerCase()))
+        : null;
+      if (routeProduct) {
+        const searchInput = inventorySection.querySelector('[data-inventory-search]');
+        if (searchInput) searchInput.value = routeProduct.name || '';
+        ['[data-inventory-expiry-filter]', '[data-inventory-category-filter]', '[data-inventory-supplier-filter]', '[data-inventory-status-filter]'].forEach((selector) => {
+          const filter = inventorySection.querySelector(selector);
+          if (filter) filter.value = 'all';
+        });
+      }
+      const inventorySearchInput = inventorySection.querySelector('[data-inventory-search]');
+      const search = (inventorySearchInput?.value || '').trim().toLocaleLowerCase();
+      inventorySearchInput?.classList.toggle('is-filtered', Boolean(search));
+      const expiryFilter = inventorySection.querySelector('[data-inventory-expiry-filter]')?.value || 'all';
+      const categoryFilter = inventorySection.querySelector('[data-inventory-category-filter]')?.value || 'all';
+      const supplierFilter = inventorySection.querySelector('[data-inventory-supplier-filter]')?.value || 'all';
+      const statusFilter = inventorySection.querySelector('[data-inventory-status-filter]')?.value || 'all';
+      const total = inventoryRows.reduce((sum, row) => sum + (Number(row.quantity) || 0), 0);
+      inventorySection.querySelector('[data-inventory-total]').textContent = total.toLocaleString();
+      inventorySection.querySelector('[data-inventory-lots]').textContent = inventoryRows.length.toLocaleString();
+      const expiryAttentionCount = inventoryRows.filter((row) => ['soon', 'expired'].includes(inventoryExpiryState(row))).length;
+      inventorySection.querySelector('[data-inventory-expiring]').textContent = expiryAttentionCount.toLocaleString();
+      const dashboardExpiryCount = document.querySelector('[data-supplier-expiring-count]');
+      if (dashboardExpiryCount) dashboardExpiryCount.textContent = expiryAttentionCount.toLocaleString();
+      const groups = [];
+      const marketplaceStateFor = (product) => {
+        const listing = product?.marketplace_product_id
+          ? supplierCatalog.find((entry) => String(entry.id) === String(product.marketplace_product_id))
+          : null;
+        const pendingListing = product?.id ? supplierSubmissions.find((entry) => entry.action === 'add' && entry.status === 'Pending Review'
+          && (String(entry.product_data?.warehouseProductId || '') === String(product.id)
+            || String(entry.product_id || '') === String(product.marketplace_product_id || ''))) : null;
+        const listingFrozen = Boolean(listing?.frozenByAdmin || listing?.variants?.some((entry) => entry.frozen));
+        return pendingListing ? 'pending' : listingFrozen ? 'frozen' : listing && !listing.hidden ? 'live' : 'hidden';
+      };
+      for (const product of warehouseProducts) {
+        for (const variant of productVariants(product)) {
+          const label = variant.label || 'Standard';
+          const lots = stockLotsFor(product.id, product.name, label);
+          groups.push({ product, productId: product.id, productName: product.name, variantId: variant.id || label, variantLabel: label, sku: variant.sku || productData(product).productCode || '', supplierName: supplierInfoFor(product, variant).name, lots, total: lots.reduce((sum, lot) => sum + (Number(lot.quantity) || 0), 0) });
+        }
+      }
+      const unlinkedLots = inventoryRows.filter((lot) => !warehouseProductForRow(lot));
+      for (const lot of unlinkedLots) {
+        groups.push({ product: null, productId: '', productName: lot.product_name || 'Unknown product', variantId: lot.variant || 'Standard', variantLabel: lot.variant || 'Standard', sku: lot.sku || '', supplierName: 'Not provided', lots: stockLotsFor('', lot.product_name, lot.variant), total: Number(lot.quantity) || 0 });
+      }
+      const lowStockOptionCount = groups.filter((group) => {
+        const variant = group.product
+          ? productVariants(group.product).find((entry) => String(entry.id || entry.label || 'Standard') === String(group.variantId || '')
+            || String(entry.label || 'Standard') === String(group.variantLabel || 'Standard'))
+          : null;
+        const enabled = variant?.lowStockAlertEnabled ?? variant?.low_stock_alert_enabled ?? true;
+        const threshold = Math.max(0, Number(variant?.lowStockThreshold ?? variant?.low_stock_threshold ?? 5) || 0);
+        return enabled && group.total <= threshold;
+      }).length;
+      inventorySection.querySelector('[data-inventory-low]').textContent = lowStockOptionCount.toLocaleString();
+      const filtered = groups.filter((group) => {
+        const lotSearch = group.lots.flatMap((lot) => [lot.batch_number, lot.location, lot.notes]).join(' ');
+        const supplierName = group.supplierName || supplierInfoFor(group.product).name;
+        const listingState = marketplaceStateFor(group.product);
+        const statusLabel = { live: 'Live', hidden: 'Hidden', pending: 'Pending', frozen: 'Frozen' }[listingState];
+        const values = [group.productName, group.sku, group.variantLabel, productData(group.product).category, productData(group.product).petTypes, supplierName, listingState, statusLabel, lotSearch].join(' ').toLocaleLowerCase();
+        const category = String(productData(group.product).category || 'Other');
+        const expiryMatch = expiryFilter === 'all'
+          || (expiryFilter === 'attention' && group.lots.some((lot) => ['soon', 'expired'].includes(inventoryExpiryState(lot))))
+          || (expiryFilter === 'none' && (!group.lots.length || group.lots.some((lot) => !lot.expires_on)))
+          || (expiryFilter === 'soon' && group.lots.some((lot) => inventoryExpiryState(lot) === 'soon'))
+          || (expiryFilter === 'expired' && group.lots.some((lot) => inventoryExpiryState(lot) === 'expired'));
+        return (!search || values.includes(search))
+          && (supplierFilter === 'all' || supplierName.toLocaleLowerCase() === supplierFilter.toLocaleLowerCase())
+          && (statusFilter === 'all' || listingState === statusFilter)
+          && (categoryFilter === 'all' || category === categoryFilter)
+          && expiryMatch;
+      });
+      if (!filtered.length) {
+        inventoryList.innerHTML = `<p class="supplier-empty">${warehouseProducts.length ? 'No warehouse products or stock lots match those filters.' : 'No warehouse products yet. Use Add Product to create the catalogue, then receive stock.'}</p>`;
+        return;
+      }
+      const productGroups = [];
+      const productGroupByKey = new Map();
+      filtered.forEach((group) => {
+        const key = group.productId ? `product:${group.productId}` : `unlinked:${group.productName}`;
+        let productGroup = productGroupByKey.get(key);
+        if (!productGroup) {
+          productGroup = { key, product: group.product, productId: group.productId, productName: group.productName, category: productData(group.product).category || 'Other', sku: productData(group.product).productCode || group.sku || '', rows: [] };
+          productGroupByKey.set(key, productGroup);
+          productGroups.push(productGroup);
+        }
+        productGroup.rows.push(group);
+      });
+      inventoryList.innerHTML = `<div class="supplier-inventory-table-wrap"><table class="supplier-inventory-table"><thead><tr><th>Product</th><th>Option</th><th>Stock</th><th>Seller</th><th>Closest expiry</th><th>Actions</th><th>Status</th></tr></thead><tbody>${productGroups.map((productGroup) => {
+        const product = productGroup.product;
+        const hasMultipleOptions = productVariants(product).length > 1;
+        const coverImage = safeMarketplaceImage(productData(product).images?.[0] || '');
+        const productImage = coverImage ? `<img class="supplier-inventory-product-image" src="${escapeHTML(coverImage)}" alt="${escapeHTML(productGroup.productName)}" loading="lazy" />` : '<span class="supplier-inventory-product-image is-placeholder" aria-hidden="true">🐾</span>';
+        const listing = product?.marketplace_product_id
+          ? supplierCatalog.find((entry) => String(entry.id) === String(product.marketplace_product_id))
+          : null;
+        const pendingListing = productGroup.productId ? supplierSubmissions.find((entry) => entry.action === 'add' && entry.status === 'Pending Review'
+          && (String(entry.product_data?.warehouseProductId || '') === String(productGroup.productId)
+            || String(entry.product_id || '') === String(product?.marketplace_product_id || ''))) : null;
+        const listingFrozen = Boolean(listing?.frozenByAdmin || listing?.variants?.some((entry) => entry.frozen));
+        const listingState = pendingListing ? 'pending' : listingFrozen ? 'frozen' : listing && !listing.hidden ? 'live' : 'hidden';
+        const listingLabel = { pending: 'Pending', frozen: 'Frozen', live: 'Live', hidden: 'Hidden' }[listingState];
+        const statusButton = `<button type="button" class="supplier-inventory-listing-state is-${listingState}" data-inventory-marketplace-toggle="${escapeHTML(productGroup.productId)}" ${!productGroup.productId || pendingListing || listingFrozen ? 'disabled' : ''}>${listingLabel}</button>`;
+        const productActions = `<div class="supplier-inventory-product-actions"><button type="button" class="is-primary" data-inventory-edit-product="${escapeHTML(productGroup.productId)}" ${productGroup.productId ? '' : 'disabled'}>Product Details</button><button type="button" data-inventory-supplier-details="${escapeHTML(productGroup.productId)}" ${productGroup.productId ? '' : 'disabled'}>Seller Details</button></div>`;
+        const productCell = `<td rowspan="${productGroup.rows.length + (hasMultipleOptions ? 1 : 0)}" class="supplier-inventory-product-group-cell"><div class="supplier-inventory-product-cell">${productImage}<span><strong>${escapeHTML(productGroup.productName)}</strong><small>${escapeHTML(productGroup.category)} · SKU: ${escapeHTML(productGroup.sku || '—')}</small></span></div></td>`;
+        const productActionsRow = hasMultipleOptions
+          ? `<tr class="supplier-inventory-product-actions-row"${productGroup.productId ? ` data-warehouse-product-row="${escapeHTML(productGroup.productId)}"` : ''}>${productCell}<td class="supplier-inventory-option-cell supplier-inventory-product-action-spacer" colspan="4"></td><td><div class="supplier-inventory-actions-wrap"><div class="supplier-inventory-actions">${productActions}</div></div></td><td rowspan="${productGroup.rows.length + 1}" class="supplier-inventory-status-cell">${statusButton}</td></tr>`
+          : '';
+        const optionRows = productGroup.rows.map((group, rowIndex) => {
+          const stockActions = `<div class="supplier-inventory-stock-actions"><button type="button" data-inventory-view-stock-product="${escapeHTML(group.productId)}" data-inventory-view-stock-name="${escapeHTML(group.productName)}" data-inventory-view-stock-variant="${escapeHTML(group.variantLabel)}" data-inventory-view-stock-variant-id="${escapeHTML(group.variantId || group.variantLabel)}">Stock Details</button></div>`;
+          const supplier = supplierInfoFor(group.product, productVariants(group.product).find((variant) => String(variant.label || 'Standard') === String(group.variantLabel || 'Standard')) || {});
+          const actions = !hasMultipleOptions
+            ? `<div class="supplier-inventory-actions">${productActions}${stockActions}</div>`
+            : `<div class="supplier-inventory-actions">${stockActions}</div>`;
+          const today = localPetDate();
+          const closestExpiryLot = group.lots.filter((lot) => lot.expires_on).sort((a, b) => {
+            const aUpcoming = a.expires_on >= today;
+            const bUpcoming = b.expires_on >= today;
+            if (aUpcoming !== bUpcoming) return aUpcoming ? -1 : 1;
+            return aUpcoming ? String(a.expires_on).localeCompare(String(b.expires_on)) : String(b.expires_on).localeCompare(String(a.expires_on));
+          })[0];
+          const expiryState = closestExpiryLot ? inventoryExpiryState(closestExpiryLot) : '';
+          const expiryClass = expiryState === 'expired' ? 'is-expired' : expiryState === 'soon' ? 'is-expiring' : '';
+          return `<tr class="${hasMultipleOptions ? 'supplier-inventory-option-row' : ''} ${rowIndex > 0 ? 'supplier-inventory-option-continuation' : ''}"${rowIndex === 0 && productGroup.productId ? ` data-warehouse-product-row="${escapeHTML(productGroup.productId)}"` : ''}>${!hasMultipleOptions ? productCell : ''}<td class="supplier-inventory-option-cell">${escapeHTML(group.variantLabel)}</td><td><strong>${group.total.toLocaleString()}</strong><small>units</small></td><td class="supplier-inventory-supplier-cell">${escapeHTML(supplier.name)}</td><td><span class="supplier-inventory-expiry ${expiryClass}">${closestExpiryLot ? inventoryDateLabel(closestExpiryLot.expires_on) : '—'}</span></td><td><div class="supplier-inventory-actions-wrap">${actions}</div></td>${!hasMultipleOptions ? `<td class="supplier-inventory-status-cell">${statusButton}</td>` : ''}</tr>`;
+        }).join('');
+        return `${productActionsRow}${optionRows}`;
+      }).join('')}</tbody></table></div>`;
+      if (routeProduct) {
+        inventoryRouteFocusHandled = true;
+        requestAnimationFrame(() => [...inventoryList.querySelectorAll('[data-warehouse-product-row]')]
+          .find((row) => row.dataset.warehouseProductRow === String(routeProduct.id))
+          ?.scrollIntoView({ behavior: 'smooth', block: 'center' }));
+      }
+    };
+    refreshWarehouseInventory = async () => {
+      if (!inventorySection || inventoryLoaded) return;
+      inventoryList.innerHTML = '<p class="supplier-empty">Loading warehouse inventory…</p>';
+      try {
+        // Store Portal data is fetched once during page initialization. Re-fetching
+        // the full catalog, submissions, and orders here made Inventory wait on
+        // the same network calls a second time before it could load its stock.
+        await refreshWarehouseProducts(true);
+      } catch (error) {
+        const detail = error.message || 'Unknown data-loading error.';
+        inventoryList.innerHTML = `<p class="supplier-empty">Warehouse products could not load: ${escapeHTML(detail)}</p>`;
+        setInventoryFeedback(detail, true);
+        throw error;
+      }
+      let data;
+      try {
+        const owners = warehouseOwnerIds();
+        let lotQuery = supabase.from('warehouse_inventory_lots')
+          .select('id,product_name,sku,variant,batch_number,quantity,received_on,expires_on,location,notes,warehouse_product_id,pick_order')
+          .order('pick_order', { ascending: true })
+          .order('expires_on', { ascending: true, nullsFirst: false })
+          .order('received_on', { ascending: true });
+        if (supplierProfile.directorStoreView) lotQuery = owners.length ? lotQuery.in('created_by', owners) : null;
+        const result = lotQuery ? await lotQuery : { data: [], error: null };
+        if (result.error) throw result.error;
+        data = result.data;
+      } catch (error) {
+        const detail = error.message || 'Unknown data-loading error.';
+        inventoryList.innerHTML = `<p class="supplier-empty">Inventory could not load: ${escapeHTML(detail)}</p>`;
+        setInventoryFeedback(detail, true);
+        throw error;
+      }
+      inventoryRows = data || [];
+      inventoryLoaded = true;
+      inventoryForm.elements.received_on.value = localPetDate();
+      syncBatchNumber(inventoryForm);
+      renderInventory();
+      renderPackagingOrders();
+    };
+    inventorySection.querySelector('[data-inventory-search]')?.addEventListener('input', renderInventory);
+    inventorySection.querySelector('[data-inventory-expiry-filter]')?.addEventListener('change', renderInventory);
+    inventorySection.querySelector('[data-inventory-category-filter]')?.addEventListener('change', renderInventory);
+    inventorySection.querySelector('[data-inventory-supplier-filter]')?.addEventListener('change', renderInventory);
+    inventorySection.querySelector('[data-inventory-status-filter]')?.addEventListener('change', renderInventory);
+    inventoryList?.addEventListener('click', async (event) => {
+      const supplierDetailsButton = event.target.closest('[data-inventory-supplier-details]');
+      if (supplierDetailsButton) {
+        const product = warehouseProducts.find((entry) => String(entry.id) === String(supplierDetailsButton.dataset.inventorySupplierDetails));
+        if (product) showSupplierDetails(product);
+        return;
+      }
+      const button = event.target.closest('[data-inventory-marketplace-toggle]');
+      if (!button || button.disabled) return;
+      const product = warehouseProducts.find((entry) => String(entry.id) === String(button.dataset.inventoryMarketplaceToggle));
+      if (!product) return;
+      const listing = product.marketplace_product_id
+        ? supplierCatalog.find((entry) => String(entry.id) === String(product.marketplace_product_id))
+        : null;
+      const pending = supplierSubmissions.find((entry) => entry.action === 'add' && entry.status === 'Pending Review'
+        && (String(entry.product_data?.warehouseProductId || '') === String(product.id)
+          || String(entry.product_id || '') === String(product.marketplace_product_id || '')));
+      if (pending) return;
+      const shouldPublish = !listing || Boolean(listing.hidden);
+      if (!window.confirm(`${shouldPublish ? 'Make' : 'Hide'} “${product.name}” ${shouldPublish ? 'live in' : 'from'} the Marketplace?`)) return;
+      button.disabled = true;
+      setInventoryFeedback(shouldPublish ? 'Publishing product…' : 'Hiding product…');
+      try {
+        let result = null;
+        if (listing) {
+          const { error } = await supabase.rpc('manage_marketplace_supplier_product', {
+            p_action: shouldPublish ? 'show' : 'hide',
+            p_product_id: listing.id,
+          });
+          if (error) throw error;
+        } else {
+          const variants = productVariants(product).map((variant) => ({
+            ...variant,
+            stock: stockLotsFor(product.id, product.name, variant.label || 'Standard').reduce((sum, lot) => sum + (Number(lot.quantity) || 0), 0),
+          }));
+          result = await submitWarehouseMarketplaceListing(product.id, {
+            ...productData(product),
+            id: product.id,
+            name: product.name,
+            warehouseProductId: product.id,
+            variants,
+          });
+        }
+        setInventoryFeedback(result?.status === 'Pending Review'
+          ? `“${product.name}” was submitted and is waiting for approval before it goes live.`
+          : `“${product.name}” is now ${shouldPublish ? 'live' : 'hidden'} in the Marketplace.`);
+        productsLoaded = false;
+        inventoryLoaded = false;
+        await refreshWarehouseInventory();
+      } catch (error) {
+        button.disabled = false;
+        setInventoryFeedback(error.message || 'The Marketplace listing could not be updated.', true);
+      }
+    });
+    inventorySection.querySelector('[data-warehouse-add-product]')?.addEventListener('click', () => navigateToSupplierProductEditor({ warehouseAdd: '1', from: 'inventory' }));
+    inventorySection.querySelector('[data-warehouse-product-cancel]')?.addEventListener('click', () => productDialog.close());
+    productForm?.querySelector('[data-warehouse-delete-product]')?.addEventListener('click', async (event) => {
+      const button = event.currentTarget;
+      const id = productForm.elements.id.value;
+      const product = warehouseProducts.find((row) => row.id === id);
+      if (!product || button.disabled) return;
+      const stockTotal = inventoryRows
+        .filter((lot) => warehouseProductForRow(lot)?.id === product.id)
+        .reduce((sum, lot) => sum + (Number(lot.quantity) || 0), 0);
+      if (stockTotal > 0) {
+        setProductFeedback(`This product has ${stockTotal.toLocaleString()} units in stock. Reduce every stock batch to zero before deleting it.`, true);
+        return;
+      }
+      if (!window.confirm(`Delete “${product.name}” from Warehouse Stock and remove its Marketplace listing? This cannot be undone.`)) return;
+      button.disabled = true;
+      try {
+        const { error } = await supabase.rpc('delete_store_warehouse_product', { p_warehouse_product_id: id });
+        if (error) throw error;
+        productDialog.close();
+        productsLoaded = false;
+        inventoryLoaded = false;
+        await refreshWarehouseProducts(true);
+        await refreshWarehouseInventory();
+        setInventoryFeedback('Warehouse product deleted.');
+      } catch (error) {
+        setProductFeedback(error.message || 'The warehouse product could not be deleted.', true);
+        button.disabled = false;
+      }
+    });
+    productForm?.querySelector('[data-warehouse-add-variant]')?.addEventListener('click', () => {
+      const variants = [...productForm.querySelectorAll('[data-warehouse-product-variant]')].map((row) => ({
+        id: row.querySelector('[name="warehouseVariantId"]').value,
+        option: row.querySelector('[name="variantOption"]').value.trim(),
+        variant: row.querySelector('[name="variantLabel"]').value.trim(),
+        label: row.querySelector('[name="variantLabel"]').value,
+        price: row.querySelector('[name="price"]').value,
+        sku: row.querySelector('[name="variantSku"]').value,
+        imageUrl: row.querySelector('[name="variantImageUrl"]').value,
+      }));
+      variants.push({});
+      renderWarehouseVariantEditor(variants);
+    });
+    productForm?.addEventListener('click', (event) => {
+      const remove = event.target.closest('[data-remove-warehouse-variant]');
+      if (!remove || remove.disabled) return;
+      remove.closest('[data-warehouse-product-variant]')?.remove();
+      const rows = [...productForm.querySelectorAll('[data-warehouse-product-variant]')];
+      rows.forEach((row) => { row.querySelector('[data-remove-warehouse-variant]').disabled = rows.length === 1; });
+    });
+    productForm?.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      if (!productForm.reportValidity()) return;
+      const fields = productForm.elements;
+      const id = fields.id.value;
+      const previousRow = warehouseProducts.find((entry) => entry.id === id);
+      const previousData = productData(previousRow);
+      const previousVariantsById = new Map(productVariants(previousRow).map((variant) => [String(variant.id || variant.label || 'Standard'), variant]));
+      const variantRows = [...productForm.querySelectorAll('[data-warehouse-product-variant]')].map((row, index) => ({
+        ...(previousVariantsById.get(String(row.querySelector('[name="warehouseVariantId"]').value || '')) || {}),
+        id: row.querySelector('[name="warehouseVariantId"]').value || `warehouse-option-${crypto.randomUUID()}-${index + 1}`,
+        option: row.querySelector('[name="variantOption"]').value.trim(),
+        variant: row.querySelector('[name="variantLabel"]').value.trim(),
+        label: composeSupplierVariantLabel(row.querySelector('[name="variantOption"]').value, row.querySelector('[name="variantLabel"]').value),
+        price: Number(row.querySelector('[name="price"]').value),
+        sku: row.querySelector('[name="variantSku"]').value.trim(),
+        imageUrl: row.querySelector('[name="variantImageUrl"]').value.trim(),
+      }));
+      if (new Set(variantRows.map((variant) => variant.label.toLocaleLowerCase())).size !== variantRows.length) { setProductFeedback('Each option and variant combination needs a different name.', true); return; }
+      const { data: authData } = await supabase.auth.getUser();
+      const imageUrl = fields.imageUrl.value.trim();
+      const coverFile = fields.coverPhoto.files?.[0] || null;
+      let uploadedCoverPath = '';
+      let coverImageUrl = imageUrl || previousData.images?.[0] || '';
+      try {
+        const coverValidationError = coverFile ? await validateSupplierPhotos([coverFile], 1) : '';
+        if (coverValidationError) { setProductFeedback(coverValidationError, true); return; }
+        if (coverFile) {
+          const extension = coverFile.type === 'image/jpeg' ? 'jpg' : coverFile.type.split('/')[1];
+        uploadedCoverPath = `${warehouseInsertOwnerId()}/warehouse/${id || crypto.randomUUID()}/${crypto.randomUUID()}.${extension}`;
+          const { error: uploadError } = await supabase.storage.from('marketplace-submissions').upload(uploadedCoverPath, coverFile, { contentType: coverFile.type, upsert: false });
+          if (uploadError) throw uploadError;
+          coverImageUrl = supabase.storage.from('marketplace-submissions').getPublicUrl(uploadedCoverPath).data.publicUrl;
+        }
+      } catch (error) {
+        setProductFeedback(error.message || 'The cover photo could not be uploaded.', true);
+        return;
+      }
+      const product = {
+        ...previousData,
+        name: fields.name.value.trim(),
+        category: fields.category.value,
+        petTypes: fields.petTypes.value.trim(),
+        productCode: fields.productCode.value.trim(),
+        description: fields.description.value.trim(),
+        ingredients: fields.ingredients.value.trim(),
+        nutrition: fields.nutrition.value.trim(),
+        images: coverImageUrl ? [coverImageUrl, ...(previousData.images || []).slice(1)] : (previousData.images || []),
+        variants: variantRows,
+      };
+      const submit = productForm.querySelector('[type="submit"]');
+      submit.disabled = true;
+      setProductFeedback(id ? 'Saving warehouse product…' : 'Adding warehouse product…');
+      let warehouseProductSaved = false;
+      try {
+        let savedProductId = id;
+        if (id) {
+          const { error } = await supabase.from('warehouse_products').update({ name: product.name, product_data: product, updated_by: authData?.user?.id || null, updated_at: new Date().toISOString() }).eq('id', id);
+          if (error) throw error;
+        } else {
+          const { data: savedProduct, error } = await supabase.from('warehouse_products')
+            .insert({ name: product.name, product_data: product, created_by: warehouseInsertOwnerId() || authData?.user?.id || null })
+            .select('id')
+            .single();
+          if (error) throw error;
+          savedProductId = savedProduct.id;
+          fields.id.value = savedProductId;
+          warehouseProductSaved = true;
+        }
+        warehouseProductSaved = true;
+        productDialog.close();
+        productsLoaded = false;
+        inventoryLoaded = false;
+        await refreshWarehouseProducts(true);
+        await refreshWarehouseInventory();
+        await refreshSupplierPortal();
+        setInventoryFeedback(id ? 'Warehouse product updated.' : 'Warehouse product added. Use Live in Warehouse Stock when it is ready to publish.');
+      } catch (error) {
+        if (uploadedCoverPath && !warehouseProductSaved) await supabase.storage.from('marketplace-submissions').remove([uploadedCoverPath]);
+        if (warehouseProductSaved) {
+          productsLoaded = false;
+          await refreshWarehouseProducts(true).catch(() => {});
+          setProductFeedback(`The warehouse product was saved, but its Marketplace listing could not be completed. Save again to retry. ${error.message || ''}`.trim(), true);
+        } else setProductFeedback(error.message || 'The warehouse product could not be saved.', true);
+      }
+      finally { submit.disabled = false; }
+    });
+    const syncInventoryVariant = (form, productSelector, variantSelector) => {
+      const productId = productSelector.value;
+      fillVariantSelect(variantSelector, productId);
+      const product = warehouseProducts.find((entry) => entry.id === productId);
+      const variant = product ? productVariants(product)[0] : null;
+      if (variant && variantSelector) variantSelector.value = variant.id || variant.label;
+      if (form.elements.sku && product) form.elements.sku.value = variant?.sku || productData(product).productCode || '';
+      if (form.elements.product_name && product) form.elements.product_name.value = product.name;
+    };
+    const lockInventoryEditFields = () => {
+      const productField = editForm?.elements.warehouse_product_id;
+      const variantField = editForm?.elements.variant;
+      const quantityField = editForm?.elements.quantity;
+      const batchField = editForm?.elements.batch_number;
+      if (productField) { productField.disabled = true; productField.setAttribute('aria-readonly', 'true'); }
+      if (variantField) { variantField.disabled = true; variantField.setAttribute('aria-readonly', 'true'); }
+      if (quantityField) quantityField.readOnly = true;
+      if (batchField) batchField.readOnly = true;
+    };
+    const inventoryProductSelect = inventoryForm?.querySelector('[data-inventory-product-select]');
+    const inventoryVariantSelect = inventoryForm?.querySelector('[data-inventory-variant-select]');
+    const openReceiveStockDialog = (productId = '', variantId = '') => {
+      inventoryForm.reset();
+      inventoryForm.elements.received_on.value = localPetDate();
+      syncBatchNumber(inventoryForm);
+      fillVariantSelect(inventoryVariantSelect, '');
+      setProductForSelect(inventoryProductSelect, inventoryVariantSelect, productId, variantId);
+      setInventoryFeedback('');
+      if (stockDialog.open) stockDialog.close();
+      receiveDialog.showModal();
+      inventoryForm.elements.quantity.focus({ preventScroll: true });
+    };
+    receiveDialog.querySelector('[data-inventory-receive-cancel]')?.addEventListener('click', () => {
+      receiveDialog.close();
+      if (stockDetailContext) { renderStockDetails(stockDetailContext.productId, stockDetailContext.productName, stockDetailContext.variantLabel); stockDialog.showModal(); }
+    });
+    let stockBatchDrag = null;
+    const saveStockBatchOrder = async (orderedIds) => {
+      if (!stockDetailContext || !orderedIds.length) return;
+      try {
+        const { error } = await supabase.rpc('reorder_warehouse_inventory_lots', { p_lot_ids: orderedIds });
+        if (error) throw error;
+        inventoryRows = inventoryRows.map((lot) => {
+          const nextIndex = orderedIds.indexOf(lot.id);
+          return nextIndex < 0 ? lot : { ...lot, pick_order: nextIndex + 1 };
+        });
+        renderStockDetails(stockDetailContext.productId, stockDetailContext.productName, stockDetailContext.variantLabel);
+      } catch (error) {
+        setInventoryFeedback(error.message || 'Batch pick order could not be changed.', true);
+        renderStockDetails(stockDetailContext.productId, stockDetailContext.productName, stockDetailContext.variantLabel);
+      }
+    };
+    stockDialog.addEventListener('pointerdown', (event) => {
+      const handle = event.target.closest('[data-stock-batch-drag]');
+      const batch = handle?.closest('[data-stock-batch]');
+      if (!handle || !batch || !stockDetailContext || event.button !== 0) return;
+      event.preventDefault();
+      stockBatchDrag = { pointerId: event.pointerId, handle, batch, startOrder: [...stockDialog.querySelectorAll('[data-stock-batch]')].map((node) => node.dataset.stockBatchId) };
+      handle.classList.add('is-dragging');
+      batch.classList.add('is-dragging');
+      handle.setPointerCapture?.(event.pointerId);
+    });
+    stockDialog.addEventListener('pointermove', (event) => {
+      if (!stockBatchDrag || stockBatchDrag.pointerId !== event.pointerId) return;
+      const target = document.elementFromPoint(event.clientX, event.clientY)?.closest('[data-stock-batch]');
+      const list = stockDialog.querySelector('.supplier-stock-batches');
+      if (!target || !list || target === stockBatchDrag.batch || target.parentElement !== list) return;
+      const rect = target.getBoundingClientRect();
+      list.insertBefore(stockBatchDrag.batch, event.clientY < rect.top + rect.height / 2 ? target : target.nextElementSibling);
+    });
+    const finishStockBatchDrag = (event, shouldSave = true) => {
+      if (!stockBatchDrag || stockBatchDrag.pointerId !== event.pointerId) return;
+      const drag = stockBatchDrag;
+      stockBatchDrag = null;
+      drag.handle.classList.remove('is-dragging');
+      drag.batch.classList.remove('is-dragging');
+      const orderedIds = [...stockDialog.querySelectorAll('[data-stock-batch]')].map((node) => node.dataset.stockBatchId);
+      if (!shouldSave) {
+        renderStockDetails(stockDetailContext.productId, stockDetailContext.productName, stockDetailContext.variantLabel);
+      } else if (orderedIds.length && orderedIds.some((id, index) => id !== drag.startOrder[index])) {
+        void saveStockBatchOrder(orderedIds);
+      }
+    };
+    stockDialog.addEventListener('pointerup', (event) => finishStockBatchDrag(event));
+    stockDialog.addEventListener('pointercancel', (event) => finishStockBatchDrag(event, false));
+    stockDialog.addEventListener('click', async (event) => {
+      const closeButton = event.target.closest('[data-stock-details-close]');
+      const editButton = event.target.closest('[data-stock-batch-edit]');
+      const adjustButton = event.target.closest('[data-stock-batch-adjust]');
+      const lowStockButton = event.target.closest('[data-stock-low-stock-open]');
+      const historyButton = event.target.closest('[data-stock-history-open]');
+      const receiveButton = event.target.closest('[data-stock-details-receive]');
+      if (closeButton) {
+        stockDialog.close();
+        stockDetailContext = null;
+      } else if (editButton) {
+        const lot = inventoryRows.find((row) => row.id === editButton.dataset.stockBatchEdit);
+        if (!lot) return;
+        Object.entries(lot).forEach(([key, value]) => { if (editForm.elements[key]) editForm.elements[key].value = value ?? ''; });
+        setProductForSelect(editForm.querySelector('[data-inventory-edit-product]'), editForm.querySelector('[data-inventory-edit-variant]'), lot.warehouse_product_id, lot.variant);
+        syncBatchNumber(editForm);
+        lockInventoryEditFields();
+        stockDialog.close();
+        editDialog.showModal();
+      } else if (adjustButton) {
+        const lot = inventoryRows.find((row) => row.id === adjustButton.dataset.stockBatchAdjust);
+        if (!lot) return;
+        stockAdjustmentForm.reset();
+        stockAdjustmentForm.elements.lotId.value = lot.id;
+        stockAdjustmentForm.elements.quantity.max = String(Number(lot.quantity) || 0);
+        stockAdjustmentForm.querySelector('[data-stock-adjust-all]').disabled = Number(lot.quantity) < 1;
+        stockAdjustmentForm.querySelector('[data-stock-adjust-summary]').textContent = `${lot.batch_number || 'Unlabelled batch'} · ${lot.product_name} · ${lot.variant || 'Standard'} · ${Number(lot.quantity) || 0} units available`;
+        stockAdjustmentForm.querySelector('[data-stock-adjust-feedback]').textContent = '';
+        stockAdjustmentForm.querySelector('[type="submit"]').disabled = Number(lot.quantity) < 1;
+        stockDialog.close();
+        stockAdjustmentDialog.showModal();
+      } else if (lowStockButton) {
+        openLowStockSettings();
+      } else if (historyButton) {
+        stockDialog.close();
+        await loadStockHistory();
+      } else if (receiveButton) {
+        const productId = receiveButton.dataset.stockDetailsReceive;
+        const product = warehouseProducts.find((entry) => entry.id === productId);
+        const variant = product ? productVariants(product).find((entry) => entry.label === receiveButton.dataset.stockDetailsVariant) : null;
+        openReceiveStockDialog(productId, variant?.id || variant?.label || '');
+      }
+    });
+    stockAdjustmentDialog.addEventListener('click', (event) => {
+      if (event.target.closest('[data-stock-adjust-all]')) {
+        const quantityField = stockAdjustmentForm.elements.quantity;
+        quantityField.value = quantityField.max || '0';
+        quantityField.dispatchEvent(new Event('input', { bubbles: true }));
+      } else if (event.target.closest('[data-stock-adjust-cancel]')) {
+        stockAdjustmentDialog.close();
+        if (stockDetailContext) { renderStockDetails(stockDetailContext.productId, stockDetailContext.productName, stockDetailContext.variantLabel); stockDialog.showModal(); }
+      }
+    });
+    stockAdjustmentForm?.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      if (!stockAdjustmentForm.reportValidity()) return;
+      const fields = stockAdjustmentForm.elements;
+      const quantity = Number(fields.quantity.value);
+      const submit = stockAdjustmentForm.querySelector('[type="submit"]');
+      const feedback = stockAdjustmentForm.querySelector('[data-stock-adjust-feedback]');
+      submit.disabled = true;
+      feedback.textContent = 'Saving stock adjustment…';
+      try {
+        const { error } = await supabase.rpc('adjust_warehouse_inventory_lot', {
+          p_lot_id: fields.lotId.value,
+          p_quantity: quantity,
+          p_reason: fields.reason.value,
+          p_notes: fields.notes.value.trim() || null,
+        });
+        if (error) throw error;
+        stockAdjustmentDialog.close();
+        inventoryLoaded = false;
+        await refreshWarehouseInventory();
+        try { await refreshMarketplaceCatalogFromDatabase(); } catch (refreshError) { console.warn('Marketplace stock cache refresh deferred:', refreshError); }
+        setInventoryFeedback('Stock adjusted and saved in stock history.');
+        if (stockDetailContext) { renderStockDetails(stockDetailContext.productId, stockDetailContext.productName, stockDetailContext.variantLabel); stockDialog.showModal(); }
+      } catch (error) {
+        feedback.textContent = error.message || 'Stock could not be adjusted.';
+      } finally { submit.disabled = false; }
+    });
+    supplierDetailsDialog.addEventListener('click', (event) => {
+      if (event.target.closest('[data-supplier-details-close]')) supplierDetailsDialog.close();
+    });
+    editDialog?.querySelector('[data-inventory-edit-cancel]')?.addEventListener('click', () => {
+      editDialog.close();
+      if (stockDetailContext) { renderStockDetails(stockDetailContext.productId, stockDetailContext.productName, stockDetailContext.variantLabel); stockDialog.showModal(); }
+    });
+    inventoryProductSelect?.addEventListener('change', () => syncInventoryVariant(inventoryForm, inventoryProductSelect, inventoryVariantSelect));
+    inventoryVariantSelect?.addEventListener('change', () => {
+      const product = warehouseProducts.find((entry) => entry.id === inventoryProductSelect.value);
+      const variant = productVariants(product || {}).find((entry) => String(entry.id || entry.label) === inventoryVariantSelect.value);
+      if (inventoryForm.elements.sku) inventoryForm.elements.sku.value = variant?.sku || productData(product).productCode || '';
+    });
+    inventoryForm?.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const fields = inventoryForm.elements;
+      const product = warehouseProducts.find((entry) => entry.id === fields.warehouse_product_id.value);
+      const variant = product ? productVariants(product).find((entry) => String(entry.id || entry.label) === fields.variant.value) : null;
+      if (!product || !variant) { setInventoryFeedback('Choose a warehouse product and option first.', true); return; }
+      const payload = Object.fromEntries(['batch_number', 'quantity', 'received_on', 'expires_on', 'location', 'notes'].map((key) => [key, String(fields[key].value || '').trim()]));
+      payload.warehouse_product_id = product.id;
+      payload.product_name = product.name;
+      payload.variant = variant.label || 'Standard';
+      payload.sku = variant.sku || productData(product).productCode || null;
+      payload.quantity = Number(payload.quantity);
+      payload.batch_number = batchNumberFromDate(payload.received_on);
+      payload.batch_number ||= null; payload.expires_on ||= null; payload.location ||= null; payload.notes ||= null;
+      if (!Number.isInteger(payload.quantity) || payload.quantity < 1) { setInventoryFeedback('Enter a whole number of units received.', true); return; }
+      const { data: authData } = await supabase.auth.getUser();
+      payload.created_by = warehouseInsertOwnerId() || authData?.user?.id || null;
+      const submitButton = inventoryForm.querySelector('[type="submit"]');
+      submitButton.disabled = true;
+      try {
+        const { error } = await supabase.from('warehouse_inventory_lots').insert(payload);
+        if (error) throw error;
+        inventoryForm.reset();
+        fields.received_on.value = localPetDate();
+        syncBatchNumber(inventoryForm);
+        fillVariantSelect(inventoryVariantSelect, '');
+        receiveDialog.close();
+        inventoryLoaded = false;
+        await refreshWarehouseInventory();
+        try { await refreshMarketplaceCatalogFromDatabase(); } catch (refreshError) { console.warn('Marketplace stock cache refresh deferred:', refreshError); }
+        setInventoryFeedback('Received stock saved to the selected warehouse product and option.');
+        if (stockDetailContext) { renderStockDetails(stockDetailContext.productId, stockDetailContext.productName, stockDetailContext.variantLabel); stockDialog.showModal(); }
+      } catch (error) { setInventoryFeedback(error.message || 'The inventory lot could not be saved.', true); }
+      finally { submitButton.disabled = false; }
+    });
+    inventoryList?.addEventListener('click', async (event) => {
+      const productButton = event.target.closest('[data-inventory-edit-product]');
+      const viewStockButton = event.target.closest('[data-inventory-view-stock-product]');
+      const editButton = event.target.closest('[data-inventory-edit]');
+      const deleteButton = event.target.closest('[data-inventory-delete]');
+      if (viewStockButton) {
+        renderStockDetails(viewStockButton.dataset.inventoryViewStockProduct, viewStockButton.dataset.inventoryViewStockName, viewStockButton.dataset.inventoryViewStockVariant, viewStockButton.dataset.inventoryViewStockVariantId);
+        stockDialog.showModal();
+      } else if (productButton) {
+        const row = warehouseProducts.find((entry) => entry.id === productButton.dataset.inventoryEditProduct);
+        if (row) navigateToSupplierProductEditor({ warehouseProductId: row.id, from: 'inventory' });
+      } else if (editButton) {
+        const row = inventoryRows.find((entry) => entry.id === editButton.dataset.inventoryEdit);
+        if (!row) return;
+        Object.entries(row).forEach(([key, value]) => { if (editForm.elements[key]) editForm.elements[key].value = value ?? ''; });
+        const productSelect = editForm.querySelector('[data-inventory-edit-product]');
+        const variantSelect = editForm.querySelector('[data-inventory-edit-variant]');
+        setProductForSelect(productSelect, variantSelect, row.warehouse_product_id, row.variant);
+        syncBatchNumber(editForm);
+        lockInventoryEditFields();
+        editDialog.showModal();
+      } else if (deleteButton) {
+        if (!window.confirm('Remove this inventory lot? This cannot be undone.')) return;
+        deleteButton.disabled = true;
+        try {
+          const { error } = await supabase.from('warehouse_inventory_lots').delete().eq('id', deleteButton.dataset.inventoryDelete);
+          if (error) throw error;
+          inventoryLoaded = false;
+          await refreshWarehouseInventory();
+          try { await refreshMarketplaceCatalogFromDatabase(); } catch (refreshError) { console.warn('Marketplace stock cache refresh deferred:', refreshError); }
+          setInventoryFeedback('Inventory lot removed.');
+        } catch (error) { setInventoryFeedback(error.message || 'The lot could not be removed.', true); deleteButton.disabled = false; }
+      }
+    });
+    const editProductSelect = editForm?.querySelector('[data-inventory-edit-product]');
+    const editVariantSelect = editForm?.querySelector('[data-inventory-edit-variant]');
+    editProductSelect?.addEventListener('change', () => syncInventoryVariant(editForm, editProductSelect, editVariantSelect));
+    editForm?.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const fields = editForm.elements;
+      const id = fields.id.value;
+      const product = warehouseProducts.find((entry) => entry.id === fields.warehouse_product_id.value);
+      const variant = product ? productVariants(product).find((entry) => String(entry.id || entry.label) === fields.variant.value) : null;
+      if (!product || !variant) { setInventoryFeedback('Choose a warehouse product and option first.', true); return; }
+      const payload = Object.fromEntries(['batch_number', 'quantity', 'received_on', 'expires_on', 'location', 'notes'].map((key) => [key, String(fields[key].value || '').trim()]));
+      payload.warehouse_product_id = product.id;
+      payload.product_name = product.name;
+      payload.variant = variant.label || 'Standard';
+      payload.sku = variant.sku || productData(product).productCode || null;
+      payload.quantity = Number(payload.quantity);
+      payload.batch_number = batchNumberFromDate(payload.received_on);
+      payload.batch_number ||= null; payload.expires_on ||= null; payload.location ||= null; payload.notes ||= null;
+      if (!Number.isInteger(payload.quantity) || payload.quantity < 0) { setInventoryFeedback('Quantity must be a whole number of zero or more.', true); return; }
+      const { data: authData } = await supabase.auth.getUser();
+      payload.updated_by = authData?.user?.id || null;
+      payload.updated_at = new Date().toISOString();
+      const submitButton = editForm.querySelector('[type="submit"]');
+      submitButton.disabled = true;
+      try {
+        const { error } = await supabase.from('warehouse_inventory_lots').update(payload).eq('id', id);
+        if (error) throw error;
+        editDialog.close();
+        inventoryLoaded = false;
+        await refreshWarehouseInventory();
+        try { await refreshMarketplaceCatalogFromDatabase(); } catch (refreshError) { console.warn('Marketplace stock cache refresh deferred:', refreshError); }
+        setInventoryFeedback('Inventory lot updated.');
+        if (stockDetailContext) { renderStockDetails(stockDetailContext.productId, stockDetailContext.productName, stockDetailContext.variantLabel); stockDialog.showModal(); }
+      } catch (error) { setInventoryFeedback(error.message || 'The inventory lot could not be updated.', true); }
+      finally { submitButton.disabled = false; }
+    });
+  }
   document.querySelectorAll('[data-supplier-order-filter-open]').forEach((card) => {
     const openOrders = () => {
       const status = card.dataset.supplierOrderFilterOpen;
-      window.location.hash = `supplier?tab=orders&status=${encodeURIComponent(status)}`;
+      window.location.hash = '#supplier?tab=packaging&packagingStatus=ready';
     };
     card.addEventListener('click', (event) => { event.stopPropagation(); openOrders(); });
     card.addEventListener('keydown', (event) => {
@@ -3304,124 +5050,70 @@ function setupMarketplaceSupplierPortal() {
       openOrders();
     });
   });
-  document.querySelector('[data-supplier-dashboard-stats]')?.addEventListener('keydown', (event) => {
+  document.querySelectorAll('[data-supplier-dashboard-packaging], [data-supplier-dashboard-orders]').forEach((card) => {
+    const openDashboardQueue = () => {
+      if (card.hasAttribute('data-supplier-dashboard-packaging')) {
+        window.location.hash = '#supplier?tab=packaging&packagingStatus=ready';
+      } else {
+        window.location.hash = '#supplier?tab=packaging&packagingStatus=packed';
+      }
+    };
+    card.addEventListener('click', openDashboardQueue);
+    card.addEventListener('keydown', (event) => {
+      if (event.key !== 'Enter' && event.key !== ' ') return;
+      event.preventDefault();
+      openDashboardQueue();
+    });
+  });
+  const openInventoryExpiry = () => { window.location.hash = '#supplier?tab=inventory&expiry=attention'; };
+  document.querySelector('[data-supplier-inventory-expiry-open]')?.addEventListener('click', (event) => {
+    event.stopPropagation();
+    openInventoryExpiry();
+  });
+  document.querySelector('[data-supplier-inventory-expiry-open]')?.addEventListener('keydown', (event) => {
     if (event.key !== 'Enter' && event.key !== ' ') return;
     event.preventDefault();
-    event.currentTarget.click();
+    event.stopPropagation();
+    openInventoryExpiry();
   });
-  const supplierVoucherForm = document.querySelector('[data-supplier-voucher-form]');
-  const supplierVoucherList = document.querySelector('[data-supplier-voucher-list]');
-  const supplierVoucherFeedback = document.querySelector('[data-supplier-voucher-feedback]');
-  const setSupplierVoucherFeedback = (message, isError = false) => {
-    if (!supplierVoucherFeedback) return;
-    supplierVoucherFeedback.textContent = message;
-    supplierVoucherFeedback.classList.toggle('is-error', isError);
-  };
-  const updateSupplierVoucherEnabledLabel = () => {
-    if (!supplierVoucherForm) return;
-    const label = supplierVoucherForm.querySelector('[data-voucher-enabled-label]');
-    if (label) {
-      const active = supplierVoucherForm.elements.enabled.checked;
-      label.textContent = `Status: ${active ? 'Active' : 'Not Active'}`;
-      label.classList.toggle('is-active', active);
-      label.classList.toggle('is-inactive', !active);
-    }
-  };
-  const updateSupplierVoucherTypeFields = () => {
-    if (!supplierVoucherForm) return;
-    const freeShipping = supplierVoucherForm.elements.discountType.value === 'free_shipping';
-    const valueField = supplierVoucherForm.querySelector('[data-supplier-discount-value-field]');
-    const valueInput = supplierVoucherForm.elements.discountValue;
-    if (valueField) valueField.hidden = freeShipping;
-    valueInput.required = !freeShipping;
-    valueInput.disabled = freeShipping;
-  };
-  supplierVoucherForm?.elements.discountType.addEventListener('change', updateSupplierVoucherTypeFields);
-  updateSupplierVoucherTypeFields();
-  supplierVoucherForm?.elements.enabled.addEventListener('change', updateSupplierVoucherEnabledLabel);
-  const resetSupplierVoucherForm = () => {
-    supplierVoucherForm?.reset();
-    if (!supplierVoucherForm) return;
-    supplierVoucherForm.elements.voucherId.value = '';
-    supplierVoucherForm.elements.minimumSpend.value = '0';
-    supplierVoucherForm.elements.enabled.checked = true;
-    updateSupplierVoucherEnabledLabel();
-    updateSupplierVoucherTypeFields();
-    supplierVoucherForm.querySelector('[data-voucher-submit]').textContent = 'Save Voucher';
-    supplierVoucherForm.querySelector('[data-voucher-cancel]').hidden = true;
-  };
-  const loadSupplierVouchers = async () => {
-    if (!supplierVoucherList) return [];
-    const { data, error } = await supabase.from('marketplace_supplier_vouchers').select('*').order('created_at', { ascending: false });
-    if (error) throw error;
-    supplierVoucherList.innerHTML = data?.length ? data.map((voucher) => {
-      const discount = voucher.discount_type === 'free_shipping' ? 'Free shipping' : voucher.discount_type === 'percent' ? `${Number(voucher.discount_value)}% off` : `MYR ${Number(voucher.discount_value).toFixed(2)} off`;
-      const expiry = voucher.expires_at ? ` · Expires ${new Date(`${voucher.expires_at}T00:00:00`).toLocaleDateString()}` : '';
-      return `<article class="supplier-voucher-card"><div><span class="supplier-voucher-state ${voucher.enabled ? 'is-active' : ''}">${voucher.enabled ? 'Active' : 'Inactive'}</span><h3>${escapeHTML(voucher.code)}</h3><p>${escapeHTML(discount)}${Number(voucher.minimum_spend) ? ` · Minimum spend MYR ${Number(voucher.minimum_spend).toFixed(2)}` : ''}${escapeHTML(expiry)}</p></div><div class="supplier-voucher-actions"><button type="button" data-edit-supplier-voucher="${escapeHTML(voucher.id)}">Edit</button><button type="button" data-delete-supplier-voucher="${escapeHTML(voucher.id)}">Delete</button></div></article>`;
-    }).join('') : '<p class="supplier-empty">You have not created any Shop Vouchers yet.</p>';
-    supplierVoucherList.dataset.vouchers = JSON.stringify(data || []);
-    return data || [];
-  };
-  supplierVoucherForm?.addEventListener('submit', async (event) => {
-    event.preventDefault();
-    const submit = supplierVoucherForm.querySelector('[data-voucher-submit]');
-    submit.disabled = true;
-    try {
-      const { data: authData, error: authError } = await supabase.auth.getUser();
-      if (authError || !authData.user) throw authError || new Error('Sign in to manage your vouchers.');
-      const discountType = supplierVoucherForm.elements.discountType.value;
-      const discountValue = discountType === 'free_shipping' ? null : Number(supplierVoucherForm.elements.discountValue.value);
-      const minimumSpend = Number(supplierVoucherForm.elements.minimumSpend.value || 0);
-      if (discountType !== 'free_shipping' && (!Number.isFinite(discountValue) || discountValue <= 0 || (discountType === 'percent' && discountValue > 100))) throw new Error('Enter a valid discount (percentage must be 100 or less).');
-      if (!Number.isFinite(minimumSpend) || minimumSpend < 0) throw new Error('Minimum spend cannot be negative.');
-      const payload = { supplier_user_id: authData.user.id, discount_type: discountType, discount_value: discountValue, minimum_spend: minimumSpend, expires_at: supplierVoucherForm.elements.expiresAt.value || null, enabled: supplierVoucherForm.elements.enabled.checked };
-      const voucherId = supplierVoucherForm.elements.voucherId.value;
-      const query = voucherId
-        ? supabase.from('marketplace_supplier_vouchers').update(payload).eq('id', voucherId)
-        : supabase.from('marketplace_supplier_vouchers').insert(payload);
-      const { error } = await query;
-      if (error) throw error;
-      resetSupplierVoucherForm();
-      setSupplierVoucherFeedback(voucherId ? 'Voucher updated.' : 'Voucher saved.');
-      await loadSupplierVouchers();
-    } catch (error) { setSupplierVoucherFeedback(error.message || 'Voucher could not be saved.', true); }
-    finally { submit.disabled = false; }
-  });
-  supplierVoucherForm?.querySelector('[data-voucher-cancel]')?.addEventListener('click', resetSupplierVoucherForm);
-  supplierVoucherList?.addEventListener('click', async (event) => {
-    const editButton = event.target.closest('[data-edit-supplier-voucher]');
-    const deleteButton = event.target.closest('[data-delete-supplier-voucher]');
-    const vouchers = (() => { try { return JSON.parse(supplierVoucherList.dataset.vouchers || '[]'); } catch { return []; } })();
-    if (editButton) {
-      const voucher = vouchers.find((entry) => entry.id === editButton.dataset.editSupplierVoucher);
-      if (!voucher || !supplierVoucherForm) return;
-      supplierVoucherForm.elements.voucherId.value = voucher.id;
-      supplierVoucherForm.elements.discountType.value = voucher.discount_type;
-      updateSupplierVoucherTypeFields();
-      supplierVoucherForm.elements.discountValue.value = voucher.discount_value;
-      supplierVoucherForm.elements.minimumSpend.value = voucher.minimum_spend;
-      supplierVoucherForm.elements.expiresAt.value = voucher.expires_at || '';
-      supplierVoucherForm.elements.enabled.checked = voucher.enabled;
-      updateSupplierVoucherEnabledLabel();
-      supplierVoucherForm.querySelector('[data-voucher-submit]').textContent = 'Update Voucher';
-      supplierVoucherForm.querySelector('[data-voucher-cancel]').hidden = false;
-      supplierVoucherForm.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    }
-    if (deleteButton) {
-      if (!window.confirm('Delete this Shop Voucher?')) return;
-      const { error } = await supabase.from('marketplace_supplier_vouchers').delete().eq('id', deleteButton.dataset.deleteSupplierVoucher);
-      if (error) { setSupplierVoucherFeedback(error.message || 'Voucher could not be deleted.', true); return; }
-      setSupplierVoucherFeedback('Voucher deleted.');
-      try { await loadSupplierVouchers(); } catch (loadError) { setSupplierVoucherFeedback(loadError.message, true); }
-    }
-  });
-  if (supplierVoucherList) void loadSupplierVouchers().catch((error) => { supplierVoucherList.innerHTML = `<p class="supplier-empty">Shop Vouchers could not be loaded: ${escapeHTML(error.message || 'Supabase request failed')}</p>`; });
-
+  const supplierRouteParams = new URLSearchParams(window.location.hash.split('?')[1] || '');
   let supplierCatalog = [];
   let supplierSubmissions = [];
-  const supplierRouteParams = new URLSearchParams(window.location.hash.split('?')[1] || '');
+  let supplierOrders = [];
+  let packagingStatusFilter = ['ready', 'packed', 'awaiting_pickup', 'completed'].includes(supplierRouteParams.get('packagingStatus')) ? supplierRouteParams.get('packagingStatus') : 'ready';
+  const packagingSelection = new Map();
+  const packagingPendingSelection = new Map();
+  const packagingPickupSelection = new Set();
+  const packagingTarget = document.querySelector('[data-packaging-orders]');
+  const packagingPanelTarget = document.querySelector('.supplier-packaging-panel');
+  const packagingPickupToolbarTarget = document.querySelector('[data-packaging-pickup-toolbar]');
+  const supplierProductListTarget = document.querySelector('[data-supplier-products]');
+  const renderSupplierProductList = (restoreSearchFocus = false, caretPosition = 0, restoreControl = '') => {
+    if (!supplierProductListTarget) return;
+    supplierProductListTarget.innerHTML = supplierProductRows(supplierCatalog, supplierSubmissions, supplierOrders, {
+      search: supplierProductListTarget.dataset.search || '',
+      category: supplierProductListTarget.dataset.category || 'all',
+    });
+    if (restoreSearchFocus) {
+      const searchInput = supplierProductListTarget.querySelector('[data-supplier-product-search]');
+      searchInput?.focus();
+      searchInput?.setSelectionRange(caretPosition, caretPosition);
+    } else if (restoreControl) supplierProductListTarget.querySelector(restoreControl)?.focus();
+  };
+  supplierProductListTarget?.addEventListener('input', (event) => {
+    const input = event.target.closest('[data-supplier-product-search]');
+    if (!input) return;
+    supplierProductListTarget.dataset.search = input.value;
+    renderSupplierProductList(true, input.selectionStart ?? input.value.length);
+  });
+  supplierProductListTarget?.addEventListener('change', (event) => {
+    const category = event.target.closest('[data-supplier-product-category]');
+    if (!category) return;
+    if (category) supplierProductListTarget.dataset.category = category.value;
+    renderSupplierProductList(false, 0, '[data-supplier-product-category]');
+  });
   const requestedSupplierOrderFilter = supplierRouteParams.get('status');
-  let supplierOrderStatusFilter = requestedSupplierOrderFilter === 'progressing' ? 'shipped' : ['new', 'shipped', 'delivered', 'cancelled', 'returns'].includes(requestedSupplierOrderFilter) ? requestedSupplierOrderFilter : 'new';
+  let supplierOrderStatusFilter = requestedSupplierOrderFilter === 'progressing' ? 'shipped' : ['new', 'received', 'packed', 'shipped', 'delivered', 'cancelled', 'returns'].includes(requestedSupplierOrderFilter) ? requestedSupplierOrderFilter : 'new';
   const applySupplierOrderStatusFilter = () => {
     const ordersTarget = document.querySelector('[data-supplier-orders]');
     if (!ordersTarget) return;
@@ -3437,7 +5129,7 @@ function setupMarketplaceSupplierPortal() {
       const notice = empty || document.createElement('p');
       notice.className = 'supplier-empty';
       notice.dataset.supplierFilterEmpty = '';
-      notice.textContent = `No orders in ${({ new: 'New Order', shipped: 'Shipped', delivered: 'Delivered', cancelled: 'Cancelled', returns: 'Return or Refund' })[supplierOrderStatusFilter]}.`;
+      notice.textContent = `No orders in ${({ new: 'New Order', received: 'Received Order', packed: 'Packed', shipped: 'Shipped', delivered: 'Delivered', cancelled: 'Cancelled', returns: 'Return or Refund' })[supplierOrderStatusFilter]}.`;
       if (!empty) ordersTarget.append(notice);
     } else empty?.remove();
     document.querySelectorAll('[data-supplier-order-status-filter]').forEach((button) => {
@@ -3452,6 +5144,29 @@ function setupMarketplaceSupplierPortal() {
     if (!button) return;
     supplierOrderStatusFilter = button.dataset.supplierOrderStatusFilter;
     applySupplierOrderStatusFilter();
+  });
+  const applyPackagingStatusFilter = () => {
+    const labels = {
+      ready: 'Ready to pack',
+      packed: 'Ready to Ship',
+      awaiting_pickup: 'Awaiting Pickup',
+      completed: 'Completed',
+    };
+    const label = document.querySelector('[data-packaging-heading-label]');
+    if (label) label.textContent = labels[packagingStatusFilter] || labels.ready;
+    document.querySelectorAll('[data-packaging-status-filter]').forEach((button) => {
+      const active = button.dataset.packagingStatusFilter === packagingStatusFilter;
+      button.classList.toggle('is-active', active);
+      button.setAttribute('aria-pressed', String(active));
+    });
+    renderPackagingOrders();
+  };
+  applyPackagingStatusFilter();
+  document.querySelector('[data-packaging-status-tabs]')?.addEventListener('click', (event) => {
+    const button = event.target.closest('[data-packaging-status-filter]');
+    if (!button) return;
+    packagingStatusFilter = button.dataset.packagingStatusFilter;
+    applyPackagingStatusFilter();
   });
   const setSupplierFeedback = (message, isError = false) => {
     const feedback = document.querySelector('[data-supplier-feedback]');
@@ -3488,6 +5203,7 @@ function setupMarketplaceSupplierPortal() {
     if (validationError) { setSupplierFeedback(validationError, true); return; }
     supplierEditorImages.push(...files.map((file) => ({ file, previewUrl: URL.createObjectURL(file) })));
     renderSupplierPhotoList();
+    renderSupplierVariantRows(readSupplierVariantRows());
     setSupplierFeedback('Photo added. Save the product to apply photo changes.');
   });
   supplierPhotoList?.addEventListener('click', (event) => {
@@ -3497,8 +5213,66 @@ function setupMarketplaceSupplierPortal() {
     const [removed] = supplierEditorImages.splice(index, 1);
     if (removed?.previewUrl?.startsWith('blob:')) URL.revokeObjectURL(removed.previewUrl);
     renderSupplierPhotoList();
+    renderSupplierVariantRows(readSupplierVariantRows().map((variant) => ({ ...variant, imageIndex: Number(variant.imageIndex) === index ? '0' : String(Number(variant.imageIndex) > index ? Number(variant.imageIndex) - 1 : Number(variant.imageIndex)) })));
     setSupplierFeedback('Photo removed. Save the product to apply photo changes.');
   });
+  const reorderSupplierPhoto = (from, to) => {
+    if (!Number.isInteger(from) || !Number.isInteger(to) || from === to || from < 0 || to < 0
+      || from >= supplierEditorImages.length || to >= supplierEditorImages.length) return;
+    const variants = readSupplierVariantRows();
+    const [photo] = supplierEditorImages.splice(from, 1);
+    supplierEditorImages.splice(to, 0, photo);
+    const remapIndex = (value) => {
+      const index = Number(value) || 0;
+      if (index === from) return to;
+      if (from < to && index > from && index <= to) return index - 1;
+      if (to < from && index >= to && index < from) return index + 1;
+      return index;
+    };
+    renderSupplierPhotoList();
+    renderSupplierVariantRows(variants.map((variant) => ({ ...variant, imageIndex: String(remapIndex(variant.imageIndex)) })));
+    setSupplierFeedback('Photo order updated. The first photo is the product cover. Save the product to apply the new order.');
+  };
+  let draggedPhotoIndex = null;
+  supplierPhotoList?.addEventListener('dragstart', (event) => {
+    const photo = event.target.closest('[data-supplier-photo-index]');
+    if (!photo || event.target.closest('button, label')) { event.preventDefault(); return; }
+    draggedPhotoIndex = Number(photo.dataset.supplierPhotoIndex);
+    event.dataTransfer?.setData('text/plain', String(draggedPhotoIndex));
+    if (event.dataTransfer) event.dataTransfer.effectAllowed = 'move';
+  });
+  supplierPhotoList?.addEventListener('dragover', (event) => {
+    if (!event.target.closest('[data-supplier-photo-index]')) return;
+    event.preventDefault();
+    if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
+  });
+  supplierPhotoList?.addEventListener('drop', (event) => {
+    const target = event.target.closest('[data-supplier-photo-index]');
+    if (!target || draggedPhotoIndex == null) return;
+    event.preventDefault();
+    reorderSupplierPhoto(draggedPhotoIndex, Number(target.dataset.supplierPhotoIndex));
+    draggedPhotoIndex = null;
+  });
+  supplierPhotoList?.addEventListener('dragend', () => { draggedPhotoIndex = null; });
+  let touchPhotoStart = null;
+  supplierPhotoList?.addEventListener('pointerdown', (event) => {
+    if (event.pointerType !== 'touch') return;
+    const photo = event.target.closest('[data-supplier-photo-index]');
+    if (!photo || event.target.closest('button, label')) return;
+    touchPhotoStart = { index: Number(photo.dataset.supplierPhotoIndex), x: event.clientX, y: event.clientY };
+  }, { passive: true });
+  supplierPhotoList?.addEventListener('pointerup', (event) => {
+    if (!touchPhotoStart || event.pointerType !== 'touch') return;
+    const start = touchPhotoStart;
+    touchPhotoStart = null;
+    const dx = event.clientX - start.x;
+    const dy = event.clientY - start.y;
+    if (Math.abs(dx) < 35 || Math.abs(dx) < Math.abs(dy) * 1.2) return;
+    const target = document.elementFromPoint(event.clientX, event.clientY)?.closest('[data-supplier-photo-index]');
+    if (target && supplierPhotoList.contains(target)) {
+      reorderSupplierPhoto(start.index, Number(target.dataset.supplierPhotoIndex));
+    }
+  }, { passive: true });
   supplierPhotoList?.addEventListener('change', async (event) => {
     const input = event.target.closest('[data-replace-supplier-photo]');
     const file = input?.files?.[0];
@@ -3511,31 +5285,72 @@ function setupMarketplaceSupplierPortal() {
     if (previous?.previewUrl?.startsWith('blob:')) URL.revokeObjectURL(previous.previewUrl);
     supplierEditorImages[index] = { file, previewUrl: URL.createObjectURL(file) };
     renderSupplierPhotoList();
+    renderSupplierVariantRows(readSupplierVariantRows());
     setSupplierFeedback('Photo changed. Save the product to apply photo changes.');
   });
   const refreshSupplierPortal = async () => {
     const submissionsTarget = document.querySelector('[data-supplier-products]');
-    const shopTarget = document.querySelector('[data-supplier-shop-products]');
     const ordersTarget = document.querySelector('[data-supplier-orders]');
     const editPageTarget = document.querySelector('[data-marketplace-supplier-product]');
-    if (!submissionsTarget && !shopTarget && !ordersTarget && !editPageTarget) return;
-    const [submissionsResult, catalogResult, ordersResult] = await Promise.all([
-      supabase.from('marketplace_product_submissions').select('*').order('submitted_at', { ascending: false }),
-      supabase.rpc('get_marketplace_supplier_catalog'),
-      ordersTarget ? supabase.rpc('get_marketplace_supplier_orders') : Promise.resolve({ data: [], error: null }),
+    if (!submissionsTarget && !ordersTarget && !packagingTarget && !editPageTarget) return;
+    if (editPageTarget && !editPageTarget.dataset.supplierRouteInitialized) {
+      const routeParams = new URLSearchParams(window.location.hash.split('?')[1] || '');
+      if (routeParams.get('warehouseAdd') === '1') {
+        editPageTarget.dataset.supplierRouteInitialized = 'true';
+        editPageTarget.closest('.supplier-product-edit-page')?.classList.add('is-warehouse-create');
+        openWarehouseProductCreateEditor();
+        return;
+      }
+      const warehouseProductId = routeParams.get('warehouseProductId');
+      if (warehouseProductId) {
+        editPageTarget.dataset.supplierRouteInitialized = 'true';
+        try {
+          const { data: warehouseProduct, error } = await supabase.from('warehouse_products')
+            .select('id,name,product_data,marketplace_product_id')
+            .eq('id', warehouseProductId)
+            .maybeSingle();
+          if (error) throw error;
+          const { data: productLots, error: lotError } = await supabase.from('warehouse_inventory_lots')
+            .select('variant,quantity')
+            .eq('warehouse_product_id', warehouseProductId);
+          if (lotError) throw lotError;
+          const stockByVariant = (productLots || []).reduce((totals, lot) => {
+            const key = String(lot.variant || 'Standard');
+            totals[key] = (totals[key] || 0) + (Number(lot.quantity) || 0);
+            return totals;
+          }, {});
+          if (!openWarehouseProductEditor(warehouseProduct, { stockTotal: (productLots || []).reduce((sum, lot) => sum + (Number(lot.quantity) || 0), 0), stockByVariant })) {
+            setSupplierFeedback('This warehouse product could not be found.', true);
+          }
+        } catch (error) {
+          setSupplierFeedback(error.message || 'Warehouse product details could not load.', true);
+        }
+        return;
+      }
+    }
+    const [catalogResult, ordersResult] = await Promise.all([
+      supplierProfile.directorStoreView
+        ? supabase.rpc('get_marketplace_store_catalog', { p_supplier_name: supplierProfile.supplierName })
+        : supabase.rpc('get_marketplace_supplier_catalog'),
+      (ordersTarget || packagingTarget) && !supplierProfile.directorStoreView
+        ? supabase.rpc('get_marketplace_supplier_orders')
+        : Promise.resolve({ data: [], error: null }),
     ]);
-    if (submissionsResult.error) throw submissionsResult.error;
     if (catalogResult.error) throw catalogResult.error;
     if (ordersResult.error) throw ordersResult.error;
-    supplierSubmissions = submissionsResult.data || [];
+    supplierSubmissions = [];
     supplierCatalog = catalogResult.data || [];
     if (editPageTarget && !editPageTarget.dataset.supplierRouteInitialized) {
       editPageTarget.dataset.supplierRouteInitialized = 'true';
       const routeParams = new URLSearchParams(window.location.hash.split('?')[1] || '');
       const requestId = routeParams.get('requestId');
       const productId = routeParams.get('productId');
+      const warehouseProductId = routeParams.get('warehouseProductId');
+      const warehouseAdd = routeParams.get('warehouseAdd') === '1';
       const variantId = routeParams.get('variantId') || '';
-      if (requestId) {
+      if (warehouseAdd) {
+        openWarehouseProductCreateEditor();
+      } else if (requestId) {
         const request = supplierSubmissions.find((entry) => entry.id === requestId && entry.action === 'add' && ['Pending Review', 'Rejected'].includes(entry.status));
         if (request) {
           const product = request.product_data || {};
@@ -3548,10 +5363,8 @@ function setupMarketplaceSupplierPortal() {
           fields.petTypes.value = product.petTypes || '';
           fields.ingredients.value = product.ingredients || '';
           fields.nutrition.value = product.nutrition || '';
-          fields.price.value = Number(variant.price || 0);
-          fields.variantLabel.value = variant.label || '';
-          fields.stock.value = Number(variant.stock || 0);
           supplierEditorImages = (product.images || []).map((url) => ({ url }));
+          renderSupplierVariantRows(product.variants || [variant]);
           renderSupplierPhotoList();
           document.querySelector('[data-supplier-form-title]').textContent = `Edit ${request.status === 'Rejected' ? 'rejected' : 'pending'} ${product.name || 'product'}`;
           supplierForm.querySelector('[data-supplier-submit-label]').textContent = request.status === 'Rejected' ? 'Save & Resubmit' : 'Save Request';
@@ -3560,32 +5373,40 @@ function setupMarketplaceSupplierPortal() {
         }
       } else if (productId) {
         if (!openSupplierProductEditor(productId, variantId)) setSupplierFeedback('This product or variant could not be found.', true);
+      } else if (warehouseProductId) {
+        const { data: warehouseProduct, error } = await supabase.from('warehouse_products')
+          .select('id,name,product_data,marketplace_product_id')
+          .eq('id', warehouseProductId)
+          .maybeSingle();
+        if (error) throw error;
+        const { data: productLots, error: lotError } = await supabase.from('warehouse_inventory_lots')
+          .select('variant,quantity')
+          .eq('warehouse_product_id', warehouseProductId);
+        if (lotError) throw lotError;
+        const stockByVariant = (productLots || []).reduce((totals, lot) => {
+          const key = String(lot.variant || 'Standard');
+          totals[key] = (totals[key] || 0) + (Number(lot.quantity) || 0);
+          return totals;
+        }, {});
+        if (!openWarehouseProductEditor(warehouseProduct, { stockTotal: (productLots || []).reduce((sum, lot) => sum + (Number(lot.quantity) || 0), 0), stockByVariant })) setSupplierFeedback('This warehouse product could not be found.', true);
       }
     }
-    if (shopTarget) {
-      const shopProducts = supplierCatalog.filter((product) => !product.hidden && !product.frozenByAdmin).flatMap((product) => {
-        const variants = (product.variants || []).filter((variant) => !variant.frozen && Number(variant.stock) > 0);
-        if (!variants.length) return [];
-        const price = Math.min(...variants.map((variant) => Number(variant.price) || 0));
-        const variant = variants[0];
-        const image = (product.images || []).map(safeMarketplaceImage).find(Boolean);
-        const visual = image
-          ? `<img class="market-product-visual" src="${escapeHTML(image)}" alt="${escapeHTML(product.name || 'Product')}" loading="lazy" />`
-          : `<span class="market-product-visual" aria-hidden="true">${escapeHTML(product.emoji || '🐾')}</span>`;
-        return [`<article class="market-product-card"><button class="market-product-link supplier-shop-product-link" type="button" data-supplier-edit-product="${escapeHTML(product.id)}" data-supplier-variant-id="${escapeHTML(variant.id || '')}" aria-label="Edit ${escapeHTML(product.name || 'product')}">${visual}<span class="market-product-category">${escapeHTML(product.category || 'Other')}</span><strong>${escapeHTML(product.name || 'Product')}</strong><span class="market-product-price">From MYR ${price.toFixed(2)}</span></button></article>`];
-      });
-      shopTarget.innerHTML = shopProducts.join('') || '<p class="market-empty supplier-shop-empty">No products are live in your shop yet.</p>';
-      const count = document.querySelector('[data-supplier-shop-count]');
-      if (count) count.textContent = `${shopProducts.length} ${shopProducts.length === 1 ? 'product' : 'products'}`;
-    }
-    const supplierOrders = (ordersResult.data || []).map((row) => row.order_details || row);
+    supplierOrders = (ordersResult.data || []).map((row) => row.order_details || row);
+    const paidMarketplaceOrders = supplierOrders.filter((order) => String(order.paymentStatus || '').toLowerCase() === 'paid');
+    const toPackCount = paidMarketplaceOrders.filter((order) => matchesSupplierOrderStatus(order, 'received')).length;
+    const toShipCount = paidMarketplaceOrders.filter((order) => matchesSupplierOrderStatus(order, 'packed')).length;
     const newOrderCount = supplierOrders.filter((order) => matchesSupplierOrderStatus(order, 'new')).length;
     const shippedOrderCount = supplierOrders.filter((order) => matchesSupplierOrderStatus(order, 'shipped')).length;
+    const toPackCountTarget = document.querySelector('[data-supplier-to-pack-count]');
+    const toShipCountTarget = document.querySelector('[data-supplier-to-ship-count]');
     const newOrderCountTarget = document.querySelector('[data-supplier-new-order-count]');
     const shippedOrderCountTarget = document.querySelector('[data-supplier-shipped-order-count]');
+    if (toPackCountTarget) toPackCountTarget.textContent = String(toPackCount);
+    if (toShipCountTarget) toShipCountTarget.textContent = String(toShipCount);
     if (newOrderCountTarget) newOrderCountTarget.textContent = String(newOrderCount);
     if (shippedOrderCountTarget) shippedOrderCountTarget.textContent = String(shippedOrderCount);
-    if (submissionsTarget) submissionsTarget.innerHTML = supplierProductRows(supplierCatalog, supplierSubmissions);
+    if (submissionsTarget) renderSupplierProductList();
+    renderPackagingOrders();
     if (ordersTarget) {
       ordersTarget.innerHTML = supplierOrderRows(supplierOrders);
       applySupplierOrderStatusFilter();
@@ -3596,18 +5417,119 @@ function setupMarketplaceSupplierPortal() {
       }
     }
   };
+  const setPackagingFeedback = (message, isError = false) => {
+    const feedback = document.querySelector('[data-packaging-feedback]');
+    if (!feedback) return;
+    feedback.textContent = message;
+    feedback.classList.toggle('is-error', isError);
+  };
+  packagingTarget?.addEventListener('click', async (event) => {
+    const editPackedParcel = event.target.closest('[data-edit-packed-parcel]');
+    if (editPackedParcel) {
+      const orderId = editPackedParcel.dataset.editPackedParcel;
+      if (!window.confirm('Return this parcel to packing? Saved tracking details will be cleared, and the packed items will stay in the Parcel Box for editing.')) return;
+      editPackedParcel.disabled = true;
+      setPackagingFeedback('Reopening parcel…');
+      const { error } = await supabase.rpc('reopen_marketplace_supplier_order_packing', { p_order_id: orderId });
+      if (error) {
+        editPackedParcel.disabled = false;
+        setPackagingFeedback(error.message || 'This parcel could not be reopened.', true);
+        return;
+      }
+      const packedOrder = supplierOrders.find((order) => String(order.id) === String(orderId));
+      const packedCounts = new Map();
+      (packedOrder?.products || []).forEach((item, index) => {
+        packedCounts.set(index, Math.max(1, Number(item.quantity) || 1));
+      });
+      packagingSelection.set(String(orderId), packedCounts);
+      packagingPendingSelection.set(String(orderId), new Set());
+      packagingStatusFilter = 'ready';
+      applyPackagingStatusFilter();
+      try {
+        await refreshSupplierPortal();
+        applyPackagingStatusFilter();
+        setPackagingFeedback('Parcel reopened. Its items are still in the Parcel Box. Remove any units that need to go back to the warehouse list.');
+      } catch (refreshError) {
+        setPackagingFeedback(refreshError.message || 'Parcel reopened, but the order list could not refresh.', true);
+      }
+      return;
+    }
+    const packagingCard = event.target.closest('[data-packaging-order]');
+    const selectItem = event.target.closest('[data-package-select]');
+    const addItem = event.target.closest('[data-package-add]');
+    const removeItem = event.target.closest('[data-package-remove]');
+    if (packagingCard && (selectItem || addItem || removeItem)) {
+      const orderId = String(packagingCard.dataset.packagingOrder || '');
+      const packedCounts = packagingSelection.get(orderId) || new Map();
+      const pending = packagingPendingSelection.get(orderId) || new Set();
+      const itemIndex = Number(selectItem?.dataset.packageSelect ?? addItem?.dataset.packageAdd ?? removeItem?.dataset.packageRemove);
+      if (Number.isInteger(itemIndex)) {
+        if (selectItem) {
+          if (pending.has(itemIndex)) {
+            pending.delete(itemIndex);
+          } else pending.add(itemIndex);
+          packagingPendingSelection.set(orderId, pending);
+        } else if (addItem) {
+          const nextPackedCount = (packedCounts.get(itemIndex) || 0) + 1;
+          packedCounts.set(itemIndex, nextPackedCount);
+          if (nextPackedCount >= Number(addItem.dataset.packageRequested || 0)) pending.delete(itemIndex);
+          else pending.add(itemIndex);
+          packagingPendingSelection.set(orderId, pending);
+        } else {
+          const count = packedCounts.get(itemIndex) || 0;
+          if (count <= 1) packedCounts.delete(itemIndex);
+          else packedCounts.set(itemIndex, count - 1);
+          pending.delete(itemIndex);
+          packagingPendingSelection.set(orderId, pending);
+        }
+        packagingSelection.set(orderId, packedCounts);
+        renderPackagingOrders();
+      }
+      return;
+    }
+    const button = event.target.closest('[data-mark-packed]');
+    if (!button || button.disabled) return;
+    button.disabled = true;
+    setPackagingFeedback('Saving packed status…');
+    const { error } = await supabase.rpc('mark_marketplace_supplier_order_packed', { p_order_id: button.dataset.markPacked });
+    if (error) {
+      button.disabled = false;
+      setPackagingFeedback(error.message || 'The order could not be marked as packed.', true);
+      return;
+    }
+    setPackagingFeedback('Order marked as packed.');
+    try { await refreshSupplierPortal(); }
+    catch (refreshError) { setPackagingFeedback(refreshError.message || 'Packed status saved, but orders could not refresh.', true); }
+  });
   const setShipmentFeedback = (message, isError = false) => {
     const feedback = document.querySelector('[data-supplier-shipment-feedback]');
     if (!feedback) return;
     feedback.textContent = message;
     feedback.classList.toggle('is-error', isError);
   };
-  const setSupplierListFeedback = (message, isError = false) => {
-    const feedback = document.querySelector('[data-supplier-list-feedback]');
-    if (!feedback) return;
-    feedback.textContent = message;
-    feedback.classList.toggle('is-error', isError);
-  };
+  packagingTarget?.addEventListener('click', async (event) => {
+    const copyButton = event.target.closest('[data-copy-recipient-field]');
+    if (!copyButton) return;
+    const section = copyButton.closest('.supplier-packaging-recipient');
+    const feedback = section?.querySelector('[data-packaging-copy-feedback]');
+    const value = copyButton.dataset.copyRecipientField || '';
+    try {
+      if (!navigator.clipboard?.writeText) throw new Error('Clipboard access is unavailable.');
+      await navigator.clipboard.writeText(value);
+      if (feedback) feedback.textContent = 'Copied.';
+    } catch {
+      const field = document.createElement('textarea');
+      field.value = value;
+      field.setAttribute('readonly', '');
+      field.style.position = 'fixed';
+      field.style.opacity = '0';
+      document.body.append(field);
+      field.select();
+      const copied = document.execCommand('copy');
+      field.remove();
+      if (feedback) feedback.textContent = copied ? 'Copied.' : 'Could not copy. Please select and copy the details.';
+    }
+  });
   supplierForm?.addEventListener('submit', async (event) => {
     event.preventDefault();
     if (!supplierForm.reportValidity()) return;
@@ -3622,14 +5544,32 @@ function setupMarketplaceSupplierPortal() {
     submit.disabled = true;
     const editingProductId = fields.productId.value.trim();
     const pendingSubmissionId = fields.pendingSubmissionId.value.trim();
-    const action = pendingSubmissionId ? 'pending_edit' : editingProductId ? 'edit' : 'add';
-    setSupplierFeedback(action === 'edit' ? 'Saving product details…' : action === 'pending_edit' ? 'Updating pending product request…' : 'Submitting product for Furgo approval…');
+    const warehouseProductId = fields.warehouseProductId?.value.trim() || '';
+    const warehouseProductCreate = fields.warehouseProductCreate?.value === 'true';
+    const action = warehouseProductCreate ? 'warehouse_add' : warehouseProductId ? 'warehouse_edit' : pendingSubmissionId ? 'pending_edit' : editingProductId ? 'edit' : 'add';
+    setSupplierFeedback(action === 'warehouse_add' ? 'Adding warehouse product…' : action === 'warehouse_edit' || action === 'edit' ? 'Saving product details…' : action === 'pending_edit' ? 'Updating pending product request…' : 'Submitting product for Furgo approval…');
     try {
       const submissionId = crypto.randomUUID();
       const existingProduct = supplierCatalog.find((entry) => entry.id === editingProductId);
       const pendingSubmission = supplierSubmissions.find((entry) => entry.id === pendingSubmissionId);
       const pendingProduct = pendingSubmission?.product_data || {};
-      const existingVariant = existingProduct?.variants?.find((entry) => entry.id === fields.variantId.value) || existingProduct?.variants?.[0] || pendingProduct.variants?.find((entry) => entry.id === fields.variantId.value) || pendingProduct.variants?.[0];
+      const { data: warehouseExistingResult, error: warehouseExistingError } = warehouseProductId
+        ? await supabase.from('warehouse_products').select('id,name,product_data,marketplace_product_id').eq('id', warehouseProductId).maybeSingle()
+        : { data: null, error: null };
+      if (warehouseExistingError) throw warehouseExistingError;
+      const existingVariants = existingProduct?.variants || pendingProduct.variants || warehouseExistingResult?.product_data?.variants || [];
+      const variantRows = [...supplierForm.querySelectorAll('[data-supplier-variant-row]')].map((row) => ({
+        id: row.querySelector('[name="variantRowId"]')?.value || '',
+        option: row.querySelector('[name="variantOption"]')?.value.trim() || '',
+        variant: row.querySelector('[name="variantLabel"]')?.value.trim() || '',
+        label: composeSupplierVariantLabel(row.querySelector('[name="variantOption"]')?.value, row.querySelector('[name="variantLabel"]')?.value),
+        price: Number(row.querySelector('[name="price"]')?.value),
+        stock: Number(row.querySelector('[name="stock"]')?.value),
+        imageIndex: row.querySelector('[name="variantImageIndex"]')?.value || '0',
+      }));
+      if (!variantRows.length || variantRows.length > 30) { setSupplierFeedback('Add between 1 and 30 product options.', true); submit.disabled = false; return; }
+      const optionLabels = variantRows.map((entry) => entry.label.toLocaleLowerCase());
+      if (new Set(optionLabels).size !== optionLabels.length) { setSupplierFeedback('Each option and variant combination needs a different name.', true); submit.disabled = false; return; }
       const images = [];
       for (const [index, photo] of supplierEditorImages.entries()) {
         if (!photo.file) { images.push(photo.url); continue; }
@@ -3651,14 +5591,84 @@ function setupMarketplaceSupplierPortal() {
         nutrition: fields.nutrition.value.trim(),
         images,
         hidden: false,
-        productCode: existingProduct?.productCode || pendingProduct.productCode || '',
-        variants: [{ id: existingVariant?.id || `variant-${submissionId}`, label: fields.variantLabel.value.trim(), price: Number(fields.price.value), stock: Number(fields.stock.value), supplierId: supplierProfile.supplierName, supplier: supplierProfile.supplierName, cost: existingVariant?.cost ?? 0, frozen: Boolean(existingVariant?.frozen) }],
+        productCode: warehouseProductCreate || warehouseProductId
+          ? fields.warehouseProductCode.value.trim()
+          : existingProduct?.productCode || pendingProduct.productCode || '',
+        variants: variantRows.map((row, index) => {
+          const previous = existingVariants.find((entry) => String(entry.id || '') === row.id) || {};
+          return { ...previous, id: row.id || `variant-${submissionId}-${index + 1}`, option: row.option, variant: row.variant, label: row.label, price: row.price, stock: row.stock, imageUrl: images[Number(row.imageIndex)] || images[0] || '', supplierId: supplierProfile.supplierName, supplier: supplierProfile.supplierName, cost: previous.cost ?? 0, frozen: Boolean(previous.frozen) };
+        }),
       };
       let feedbackMessage;
-      if (action === 'pending_edit') {
-        const { error } = await supabase.rpc('update_marketplace_pending_product_request', { p_submission_id: pendingSubmissionId, p_product_data: product });
+      if (action === 'warehouse_add') {
+        const warehouseData = {
+          category: fields.category.value,
+          description: fields.description.value.trim(),
+          petTypes: fields.petTypes.value.trim(),
+          ingredients: fields.ingredients.value.trim(),
+          nutrition: fields.nutrition.value.trim(),
+          images,
+          productCode: fields.warehouseProductCode.value.trim(),
+          variants: product.variants.map((variant, index) => ({
+            id: variant.id,
+            option: variant.option,
+            variant: variant.variant,
+            label: variant.label,
+            price: variant.price,
+            stock: 0,
+            sku: fields.warehouseProductCode.value.trim(),
+            imageUrl: images[Number(variantRows[index]?.imageIndex)] || images[0] || '',
+          })),
+        };
+        const { data: authData, error: authError } = await supabase.auth.getUser();
+        if (authError) throw authError;
+        const { data: warehouseRow, error } = await supabase.from('warehouse_products').insert({
+          name: fields.name.value.trim(),
+          product_data: warehouseData,
+          created_by: warehouseInsertOwnerId() || authData?.user?.id || null,
+        }).select('id').single();
         if (error) throw error;
-        feedbackMessage = 'Product request updated and resubmitted. It is waiting for Furgo approval.';
+        fields.warehouseProductCreate.value = '';
+        fields.warehouseProductId.value = warehouseRow.id;
+        feedbackMessage = 'Warehouse product added. Use Live in Warehouse Stock when it is ready to publish.';
+      } else if (action === 'warehouse_edit') {
+        const priorData = warehouseExistingResult?.product_data || {};
+        const warehouseVariants = variantRows.map((row) => {
+          const previous = existingVariants.find((entry) => String(entry.id || '') === row.id) || {};
+          return {
+            ...previous,
+            id: row.id || `warehouse-option-${submissionId}`,
+            option: row.option,
+            variant: row.variant,
+            label: row.label,
+            price: row.price,
+            stock: previous.stock ?? 0,
+            sku: previous.sku || '',
+            imageUrl: product.variants[variantRows.indexOf(row)]?.imageUrl || images[0] || '',
+          };
+        });
+        const warehouseData = {
+          ...priorData,
+          category: fields.category.value,
+          description: fields.description.value.trim(),
+          petTypes: fields.petTypes.value.trim(),
+          ingredients: fields.ingredients.value.trim(),
+          nutrition: fields.nutrition.value.trim(),
+          images,
+          productCode: fields.warehouseProductCode.value.trim(),
+          variants: warehouseVariants,
+        };
+        const { error } = await supabase.from('warehouse_products')
+          .update({ name: fields.name.value.trim(), product_data: warehouseData, updated_by: supplierProfile.id })
+          .eq('id', warehouseProductId);
+        if (error) throw error;
+        feedbackMessage = 'Warehouse product details saved.';
+      } else if (action === 'pending_edit') {
+        const { data, error } = await supabase.rpc('update_marketplace_pending_product_request', { p_submission_id: pendingSubmissionId, p_product_data: product });
+        if (error) throw error;
+        feedbackMessage = data?.status === 'Approved'
+          ? 'Product published and is now live in the Marketplace.'
+          : 'Product request updated and resubmitted. It is waiting for Furgo approval.';
       } else if (action === 'edit') {
         const { data, error } = await supabase.rpc('edit_marketplace_supplier_product', { p_product_id: editingProductId, p_product_data: product });
         if (error) throw error;
@@ -3666,102 +5676,51 @@ function setupMarketplaceSupplierPortal() {
           ? 'Product details saved. Price or variant changes are pending Furgo approval.'
           : 'Product details saved and are now live in the Marketplace.';
       } else {
-        const { error } = await supabase.rpc('submit_marketplace_supplier_product', { p_action: 'add', p_product_id: null, p_product_data: product });
+        const { data, error } = await supabase.rpc('submit_marketplace_supplier_product', { p_action: 'add', p_product_id: null, p_product_data: product });
         if (error) throw error;
-        feedbackMessage = 'Product submitted. It will appear in the Marketplace after Furgo approval.';
+        feedbackMessage = data?.status === 'Approved'
+          ? 'Product published and is now live in the Marketplace.'
+          : 'Product submitted. It will appear in the Marketplace after Furgo approval.';
       }
+      const returnToInventory = warehouseProductCreate || Boolean(warehouseProductId);
       supplierForm.reset();
       resetSupplierEditor();
       setSupplierFeedback(feedbackMessage);
       if (window.location.hash.startsWith('#supplier-product-edit')) {
-        window.location.hash = '#supplier';
+        window.location.hash = returnToInventory ? '#supplier?tab=inventory' : '#supplier';
         return;
       }
       await refreshSupplierPortal();
     } catch (error) {
-      console.error('Supplier product submission failed:', error);
+      console.error('Store product submission failed:', error);
       setSupplierFeedback(error.message || 'The product could not be submitted. Please try again.', true);
     } finally { submit.disabled = false; }
   });
   supplierForm?.querySelector('[data-supplier-cancel-edit]')?.addEventListener('click', () => {
-    window.location.hash = '#supplier';
-  });
-  document.querySelector('[data-supplier-products]')?.addEventListener('click', async (event) => {
-    const editButton = event.target.closest('[data-supplier-edit-product]');
-    const actionButton = event.target.closest('[data-supplier-product-action]');
-    const editRequestButton = event.target.closest('[data-supplier-edit-request]');
-    const deleteRequestButton = event.target.closest('[data-supplier-delete-request]');
-    const keepLiveVersionButton = event.target.closest('[data-supplier-keep-live-version]');
-    if (keepLiveVersionButton) {
-      const submission = supplierSubmissions.find((entry) => entry.id === keepLiveVersionButton.dataset.supplierKeepLiveVersion && ['edit', 'edit_variant'].includes(entry.action) && entry.status === 'Rejected');
-      if (!submission) return;
-      const productName = submission.product_data?.name || supplierCatalog.find((entry) => entry.id === submission.product_id)?.name || 'this product';
-      if (!window.confirm(`Keep the current live version of “${productName}”? The rejected changes will be withdrawn, and the existing listing will remain unchanged.`)) return;
-      keepLiveVersionButton.disabled = true;
-      setSupplierListFeedback('Keeping the current live version…');
-      const { error } = await supabase.rpc('withdraw_rejected_marketplace_product_edit', { p_submission_id: submission.id });
-      if (error) {
-        keepLiveVersionButton.disabled = false;
-        setSupplierListFeedback(error.message || 'The rejected changes could not be withdrawn.', true);
-        return;
-      }
-      setSupplierListFeedback('Rejected changes withdrawn. The current listing remains live.');
-      try { await refreshSupplierPortal(); }
-      catch (refreshError) { setSupplierListFeedback(refreshError.message || 'The rejected changes were withdrawn, but the product list could not refresh.', true); }
-      return;
-    }
-    if (editRequestButton) {
-      const submission = supplierSubmissions.find((entry) => entry.id === editRequestButton.dataset.supplierEditRequest && entry.action === 'add' && ['Pending Review', 'Rejected'].includes(entry.status));
-      if (!submission) return;
-      navigateToSupplierProductEditor({ requestId: submission.id });
-      return;
-    }
-    if (deleteRequestButton) {
-      const submission = supplierSubmissions.find((entry) => entry.id === deleteRequestButton.dataset.supplierDeleteRequest && entry.action === 'add' && ['Pending Review', 'Rejected'].includes(entry.status));
-      if (!submission) return;
-      const productName = submission.product_data?.name || 'this product';
-      if (!window.confirm(`Delete the ${submission.status === 'Rejected' ? 'rejected' : 'pending'} request for “${productName}”? This request will be withdrawn.`)) return;
-      deleteRequestButton.disabled = true;
-      setSupplierListFeedback('Deleting pending product request…');
-      const { error } = await supabase.rpc('delete_marketplace_pending_product_request', { p_submission_id: submission.id });
-      if (error) {
-        deleteRequestButton.disabled = false;
-        setSupplierListFeedback(error.message || 'The pending request could not be deleted.', true);
-        return;
-      }
-      setSupplierListFeedback('Pending product request deleted.');
-      try { await refreshSupplierPortal(); }
-      catch (refreshError) { setSupplierListFeedback(refreshError.message || 'The request was deleted, but the product list could not refresh.', true); }
-      return;
-    }
-    if (editButton) {
-      navigateToSupplierProductEditor({ productId: editButton.dataset.supplierEditProduct, variantId: editButton.dataset.supplierVariantId });
-      return;
-    }
-    if (!actionButton) return;
-    const product = supplierCatalog.find((entry) => entry.id === actionButton.dataset.supplierProductId);
-    if (!product) return;
-    const isHide = actionButton.dataset.supplierProductAction === 'hide';
-    const label = isHide ? (product.hidden ? 'show' : 'hide') : 'permanently delete';
-    if (!window.confirm(`${isHide ? `Do you want to ${label}` : 'Permanently delete'} “${product.name}” ${isHide ? 'in the Marketplace' : 'from the Marketplace catalog'}? This takes effect immediately.`)) return;
-    actionButton.disabled = true;
-    setSupplierFeedback(`${isHide ? 'Updating listing visibility' : 'Deleting product'}…`);
-    const { error } = await supabase.rpc('manage_marketplace_supplier_product', { p_action: isHide ? (product.hidden ? 'show' : 'hide') : 'delete', p_product_id: product.id });
-    if (error) {
-      actionButton.disabled = false;
-      setSupplierFeedback(error.message || 'The request could not be sent.', true);
-      return;
-    }
-    setSupplierFeedback(isHide ? `The listing is now ${product.hidden ? 'visible' : 'hidden'} in the Marketplace.` : 'The product has been deleted from the Marketplace catalog.');
-    try { await refreshSupplierPortal(); }
-    catch (refreshError) { setSupplierFeedback(refreshError.message || 'Request sent, but the product list could not refresh.', true); }
-  });
-  document.querySelector('[data-supplier-shop-products]')?.addEventListener('click', (event) => {
-    const productButton = event.target.closest('[data-supplier-edit-product]');
-    if (!productButton) return;
-    navigateToSupplierProductEditor({ productId: productButton.dataset.supplierEditProduct, variantId: productButton.dataset.supplierVariantId });
+    const warehouseMode = supplierForm.elements.warehouseProductId?.value.trim() || supplierForm.elements.warehouseProductCreate?.value === 'true';
+    window.location.hash = warehouseMode ? '#supplier?tab=inventory' : '#supplier';
   });
   const ordersTarget = document.querySelector('[data-supplier-orders]');
+  packagingTarget?.addEventListener('click', (event) => {
+    const saveDefaultButton = event.target.closest('[data-save-default-courier]');
+    if (!saveDefaultButton) return;
+    const form = saveDefaultButton.closest('[data-supplier-shipping-form]');
+    const courier = form?.elements.courier?.value.trim();
+    if (!courier) {
+      setShipmentFeedback('Enter or choose a courier before saving it as the default.', true);
+      form?.elements.courier?.focus();
+      return;
+    }
+    try {
+      localStorage.setItem(supplierDefaultCourierStorageKey(), courier);
+      packagingTarget.querySelectorAll('[data-supplier-shipping-form] input[name="courier"]').forEach((input) => {
+        if (!input.value.trim()) input.value = courier;
+      });
+      setShipmentFeedback(`${courier} saved as your default courier in this browser.`);
+    } catch {
+      setShipmentFeedback('The default courier could not be saved in this browser.', true);
+    }
+  });
   ordersTarget?.addEventListener('click', async (event) => {
     const button = event.target.closest('[data-supplier-return-action]');
     if (!button) return;
@@ -3813,7 +5772,7 @@ function setupMarketplaceSupplierPortal() {
       showCopied(copied ? 'Recipient details copied.' : 'Could not copy recipient details.');
     }
   });
-  ordersTarget?.addEventListener('submit', async (event) => {
+  packagingTarget?.addEventListener('submit', async (event) => {
     const form = event.target.closest('[data-supplier-shipping-form]');
     if (!form) return;
     event.preventDefault();
@@ -3822,6 +5781,9 @@ function setupMarketplaceSupplierPortal() {
     submit.disabled = true;
     setShipmentFeedback('Saving shipment details…');
     const shipmentAction = form.dataset.shipmentAction || 'ship';
+    const wasReadyToShip = shipmentAction === 'edit_tracking'
+      && supplierOrders.some((order) => String(order.id) === String(form.dataset.supplierShippingForm)
+        && String(order.supplierShipment?.status || '').toLowerCase() === 'ready to ship');
     const { error } = await supabase.rpc('update_marketplace_supplier_shipment', {
       p_order_id: form.dataset.supplierShippingForm,
       p_action: shipmentAction,
@@ -3834,16 +5796,130 @@ function setupMarketplaceSupplierPortal() {
       setShipmentFeedback(error.message || 'Shipment details could not be saved.', true);
       return;
     }
-    setShipmentFeedback(shipmentAction === 'edit_tracking' ? 'Corrected tracking details saved.' : 'Tracking saved. The order has been marked as shipped.');
-    try { await refreshSupplierPortal(); }
-    catch (refreshError) { setShipmentFeedback(refreshError.message || 'Shipment saved, but the order list could not refresh.', true); }
+    setShipmentFeedback(shipmentAction === 'edit_tracking' ? 'Corrected tracking details saved.' : 'Tracking saved. The parcel is awaiting courier pickup.');
+    try {
+      await refreshSupplierPortal();
+      if (shipmentAction === 'save_tracking' || wasReadyToShip) {
+        packagingStatusFilter = 'awaiting_pickup';
+        applyPackagingStatusFilter();
+      }
+    } catch (refreshError) { setShipmentFeedback(refreshError.message || 'Shipment saved, but the order list could not refresh.', true); }
   });
-  ordersTarget?.addEventListener('click', async (event) => {
+  packagingPanelTarget?.addEventListener('change', (event) => {
+    if (!event.target.matches('[data-pickup-order]')) return;
+    const orderId = String(event.target.dataset.pickupOrder || '');
+    if (event.target.checked) packagingPickupSelection.add(orderId);
+    else packagingPickupSelection.delete(orderId);
+    const markButton = packagingPickupToolbarTarget?.querySelector('[data-supplier-mark-selected-shipped]');
+    const confirmation = packagingPickupToolbarTarget?.querySelector('[data-supplier-shipped-confirmation]');
+    if (confirmation) confirmation.hidden = true;
+    if (markButton) markButton.hidden = false;
+    const selectedCount = packagingPickupSelection.size;
+    if (markButton) {
+      markButton.disabled = selectedCount === 0;
+      markButton.textContent = selectedCount > 1 ? `Picked Up / Dropped Off (${selectedCount})` : 'Picked Up / Dropped Off';
+    }
+  });
+  packagingPanelTarget?.addEventListener('click', async (event) => {
+    const returnToShipButton = event.target.closest('[data-return-to-ship]');
+    if (returnToShipButton) {
+      returnToShipButton.disabled = true;
+      setShipmentFeedback('Returning the order to Ready to Ship…');
+      const order = supplierOrders.find((entry) => String(entry.id) === String(returnToShipButton.dataset.returnToShip));
+      const shipment = order?.supplierShipment || {};
+      const { error } = await supabase.rpc('update_marketplace_supplier_shipment', {
+        p_order_id: returnToShipButton.dataset.returnToShip,
+        p_action: 'return_to_ship',
+        p_courier: shipment.courier || '',
+        p_tracking_number: shipment.trackingNumber || '',
+        p_tracking_url: shipment.trackingUrl || '',
+      });
+      if (error) {
+        returnToShipButton.disabled = false;
+        setShipmentFeedback(error.message || 'The order could not be returned to Ready to Ship.', true);
+        return;
+      }
+      setShipmentFeedback('The order is back in Ready to Ship. Tracking details can now be edited.');
+      try {
+        await refreshSupplierPortal();
+        packagingStatusFilter = 'packed';
+        applyPackagingStatusFilter();
+      } catch (refreshError) { setShipmentFeedback(refreshError.message || 'Status saved, but the order list could not refresh.', true); }
+      return;
+    }
+    const cancelShipped = event.target.closest('[data-supplier-cancel-shipped]');
+    if (cancelShipped) {
+      const toolbar = cancelShipped.closest('.supplier-pickup-toolbar');
+      const confirmation = cancelShipped.closest('[data-supplier-shipped-confirmation]');
+      const markButton = toolbar?.querySelector('[data-supplier-mark-selected-shipped]');
+      if (confirmation) confirmation.hidden = true;
+      if (markButton) markButton.hidden = false;
+      setShipmentFeedback('');
+      return;
+    }
+    const markSelectedShippedButton = event.target.closest('[data-supplier-mark-selected-shipped]');
+    if (markSelectedShippedButton) {
+      if (!packagingPickupSelection.size) return;
+      const toolbar = markSelectedShippedButton.closest('.supplier-pickup-toolbar');
+      const confirmation = toolbar?.querySelector('[data-supplier-shipped-confirmation]');
+      if (confirmation) {
+        const label = confirmation.querySelector('[data-pickup-confirmation-label]');
+        if (label) label.textContent = packagingPickupSelection.size === 1
+          ? 'Confirm this parcel was collected or accepted by the courier?'
+          : `Confirm these ${packagingPickupSelection.size} parcels were collected or accepted by the courier?`;
+        markSelectedShippedButton.hidden = true;
+        confirmation.hidden = false;
+      }
+      return;
+    }
+    const confirmShippedButton = event.target.closest('[data-supplier-confirm-shipped]');
+    if (confirmShippedButton) {
+      const confirmation = confirmShippedButton.closest('[data-supplier-shipped-confirmation]');
+      const cancelButton = confirmation?.querySelector('[data-supplier-cancel-shipped]');
+      const selectedOrderIds = [...packagingPickupSelection];
+      confirmShippedButton.disabled = true;
+      if (cancelButton) cancelButton.disabled = true;
+      let shipmentError = null;
+      let shippedCount = 0;
+      for (const orderId of selectedOrderIds) {
+        const order = supplierOrders.find((entry) => String(entry.id) === orderId);
+        const shipment = order?.supplierShipment || {};
+        const { error } = await supabase.rpc('update_marketplace_supplier_shipment', {
+          p_order_id: orderId,
+          p_action: 'ship',
+          p_courier: shipment.courier || '',
+          p_tracking_number: shipment.trackingNumber || '',
+          p_tracking_url: shipment.trackingUrl || '',
+        });
+        if (error) { shipmentError = error; break; }
+        shippedCount += 1;
+      }
+      if (shipmentError) {
+        confirmShippedButton.disabled = false;
+        if (cancelButton) cancelButton.disabled = false;
+        setShipmentFeedback(shippedCount
+          ? `${shippedCount} parcel${shippedCount === 1 ? '' : 's'} updated, but the rest could not be marked shipped: ${shipmentError.message || 'Please try again.'}`
+          : shipmentError.message || 'The parcel could not be marked as shipped.', true);
+        if (shippedCount) {
+          try { await refreshSupplierPortal(); applyPackagingStatusFilter(); }
+          catch (refreshError) { setShipmentFeedback(refreshError.message || 'Some parcels were updated, but the list could not refresh.', true); }
+        }
+        return;
+      }
+      packagingPickupSelection.clear();
+      setShipmentFeedback(`${shippedCount === 1 ? 'The parcel has' : `${shippedCount} parcels have`} been marked as shipped.`);
+      try {
+        await refreshSupplierPortal();
+        packagingStatusFilter = 'completed';
+        applyPackagingStatusFilter();
+      } catch (refreshError) { setShipmentFeedback(refreshError.message || 'Shipment status saved, but the order list could not refresh.', true); }
+      return;
+    }
     const cancelUndoDelivery = event.target.closest('[data-supplier-cancel-undo-delivery]');
     if (cancelUndoDelivery) {
-      const summary = cancelUndoDelivery.closest('.supplier-shipment-summary');
+      const actions = cancelUndoDelivery.closest('.supplier-completed-shipment-actions');
       const confirmation = cancelUndoDelivery.closest('[data-supplier-undo-delivery-confirmation]');
-      const undoButton = summary?.querySelector('[data-supplier-undo-delivered]');
+      const undoButton = actions?.querySelector('[data-supplier-undo-delivered]');
       if (confirmation) confirmation.hidden = true;
       if (undoButton) undoButton.hidden = false;
       setShipmentFeedback('');
@@ -3851,12 +5927,58 @@ function setupMarketplaceSupplierPortal() {
     }
     const undoDeliveredButton = event.target.closest('[data-supplier-undo-delivered]');
     if (undoDeliveredButton) {
-      const summary = undoDeliveredButton.closest('.supplier-shipment-summary');
-      const confirmation = summary?.querySelector('[data-supplier-undo-delivery-confirmation]');
+      const actions = undoDeliveredButton.closest('.supplier-completed-shipment-actions');
+      const confirmation = actions?.querySelector('[data-supplier-undo-delivery-confirmation]');
       if (confirmation) {
         undoDeliveredButton.hidden = true;
         confirmation.hidden = false;
       }
+      return;
+    }
+    const cancelReturnPickup = event.target.closest('[data-supplier-cancel-return-pickup]');
+    if (cancelReturnPickup) {
+      const confirmation = cancelReturnPickup.closest('[data-supplier-return-pickup-confirmation]');
+      const returnButton = cancelReturnPickup.closest('.supplier-completed-shipment-actions')?.querySelector('[data-supplier-return-pickup]');
+      if (confirmation) confirmation.hidden = true;
+      if (returnButton) returnButton.hidden = false;
+      return;
+    }
+    const returnPickupButton = event.target.closest('[data-supplier-return-pickup]');
+    if (returnPickupButton) {
+      const actions = returnPickupButton.closest('.supplier-completed-shipment-actions');
+      const confirmation = actions?.querySelector('[data-supplier-return-pickup-confirmation]');
+      if (confirmation) {
+        returnPickupButton.hidden = true;
+        confirmation.hidden = false;
+      }
+      return;
+    }
+    const confirmReturnPickupButton = event.target.closest('[data-supplier-confirm-return-pickup]');
+    if (confirmReturnPickupButton) {
+      const confirmation = confirmReturnPickupButton.closest('[data-supplier-return-pickup-confirmation]');
+      const cancelButton = confirmation?.querySelector('[data-supplier-cancel-return-pickup]');
+      confirmReturnPickupButton.disabled = true;
+      if (cancelButton) cancelButton.disabled = true;
+      setShipmentFeedback('Returning the parcel to Awaiting Pickup…');
+      const { error } = await supabase.rpc('update_marketplace_supplier_shipment', {
+        p_order_id: confirmReturnPickupButton.dataset.supplierConfirmReturnPickup,
+        p_action: 'return_to_pickup',
+        p_courier: '',
+        p_tracking_number: '',
+        p_tracking_url: '',
+      });
+      if (error) {
+        confirmReturnPickupButton.disabled = false;
+        if (cancelButton) cancelButton.disabled = false;
+        setShipmentFeedback(error.message || 'The parcel could not be returned to Awaiting Pickup.', true);
+        return;
+      }
+      setShipmentFeedback('The parcel is back in Awaiting Pickup.');
+      try {
+        await refreshSupplierPortal();
+        packagingStatusFilter = 'awaiting_pickup';
+        applyPackagingStatusFilter();
+      } catch (refreshError) { setShipmentFeedback(refreshError.message || 'Status saved, but the order list could not refresh.', true); }
       return;
     }
     const confirmUndoButton = event.target.closest('[data-supplier-confirm-undo-delivered]');
@@ -3886,9 +6008,8 @@ function setupMarketplaceSupplierPortal() {
     }
     const cancelDelivery = event.target.closest('[data-supplier-cancel-delivery]');
     if (cancelDelivery) {
-      const summary = cancelDelivery.closest('.supplier-shipment-summary');
       const confirmation = cancelDelivery.closest('[data-supplier-delivery-confirmation]');
-      const markDeliveredButton = summary?.querySelector('[data-supplier-mark-delivered]');
+      const markDeliveredButton = cancelDelivery.closest('.supplier-completed-shipment-actions')?.querySelector('[data-supplier-mark-delivered]');
       if (confirmation) confirmation.hidden = true;
       if (markDeliveredButton) markDeliveredButton.hidden = false;
       setShipmentFeedback('');
@@ -3896,8 +6017,8 @@ function setupMarketplaceSupplierPortal() {
     }
     const markDeliveredButton = event.target.closest('[data-supplier-mark-delivered]');
     if (markDeliveredButton) {
-      const summary = markDeliveredButton.closest('.supplier-shipment-summary');
-      const confirmation = summary?.querySelector('[data-supplier-delivery-confirmation]');
+      const actions = markDeliveredButton.closest('.supplier-completed-shipment-actions');
+      const confirmation = actions?.querySelector('[data-supplier-delivery-confirmation]');
       if (confirmation) {
         markDeliveredButton.hidden = true;
         confirmation.hidden = false;
@@ -3931,7 +6052,7 @@ function setupMarketplaceSupplierPortal() {
     }
     const editTrackingButton = event.target.closest('[data-supplier-edit-tracking]');
     if (editTrackingButton) {
-      const orderCard = editTrackingButton.closest('.supplier-market-order');
+      const orderCard = editTrackingButton.closest('.supplier-packaging-order');
       const form = orderCard?.querySelector('[data-shipment-action="edit_tracking"]');
       if (form) {
         form.hidden = false;
@@ -3945,18 +6066,21 @@ function setupMarketplaceSupplierPortal() {
       const form = cancelTrackingEdit.closest('[data-shipment-action="edit_tracking"]');
       if (form) {
         form.hidden = true;
-        const orderCard = form.closest('.supplier-market-order');
+        const orderCard = form.closest('.supplier-packaging-order');
         const editButton = orderCard?.querySelector('[data-supplier-edit-tracking]');
         if (editButton) editButton.hidden = false;
       }
       return;
     }
   });
-  if (supplierForm || document.querySelector('[data-supplier-orders]')) {
-    void refreshSupplierPortal().catch((error) => {
-      console.error('Supplier portal data could not load:', error);
-      setSupplierFeedback('Supplier data could not load. Confirm the supplier portal migration has been applied.', true);
-      document.querySelectorAll('[data-supplier-products], [data-supplier-orders]').forEach((node) => { node.innerHTML = '<p>Supplier data is temporarily unavailable.</p>'; });
+  if (supplierForm || supplierProductListTarget || ordersTarget || packagingTarget) {
+    void refreshSupplierPortal().then(() => {
+      if (document.querySelector('[data-supplier-section="inventory"]')) return refreshWarehouseInventory?.();
+      return undefined;
+    }).catch((error) => {
+      console.error('Store portal data could not load:', error);
+      setSupplierFeedback(error.message ? `Store data could not load: ${error.message}` : 'Store data could not load. Check your connection and Store Portal access.', true);
+      document.querySelectorAll('[data-supplier-products], [data-supplier-orders], [data-packaging-orders]').forEach((node) => { node.innerHTML = '<p>Store data is temporarily unavailable.</p>'; });
     });
     if (document.documentElement.dataset.marketplaceSupplierReturnRealtime !== 'true') {
       document.documentElement.dataset.marketplaceSupplierReturnRealtime = 'true';
@@ -3976,9 +6100,7 @@ function setupMarketplaceSupplierPortal() {
     if (!supplierOverview) return;
     const { data, error } = await supabase.rpc('get_marketplace_supplier_accounts');
     if (error) throw error;
-    const { data: supplierVoucherRows, error: voucherError } = await supabase.from('marketplace_supplier_vouchers').select('*').order('created_at', { ascending: false });
-    if (voucherError) throw voucherError;
-    if (!data?.length) { supplierOverview.innerHTML = '<p class="admin-market-empty">No supplier portal users are linked yet.</p>'; return; }
+    if (!data?.length) { supplierOverview.innerHTML = '<p class="admin-market-empty">No store portal users are linked yet.</p>'; return; }
     const products = loadMarketplaceProducts();
     const orders = loadMarketplaceOrders();
     const summaryForSupplier = (supplierName) => {
@@ -4003,120 +6125,11 @@ function setupMarketplaceSupplierPortal() {
         const sold = variants.reduce((total, item) => total + (summary.supplierItems.filter((line) => line.productId === product.id && line.variantId === item.variant.id).reduce((subtotal, line) => subtotal + (Number(line.quantity) || 0), 0)), 0);
         return `<li><span>${escapeHTML(product.name)} · ${escapeHTML(product.category || 'Other')}${product.productCode ? ` · ${escapeHTML(product.productCode)}` : ''}</span><small>${variants.map(({ variant }) => `${escapeHTML(variant.label || 'Variant')} · MYR ${Number(variant.price || 0).toFixed(2)}`).join(' / ')}</small><b>${sold} sold</b></li>`;
       }).join('');
-      const vouchersForSupplier = (supplierVoucherRows || []).filter((voucher) => voucher.supplier_user_id === entry.supplier_user_id);
-      const voucherList = vouchersForSupplier.map((voucher) => `<li><span><strong>${escapeHTML(voucher.code)}</strong> · ${voucher.discount_type === 'free_shipping' ? 'Free shipping' : voucher.discount_type === 'percent' ? `${Number(voucher.discount_value)}% off` : `MYR ${Number(voucher.discount_value).toFixed(2)} off`}${Number(voucher.minimum_spend) ? ` · Minimum MYR ${Number(voucher.minimum_spend).toFixed(2)}` : ''}</span><small>${voucher.enabled ? 'Active' : 'Inactive'}${voucher.expires_at ? ` · Expires ${escapeHTML(voucher.expires_at)}` : ''}</small></li>`).join('');
-      return `<details class="admin-supplier-overview-card"><summary><img class="admin-supplier-avatar" src="${escapeHTML(avatarUrl)}" alt="${escapeHTML(entry.supplier_name)} profile photo" /><span class="admin-supplier-company">${escapeHTML(entry.supplier_name)}</span><span class="admin-supplier-email">${escapeHTML(account.email || 'Email unavailable')}</span></summary><div class="admin-supplier-overview-body"><div class="admin-supplier-user-details"><div><small>Name</small><strong>${escapeHTML(account.display_name || 'Name unavailable')}</strong></div><div><small>Email</small><strong>${escapeHTML(account.email || 'Email unavailable')}</strong></div><div><small>Phone</small><strong>${escapeHTML(phone || 'Phone unavailable')}</strong></div><div><small>Linked</small><strong>${escapeHTML(linkedDate)}</strong></div></div><div class="admin-supplier-sales-stats"><div><small>Paid sales</small><strong>MYR ${sales.toFixed(2)}</strong></div><div><small>Units sold</small><strong>${summary.supplierItems.reduce((total, item) => total + (Number(item.quantity) || 0), 0)}</strong></div><div><small>Paid orders</small><strong>${new Set(summary.supplierItems.map((item) => item.orderId)).size}</strong></div><div><small>Products</small><strong>${summary.uniqueProducts.length}</strong></div></div><div class="admin-supplier-products"><h4>Products and sales</h4><ul>${productList || '<li>No products linked to this supplier company yet.</li>'}</ul></div><div class="admin-supplier-products admin-supplier-vouchers"><h4>Supplier Vouchers &amp; Offers</h4><ul>${voucherList || '<li>No vouchers created yet.</li>'}</ul></div></div></details>`;
+      return `<details class="admin-supplier-overview-card"><summary><img class="admin-supplier-avatar" src="${escapeHTML(avatarUrl)}" alt="${escapeHTML(entry.supplier_name)} profile photo" /><span class="admin-supplier-company">${escapeHTML(entry.supplier_name)}</span><span class="admin-supplier-email">${escapeHTML(account.email || 'Email unavailable')}</span></summary><div class="admin-supplier-overview-body"><div class="admin-supplier-user-details"><div><small>Name</small><strong>${escapeHTML(account.display_name || 'Name unavailable')}</strong></div><div><small>Email</small><strong>${escapeHTML(account.email || 'Email unavailable')}</strong></div><div><small>Phone</small><strong>${escapeHTML(phone || 'Phone unavailable')}</strong></div><div><small>Linked</small><strong>${escapeHTML(linkedDate)}</strong></div></div><div class="admin-supplier-sales-stats"><div><small>Paid sales</small><strong>MYR ${sales.toFixed(2)}</strong></div><div><small>Units sold</small><strong>${summary.supplierItems.reduce((total, item) => total + (Number(item.quantity) || 0), 0)}</strong></div><div><small>Paid orders</small><strong>${new Set(summary.supplierItems.map((item) => item.orderId)).size}</strong></div><div><small>Products</small><strong>${summary.uniqueProducts.length}</strong></div></div><div class="admin-supplier-products"><h4>Products and sales</h4><ul>${productList || '<li>No products linked to this store name yet.</li>'}</ul></div></div></details>`;
     }).join('');
   };
-  if (supplierOverview) void loadSupplierOverview().catch((error) => { supplierOverview.innerHTML = `<p class="admin-market-empty">Supplier details could not be loaded: ${escapeHTML(error.message || 'Supabase request failed')}</p>`; });
+  if (supplierOverview) void loadSupplierOverview().catch((error) => { supplierOverview.innerHTML = `<p class="admin-market-empty">Store details could not be loaded: ${escapeHTML(error.message || 'Supabase request failed')}</p>`; });
 
-  const reviewsTarget = document.querySelector('[data-marketplace-product-reviews]');
-  const loadProductReviews = async () => {
-    if (!reviewsTarget) return;
-    const [{ data, error }, { data: catalogRecord }] = await Promise.all([
-      supabase.from('marketplace_product_submissions').select('*').eq('status', 'Pending Review').order('submitted_at', { ascending: true }),
-      supabase.from('app_data').select('payload').eq('record_id', 'shared:furgo-demo-marketplace-products:shared').maybeSingle(),
-    ]);
-    if (error) throw error;
-    const reviewCatalog = Array.isArray(catalogRecord?.payload) ? catalogRecord.payload : loadMarketplaceProducts();
-    const countBadge = document.querySelector('[data-marketplace-review-count]');
-    if (countBadge) countBadge.textContent = String(data?.length || 0);
-    if (!data?.length) { reviewsTarget.innerHTML = '<p>No product submissions are awaiting review.</p>'; return; }
-    reviewsTarget.innerHTML = data.map((submission) => {
-      const product = submission.product_data || {};
-      const action = submission.action || 'add';
-      const currentProduct = reviewCatalog.find((entry) => String(entry.id) === String(submission.product_id || product.id));
-      const proposedVariant = product.variants?.[0] || {};
-      const currentVariant = currentProduct?.variants?.find((variant) => String(variant.id) === String(proposedVariant.id)) || (currentProduct?.variants?.length === 1 ? currentProduct.variants[0] : null);
-      const changes = [];
-      const normalizeChangeValue = (value) => {
-        if (Array.isArray(value)) return value.map(normalizeChangeValue);
-        if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).sort(([a], [b]) => a.localeCompare(b)).map(([key, item]) => [key, normalizeChangeValue(item)]));
-        if (typeof value === 'string') return value.trim();
-        return value ?? '';
-      };
-      const addChange = (label, before, after, format = (value) => {
-        if (Array.isArray(value)) return value.map((item) => typeof item === 'object' ? JSON.stringify(item) : String(item)).join(', ') || '—';
-        if (value && typeof value === 'object') return JSON.stringify(value);
-        return String(value ?? '').trim() || '—';
-      }, normalize = normalizeChangeValue) => {
-        const normalizedBefore = JSON.stringify(normalize(before));
-        const normalizedAfter = JSON.stringify(normalize(after));
-        if (normalizedBefore === normalizedAfter) return;
-        const beforeNumber = before == null || before === '' ? NaN : Number(before);
-        const afterNumber = after == null || after === '' ? NaN : Number(after);
-        let trend = '';
-        if (Number.isFinite(beforeNumber) && Number.isFinite(afterNumber) && beforeNumber !== afterNumber) {
-          if (label === 'Price') trend = afterNumber > beforeNumber ? 'is-negative' : 'is-positive';
-          if (label === 'Stock') trend = afterNumber < beforeNumber ? 'is-negative' : 'is-positive';
-        }
-        changes.push({ label, before: format(before), after: format(after), trend });
-      };
-      const formatPrice = (value) => value === '' || value == null || !Number.isFinite(Number(value)) ? '—' : `MYR ${Number(value).toFixed(2)}`;
-      const formatStock = (value) => value === '' || value == null || !Number.isFinite(Number(value)) ? '—' : String(Number(value));
-      const normalizeNumber = (value) => value === '' || value == null ? '' : (Number.isFinite(Number(value)) ? Number(value) : String(value).trim());
-      if (action === 'edit_variant' || action === 'edit') {
-        if (currentProduct) {
-          if (action === 'edit') {
-            for (const [key, label] of [['name', 'Product name'], ['category', 'Category'], ['description', 'Description'], ['petTypes', 'Types of pets'], ['suitableBreeds', 'Suitable breeds'], ['issues', 'Pet concerns'], ['ingredients', 'Ingredients'], ['nutrition', 'Nutrition / product information']]) {
-              addChange(label, currentProduct[key], product[key]);
-            }
-          }
-          if (currentVariant && proposedVariant) {
-            addChange('Variant / package', currentVariant.label, proposedVariant.label);
-            addChange('Price', currentVariant.price, proposedVariant.price, formatPrice, normalizeNumber);
-            addChange('Stock', currentVariant.stock, proposedVariant.stock, formatStock, normalizeNumber);
-            addChange('SKU', currentVariant.sku, proposedVariant.sku);
-            addChange('Supplier SKU', currentVariant.supplierSku, proposedVariant.supplierSku);
-          }
-        }
-      }
-      const changesMarkup = action === 'add'
-        ? '<p class="marketplace-review-new-listing">New listing · no previous values</p>'
-        : changes.length
-          ? `<section class="marketplace-review-changes" aria-label="Changes requested"><h4>Before and proposed</h4><div class="marketplace-review-change-list">${changes.map((change) => `<div class="marketplace-review-change"><strong>${escapeHTML(change.label)}</strong><span><small>Before</small>${escapeHTML(change.before)}</span><span class="${change.trend}"><small>Proposed</small>${escapeHTML(change.after)}</span></div>`).join('')}</div></section>`
-          : `<p class="marketplace-review-new-listing">${!currentProduct ? 'Current listing values are unavailable for comparison.' : (action === 'edit_variant' && !currentVariant) ? 'Current variant values are unavailable for comparison.' : 'No field changes detected.'}</p>`;
-      const images = (product.images || []).map((url) => `<img src="${escapeHTML(url)}" alt="${escapeHTML(product.name || 'Product')}" />`).join('');
-      const variants = (product.variants || []).map((variant) => `<li>${escapeHTML(variant.label || 'Variant')} · MYR ${Number(variant.price || 0).toFixed(2)} · Stock ${Number(variant.stock) || 0}</li>`).join('');
-      const actionLabel = { add: 'New product', edit: 'Product edit', edit_variant: 'Price / variant change', hide: 'Hide request', delete: 'Delete request' }[action] || 'Product change';
-      const approveLabel = { add: 'Approve & Publish', edit: 'Approve Changes', edit_variant: 'Approve Price / Variant', hide: 'Approve Hide', delete: 'Approve Delete' }[action] || 'Approve Request';
-      return `<article class="marketplace-product-review-card" data-marketplace-review="${escapeHTML(submission.id)}"><div class="marketplace-review-images">${images}</div><div class="marketplace-review-copy"><span>${escapeHTML(submission.supplier_name)} · ${actionLabel}</span><h3>${escapeHTML(product.name || 'Product')}</h3>${changesMarkup}<p>${escapeHTML(product.description || (action === 'hide' ? 'Supplier requests to hide this active listing.' : action === 'delete' ? 'Supplier requests to delete this active listing.' : ''))}</p><p><strong>${escapeHTML(product.category || 'Other')}</strong> · ${escapeHTML(product.ingredients || '')}</p><ul>${variants}</ul><label>Rejection reason<textarea rows="2" maxlength="1000" required data-rejection-reason aria-describedby="marketplace-review-reason-hint-${escapeHTML(submission.id)}" placeholder="Required when rejecting"></textarea></label><small class="marketplace-review-reason-hint" id="marketplace-review-reason-hint-${escapeHTML(submission.id)}" data-review-reason-hint aria-live="polite">A reason is required to reject this request.</small><div class="admin-market-form-actions"><button type="button" class="button button-primary" data-review-product="approve">${approveLabel}</button><button type="button" class="button button-light" data-review-product="reject">Reject Request</button></div></div></article>`;
-    }).join('');
-  };
-  reviewsTarget?.addEventListener('input', (event) => {
-    const reasonField = event.target.closest('[data-rejection-reason]');
-    const card = reasonField?.closest('[data-marketplace-review]');
-    if (!reasonField || !card) return;
-    const hasReason = Boolean(reasonField.value.trim());
-    const approveButton = card.querySelector('[data-review-product="approve"]');
-    const hint = card.querySelector('[data-review-reason-hint]');
-    if (approveButton) approveButton.disabled = hasReason;
-    if (hint) hint.textContent = hasReason ? 'To approve this request, remove the rejection reason.' : 'A reason is required to reject this request.';
-  });
-  reviewsTarget?.addEventListener('click', async (event) => {
-    const button = event.target.closest('[data-review-product]');
-    const card = button?.closest('[data-marketplace-review]');
-    if (!button || !card) return;
-    const decision = button.dataset.reviewProduct;
-    const reasonField = card.querySelector('[data-rejection-reason]');
-    const reason = reasonField.value.trim();
-    if (decision === 'approve' && reason) {
-      card.querySelector('[data-review-reason-hint]').textContent = 'To approve this request, remove the rejection reason.';
-      reasonField.focus();
-      return;
-    }
-    if (decision === 'reject' && !reason) { reasonField.setCustomValidity('Enter a reason so the supplier knows what to change.'); reasonField.reportValidity(); reasonField.setCustomValidity(''); return; }
-    button.disabled = true;
-    const { data, error } = await supabase.rpc('review_marketplace_product_submission', { p_submission_id: card.dataset.marketplaceReview, p_decision: decision, p_reason: reason });
-    if (error) { button.disabled = false; window.alert(error.message); return; }
-    if (decision === 'approve') {
-      const { data: catalog, error: catalogError } = await supabase.from('app_data').select('payload').eq('record_id', 'shared:furgo-demo-marketplace-products:shared').maybeSingle();
-      if (!catalogError && Array.isArray(catalog?.payload)) localStorage.setItem(marketplaceProductsKey, JSON.stringify(catalog.payload));
-    }
-    if (decision === 'approve') void recordAdminAction('marketplace_product_request_approved', 'marketplace_product_submission', card.dataset.marketplaceReview);
-    await loadProductReviews();
-  });
-  if (reviewsTarget) void loadProductReviews().catch((error) => { reviewsTarget.innerHTML = `<p>${escapeHTML(error.message || 'Submissions could not load.')}</p>`; });
 }
 
 // Provides short Admin Portal confirmations without external notification services.
@@ -4963,10 +6976,10 @@ function setupAdminFooterScanner() {
             feedback.textContent = 'The QR code did not contain a manual check-in code.';
             return false;
           }
-          feedback.textContent = 'QR code scanned. Opening Orders with the manual code filled in.';
+          feedback.textContent = 'QR code scanned. Opening Current Order with the manual code filled in.';
           window.setTimeout(() => {
             if (dialog.open) dialog.close();
-            window.location.hash = `#admin-orders?view=scan&code=${encodeURIComponent(manualCode)}`;
+            window.location.hash = `#admin-current-order?code=${encodeURIComponent(manualCode)}`;
           }, 300);
           return true;
         },
@@ -4974,7 +6987,7 @@ function setupAdminFooterScanner() {
     } catch (error) {
       stopCamera();
       feedback.textContent = `${error.message} Opening the order page for manual code entry.`;
-      window.setTimeout(() => { window.location.hash = '#admin-orders?view=scan'; }, 1400);
+      window.setTimeout(() => { window.location.hash = '#admin-current-order'; }, 1400);
     }
   });
 }
@@ -5063,7 +7076,7 @@ function setupDedicatedSearchPage() {
 
     recentsSection.hidden = true;
     discoverSection.hidden = true;
-    const products = loadMarketplaceProducts().filter((product) => !product.hidden && !product.frozenByAdmin && product.variants?.some((variant) => !variant.frozen && Number(variant.stock) > 0));
+    const products = loadMarketplaceProducts().filter((product) => !product.hidden && !product.frozenByAdmin && product.variants?.some((variant) => !variant.frozen));
     const productMatches = products.map((product) => {
       const searchable = normalize([
         product.name, product.category, product.description, product.extraDescription,
@@ -5073,7 +7086,7 @@ function setupDedicatedSearchPage() {
       const isCookieSearch = normalize(productAliases[product.id]).includes(normalizedQuery) && /cookie|biscuit/.test(normalizedQuery);
       return {
         title: isCookieSearch ? `${query.trim()[0].toUpperCase()}${query.trim().slice(1)}` : product.name,
-        detail: `${product.name} · Marketplace${product.category ? ` · ${product.category}` : ''}`,
+        detail: `${product.name} · Marketplace${product.category ? ` · ${product.category}` : ''}${product.variants.filter((variant) => !variant.frozen).every((variant) => Number(variant.stock) <= 0) ? ' · Out of stock' : ''}`,
         href: `#product?id=${encodeURIComponent(product.id)}`,
         searchText: searchable,
         selectedType: 'product',
@@ -5311,8 +7324,11 @@ function wireForms() {
   void refreshFurgoCoinBalance(supabase);
   setupAdminAccess();
   setupAdminSuppliers();
+  void setupSellerPortal();
+  setupAdminSellerManagement();
+  void setupAdminSellerPayoutFee();
+  setupAdminFeeRules();
   setupAdminCoinExchange();
-  setupRoleApplication();
   setupAdminAuditPage();
   setupAdminEnquiries();
   setupAdminCustomers();
@@ -5373,7 +7389,7 @@ function wireForms() {
     }
   });
 
-  // Password changes are shared by customer, admin, driver, and supplier profile screens.
+  // Password changes are shared by customer, admin, driver, and store profile screens.
   document.querySelectorAll('[data-change-password-form]').forEach((passwordForm) => {
     passwordForm.addEventListener('submit', async (event) => {
       event.preventDefault();
@@ -5431,22 +7447,76 @@ function wireForms() {
     supportForm.reset();
   });
 
-  // Saves and removes delivery addresses in browser storage for the customer portal prototype.
+  // Saves, edits, and removes delivery addresses in browser storage for the customer portal prototype.
   const addressForm = document.querySelector('[data-address-form]');
   addressForm?.addEventListener('submit', (event) => {
     event.preventDefault();
     if (!addressForm.reportValidity()) return;
     const addresses = JSON.parse(localStorage.getItem('furgo-demo-addresses') || '[]');
-    addresses.push(Object.fromEntries(new FormData(addressForm).entries()));
+    const address = Object.fromEntries(new FormData(addressForm).entries());
+    const editIndex = address.editIndex === '' ? -1 : Number(address.editIndex);
+    delete address.editIndex;
+    if (Number.isInteger(editIndex) && editIndex >= 0 && editIndex < addresses.length) {
+      address.isDefault = addresses[editIndex].isDefault === true;
+      addresses[editIndex] = address;
+    } else {
+      if (!addresses.length) address.isDefault = true;
+      addresses.push(address);
+    }
     localStorage.setItem('furgo-demo-addresses', JSON.stringify(addresses));
+    render({ preserveScroll: editIndex >= 0 });
+  });
+  document.querySelectorAll('[data-edit-address]').forEach((button) => button.addEventListener('click', () => {
+    const addresses = JSON.parse(localStorage.getItem('furgo-demo-addresses') || '[]');
+    const index = Number(button.dataset.editAddress);
+    const address = addresses[index];
+    if (!address) return;
+    addressForm.elements.editIndex.value = String(index);
+    ['label', 'name', 'phone', 'postcode', 'street', 'city', 'state'].forEach((key) => {
+      addressForm.elements[key].value = address[key] || '';
+    });
+    addressForm.querySelector('[data-address-form-title]').textContent = 'Edit Address';
+    addressForm.querySelector('[type="submit"]').textContent = 'Save Changes';
+    addressForm.querySelector('[data-cancel-address-edit]').hidden = false;
+    addressForm.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    addressForm.elements.label.focus({ preventScroll: true });
+  }));
+  document.querySelector('[data-cancel-address-edit]')?.addEventListener('click', () => {
+    addressForm.reset();
+    addressForm.elements.editIndex.value = '';
+    addressForm.querySelector('[data-address-form-title]').textContent = 'Add A New Address';
+    addressForm.querySelector('[type="submit"]').textContent = 'Save Address';
+    addressForm.querySelector('[data-cancel-address-edit]').hidden = true;
+  });
+  document.querySelectorAll('[data-default-address]').forEach((button) => button.addEventListener('click', () => {
+    const addresses = JSON.parse(localStorage.getItem('furgo-demo-addresses') || '[]');
+    addresses.forEach((address, index) => { address.isDefault = index === Number(button.dataset.defaultAddress); });
+    localStorage.setItem('furgo-demo-addresses', JSON.stringify(addresses));
+    render({ preserveScroll: true });
+  }));
+  const addressDeleteDialog = document.querySelector('[data-address-delete-dialog]');
+  let pendingAddressRemoval = null;
+  document.querySelectorAll('[data-remove-address]').forEach((button) => button.addEventListener('click', () => {
+    pendingAddressRemoval = Number(button.dataset.removeAddress);
+    addressDeleteDialog?.showModal();
+  }));
+  document.querySelector('[data-cancel-address-delete]')?.addEventListener('click', () => {
+    pendingAddressRemoval = null;
+    addressDeleteDialog?.close();
+  });
+  document.querySelector('[data-confirm-address-delete]')?.addEventListener('click', () => {
+    if (!Number.isInteger(pendingAddressRemoval)) return;
+    const addresses = JSON.parse(localStorage.getItem('furgo-demo-addresses') || '[]');
+    const defaultIndex = Math.max(0, addresses.findIndex((address) => address.isDefault === true));
+    const removedIndex = pendingAddressRemoval;
+    if (removedIndex < 0 || removedIndex >= addresses.length) return;
+    addresses.splice(removedIndex, 1);
+    if (removedIndex === defaultIndex && addresses.length) addresses.forEach((address, index) => { address.isDefault = index === 0; });
+    localStorage.setItem('furgo-demo-addresses', JSON.stringify(addresses));
+    pendingAddressRemoval = null;
+    addressDeleteDialog?.close();
     render();
   });
-  document.querySelectorAll('[data-remove-address]').forEach((button) => button.addEventListener('click', () => {
-    const addresses = JSON.parse(localStorage.getItem('furgo-demo-addresses') || '[]');
-    addresses.splice(Number(button.dataset.removeAddress), 1);
-    localStorage.setItem('furgo-demo-addresses', JSON.stringify(addresses));
-    render();
-  }));
 
   // Stores masked payment method details only; the prototype never processes a payment.
   const paymentForm = document.querySelector('[data-payment-form]');
@@ -5590,10 +7660,11 @@ function wireForms() {
         : identity.role === 'director' ? 'Director sign-in successful. Opening the Admin Portal…'
           : identity.role === 'manager' ? 'Manager sign-in successful. Opening the Admin Portal…'
             : identity.role === 'executive' ? 'Executive sign-in successful. Opening the Admin Portal…'
-          : identity.role === 'supplier' ? 'Supplier sign-in successful. Opening the Marketplace Supplier Portal…'
+          : identity.role === 'supplier' ? 'Store sign-in successful. Opening the Marketplace Store Portal…'
+          : identity.role === 'seller' ? 'Seller sign-in successful. Opening the Seller Portal…'
           : identity.role === 'driver' ? 'Driver sign-in successful. Opening the Driver Portal…'
             : 'Sign-in successful. Opening your Furgo home…';
-      window.setTimeout(() => { window.location.hash = ['director', 'manager', 'executive'].includes(identity.role) ? '#admin' : identity.role === 'supplier' ? '#supplier' : identity.role === 'driver' ? '#driver' : '#home'; }, 500);
+      window.setTimeout(() => { window.location.hash = ['director', 'manager', 'executive'].includes(identity.role) ? '#admin' : identity.role === 'seller' ? '#seller-portal' : identity.role === 'supplier' ? '#supplier' : identity.role === 'driver' ? '#driver' : '#home'; }, 500);
     } catch (error) {
       feedback.textContent = friendlyAuthError(error);
     } finally {
@@ -5632,7 +7703,7 @@ async function render({ preserveScroll = false } = {}) {
   const page = routeName || 'home';
   const routeParams = new URLSearchParams(routeQuery);
   if (page === 'home' && routeParams.get('portal') === 'customer') sessionStorage.setItem('furgo-customer-portal-view', 'true');
-  if (['supplier', 'driver', 'admin', 'admin-orders', 'admin-access', 'admin-enquiries', 'admin-audit', 'admin-customers', 'admin-product-insights', 'admin-home-mvp', 'admin-outlets', 'admin-users', 'admin-suppliers', 'admin-coin-exchange', 'admin-promotions', 'admin-pet-taxi', 'admin-marketplace-manage', 'admin-marketplace-products', 'admin-local-finder', 'admin-marketplace', 'admin-grooming', 'admin-hotel', 'admin-daycare', 'login'].includes(page)) sessionStorage.removeItem('furgo-customer-portal-view');
+  if (['supplier', 'seller-portal', 'driver', 'admin', 'admin-orders', 'admin-current-order', 'admin-access', 'admin-enquiries', 'admin-audit', 'admin-customers', 'admin-product-insights', 'admin-home-mvp', 'admin-outlets', 'admin-users', 'admin-suppliers', 'admin-seller-management', 'admin-seller-payout-fee', 'admin-fee-rules', 'admin-coin-exchange', 'admin-promotions', 'admin-pet-taxi', 'admin-marketplace-manage', 'admin-marketplace-products', 'admin-local-finder', 'admin-marketplace', 'admin-grooming', 'admin-hotel', 'admin-daycare', 'login'].includes(page)) sessionStorage.removeItem('furgo-customer-portal-view');
   const isCustomerPortalView = sessionStorage.getItem('furgo-customer-portal-view') === 'true';
   const hasDemoSession = sessionStorage.getItem('furgo-demo-auth') === 'true';
   if (hasDemoSession && sessionStorage.getItem('furgo-demo-user-role') === 'customer') {
@@ -5641,14 +7712,18 @@ async function render({ preserveScroll = false } = {}) {
       saveCustomerRecord(currentCustomer);
     } catch { /* Keep the current page usable if local demo profile data is malformed. */ }
   }
-  const directorPages = ['admin-customers', 'admin-product-insights', 'admin-home-mvp', 'admin-outlets', 'admin-users', 'admin-suppliers'];
+  const directorPages = ['admin-customers', 'admin-product-insights', 'admin-home-mvp', 'admin-outlets', 'admin-users', 'admin-suppliers', 'admin-seller-management', 'admin-seller-payout-fee', 'admin-fee-rules'];
   const managerPages = ['admin-promotions', 'admin-pet-taxi', 'admin-marketplace-manage', 'admin-marketplace-products', 'admin-local-finder', 'admin-coin-exchange'];
   const serviceAdminPages = ['admin-marketplace', 'admin-grooming', 'admin-hotel', 'admin-daycare'];
-  const portalPages = ['admin', 'admin-orders', 'admin-access', 'admin-enquiries', 'admin-audit', ...managerPages, ...serviceAdminPages, ...directorPages];
+  const portalPages = ['admin', 'admin-orders', 'admin-current-order', 'admin-access', 'admin-enquiries', 'admin-audit', ...managerPages, ...serviceAdminPages, ...directorPages];
   const supplierPages = ['supplier', 'supplier-product-edit'];
+  const sellerPages = ['seller-portal'];
   const driverPages = ['driver'];
   const savedRole = sessionStorage.getItem('furgo-demo-user-role');
   const currentRole = savedRole === 'staff' ? 'executive' : savedRole === 'admin' ? 'director' : savedRole;
+  let directorStoreContext = null;
+  try { directorStoreContext = JSON.parse(sessionStorage.getItem('furgo-director-store-context') || 'null'); } catch { directorStoreContext = null; }
+  const hasDirectorStoreContext = currentRole === 'director' && Boolean(directorStoreContext?.storeName);
   if (currentRole !== savedRole && currentRole) {
     sessionStorage.setItem('furgo-demo-user-role', currentRole);
     try {
@@ -5681,8 +7756,16 @@ async function render({ preserveScroll = false } = {}) {
     window.location.hash = '#admin-access';
     return;
   }
-  if (supplierPages.includes(page) && (!hasDemoSession || currentRole !== 'supplier')) {
+  if (supplierPages.includes(page) && (!hasDemoSession || (currentRole !== 'supplier' && !(currentRole === 'director' && hasDirectorStoreContext)))) {
     window.location.hash = '#login';
+    return;
+  }
+  if (sellerPages.includes(page) && (!hasDemoSession || currentRole !== 'seller')) {
+    window.location.hash = hasDemoSession ? (currentRole === 'director' ? '#admin' : currentRole === 'supplier' ? '#supplier' : '#home') : '#login';
+    return;
+  }
+  if (hasDemoSession && currentRole === 'seller' && !sellerPages.includes(page) && !['login', 'change-password'].includes(page)) {
+    window.location.hash = '#seller-portal';
     return;
   }
   if (hasDemoSession && currentRole === 'supplier' && !isCustomerPortalView && !supplierPages.includes(page) && !['login', 'notification-settings', 'change-password'].includes(page)) {
@@ -5697,7 +7780,7 @@ async function render({ preserveScroll = false } = {}) {
     window.location.hash = '#login';
     return;
   }
-  const protectedPages = ['home', 'search', 'services', 'about', 'profile', 'edit-profile', 'change-password', 'help-center', 'feedback', 'pet-profile', 'pet-profile-edit', 'pet-reminder', 'pet-vaccination', 'pet-record', 'pet-data', 'pet-avatar', 'pet-assistant', 'ai-nutritionist', 'address', 'payment-method', 'credit', 'tokens', 'marketplace', 'local-finder', 'local-finder-list', 'local-finder-search', 'local-finder-place', 'local-finder-favourites', 'product', 'seller', 'cart', 'checkout', 'orders', 'check-in', 'favourites', 'subscriptions', 'grooming', 'grooming-orders', 'hotel', 'daycare'];
+  const protectedPages = ['home', 'search', 'services', 'about', 'profile', 'edit-profile', 'change-password', 'help-center', 'feedback', 'pet-profile', 'pet-profile-edit', 'pet-reminder', 'pet-vaccination', 'pet-record', 'pet-data', 'pet-avatar', 'pet-assistant', 'ai-nutritionist', 'address', 'payment-method', 'credit', 'tokens', 'marketplace', 'local-finder', 'local-finder-list', 'local-finder-search', 'local-finder-place', 'local-finder-favourites', 'product', 'seller', 'cart', 'checkout', 'orders', 'check-in', 'favourites', 'subscriptions', 'grooming', 'grooming-orders', 'hotel', 'daycare', 'seller-portal'];
   const driverAllowedPages = ['driver', 'profile', 'edit-profile', 'change-password', 'help-center', 'feedback', 'notification-settings', 'login'];
   if (hasDemoSession && sessionStorage.getItem('furgo-demo-user-role') === 'driver' && !isCustomerPortalView && !driverAllowedPages.includes(page)) {
     window.location.hash = '#driver';
@@ -5779,6 +7862,7 @@ async function render({ preserveScroll = false } = {}) {
     'ai-nutritionist': aiNutritionistPage,
     admin: adminPortalPage,
     'admin-orders': () => adminOrdersPage(routeParams),
+    'admin-current-order': () => adminCurrentOrderPage(routeParams),
     'admin-promotions': adminPromotionsPage,
     'admin-marketplace': adminMarketplacePage,
     'admin-marketplace-manage': adminMarketplaceManagePage,
@@ -5796,6 +7880,10 @@ async function render({ preserveScroll = false } = {}) {
     'admin-outlets': () => adminAccessPage('outlets'),
     'admin-users': () => adminAccessPage('team'),
     'admin-suppliers': adminSuppliersPage,
+    'admin-seller-management': adminSellerManagementPage,
+    'admin-seller-payout-fee': () => adminSellerPayoutFeePage(routeParams),
+    'admin-fee-rules': adminFeeRulesPage,
+    'seller-portal': () => sellerPortalPage(routeParams),
     'admin-coin-exchange': adminCoinExchangePage,
     'admin-audit': adminAuditPage,
     'admin-product-insights': adminProductServiceInsightsPage,
@@ -5846,11 +7934,13 @@ async function render({ preserveScroll = false } = {}) {
     'pet-assistant': 'Pet Assistant — Furgo',
     'ai-nutritionist': 'AI Nutritionist — Furgo',
     admin: 'Admin Portal — Furgo',
+    'admin-orders': 'Furgo Order — Furgo Admin',
+    'admin-current-order': 'Current Order — Furgo Admin',
     'admin-promotions': 'Manage Promotions — Furgo Admin',
     'admin-marketplace': 'Marketplace — Furgo Admin',
     'admin-marketplace-manage': 'Manage Marketplace — Furgo Admin',
-    'admin-marketplace-products': 'Product And Supplier Mapping — Furgo Admin',
-    supplier: 'Marketplace Supplier Portal — Furgo',
+    'admin-marketplace-products': 'Product And Store Mapping — Furgo Admin',
+    supplier: 'Marketplace Store Portal — Furgo',
     'admin-grooming': 'Grooming — Furgo Admin',
     'admin-hotel': 'Pet Hotel — Furgo Admin',
     'admin-daycare': 'Pet Daycare — Furgo Admin',
@@ -5861,16 +7951,41 @@ async function render({ preserveScroll = false } = {}) {
     'admin-home-mvp': 'Manage Home MVP — Furgo Admin',
     'admin-outlets': 'Manage Outlets — Furgo Admin',
     'admin-users': 'Manage Admin — Furgo Admin',
-    'admin-suppliers': 'Manage Supplier — Furgo Admin',
+    'admin-suppliers': 'Manage Store — Furgo Admin',
+    'admin-seller-management': 'Manage Marketplace Sellers — Furgo Admin',
+    'admin-seller-payout-fee': 'Payout & Fee — Furgo Admin',
+    'admin-fee-rules': 'Manage Fee & Payout — Furgo Admin',
+    'seller-portal': 'Seller Portal — Furgo',
     'admin-coin-exchange': 'Manage Coin Exchange — Furgo Admin',
     'coin-topup': 'Top Up Furgo Coins — Furgo',
     'admin-audit': 'Activity Log — Furgo',
     'admin-product-insights': 'Product & Service Insights — Furgo Admin',
     driver: 'Driver Portal — Furgo Pet Taxi',
   };
+  let adminCatalogLoadMessage = '';
+  if (page === 'admin-marketplace-products' && hasDemoSession && ['executive', 'manager', 'director'].includes(currentRole)) {
+    const { data: cloudCatalog, error: cloudCatalogError } = await supabase
+      .from('app_data')
+      .select('payload')
+      .eq('record_id', 'shared:furgo-demo-marketplace-products:shared')
+      .maybeSingle();
+    if (cloudCatalogError) {
+      adminCatalogLoadMessage = `Latest Marketplace catalog could not be loaded from Supabase: ${cloudCatalogError.message}`;
+      console.warn(adminCatalogLoadMessage);
+    } else if (Array.isArray(cloudCatalog?.payload)) {
+      // This route is already rendering immediately after the fetch; emitting
+      // the cache helper's storage event here would recursively call render().
+      cacheSyncedRecords(marketplaceProductsKey, cloudCatalog.payload, { notify: false });
+    } else {
+      adminCatalogLoadMessage = 'Supabase returned no shared Marketplace catalog. Products published in the Store Portal may not have synced to the shared catalog yet.';
+      console.warn(adminCatalogLoadMessage);
+    }
+  }
   const renderPage = pageRenderers[page] || homePage;
   document.title = titles[page] || titles.home;
-  document.querySelector('#app').innerHTML = renderPage();
+  document.querySelector('#app').innerHTML = page === 'admin-marketplace-products'
+    ? adminMarketplaceProductsPage(adminCatalogLoadMessage)
+    : renderPage();
   if (['executive', 'manager', 'director'].includes(currentRole) && isCustomerPortalView && !portalPages.includes(page) && !supplierPages.includes(page) && !driverPages.includes(page) && !['notification-settings', 'change-password'].includes(page)) {
     let adminProfile = {};
     try { adminProfile = JSON.parse(sessionStorage.getItem('furgo-demo-user-profile') || '{}'); } catch { adminProfile = {}; }
@@ -5878,10 +7993,11 @@ async function render({ preserveScroll = false } = {}) {
     document.querySelector('#app').insertAdjacentHTML('afterbegin', `<header class="admin-portal-header admin-customer-view-header"><a class="admin-portal-brand" href="#admin"><img src="Image/Icon/Logo.png" alt="Furgo" /><span>Admin Portal</span></a><div class="admin-portal-account"><span>${escapeHTML(adminName)}</span><a class="admin-customer-portal-link" href="#admin">Open Admin Portal</a></div></header>`);
   }
   // Keep the Admin Portal navigation consistent across dashboard and management pages.
-  if (portalPages.includes(page)) document.querySelector('#app').insertAdjacentHTML('beforeend', adminBottomNavigation(page === 'admin' ? 'admin' : page === 'admin-orders' ? 'orders' : page === 'admin-enquiries' ? 'enquiries' : page === 'admin-access' ? 'admin-access' : '', currentRole));
+  if (portalPages.includes(page)) document.querySelector('#app').insertAdjacentHTML('beforeend', adminBottomNavigation(page === 'admin' ? 'admin' : page === 'admin-current-order' ? 'orders' : page === 'admin-enquiries' ? 'enquiries' : page === 'admin-access' ? 'admin-access' : '', currentRole));
   if (page === 'notification-settings' || page === 'change-password') {
     if (['executive', 'manager', 'director'].includes(currentRole)) document.querySelector('#app').insertAdjacentHTML('beforeend', adminBottomNavigation('admin-access', currentRole));
-    else if (currentRole === 'supplier') document.querySelector('#app').insertAdjacentHTML('beforeend', '<nav class="bottom-nav supplier-bottom-nav" aria-label="Supplier Portal navigation"><a class="bottom-item" href="#supplier?tab=home"><img src="Image/Icon/Icon-01.png" alt="" /><span>Home</span></a><a class="bottom-item" href="#supplier?tab=orders"><img src="Image/Icon/Icon-03.png" alt="" /><span>Order</span></a><a class="bottom-item" href="#supplier?tab=help"><img src="Image/Icon/Icon-05.png" alt="" /><span>Help</span></a><a class="bottom-item active" href="#supplier?tab=profile"><img src="Image/Icon/Icon-08.png" alt="" /><span>Profile</span></a></nav>');
+    else if (currentRole === 'supplier') document.querySelector('#app').insertAdjacentHTML('beforeend', '<nav class="bottom-nav supplier-bottom-nav" aria-label="Store Portal navigation"><a class="bottom-item" href="#supplier?tab=home"><img src="Image/Icon/Icon-01.png" alt="" /><span>Home</span></a><a class="bottom-item" href="#supplier?tab=packaging"><img src="Image/Icon/Icon-23.png" alt="" /><span>Pack &amp; Ship</span></a><a class="bottom-item" href="#supplier?tab=inventory"><img src="Image/Icon/Icon-25.png" alt="" /><span>Inventory</span></a><a class="bottom-item active" href="#supplier?tab=profile"><img src="Image/Icon/Icon-08.png" alt="" /><span>Profile</span></a></nav>');
+    else if (currentRole === 'seller') document.querySelector('#app').insertAdjacentHTML('beforeend', '<nav class="bottom-nav supplier-bottom-nav seller-bottom-nav" aria-label="Seller Portal navigation"><a class="bottom-item" href="#seller-portal?section=overview"><img src="Image/Icon/Icon-01.png" alt=""/><span>Home</span></a><a class="bottom-item" href="#seller-portal?section=products"><img src="Image/Icon/Icon-23.png" alt=""/><span>My Products</span></a><a class="bottom-item" href="#seller-portal?section=inventory"><img src="Image/Icon/Icon-25.png" alt=""/><span>Inventory</span></a><a class="bottom-item active" href="#seller-portal?section=profile"><img src="Image/Icon/Icon-08.png" alt=""/><span>My Profile</span></a></nav>');
     else if (currentRole === 'driver') document.querySelector('#app').insertAdjacentHTML('beforeend', driverBottomNavigation('profile'));
     else document.querySelector('#app').insertAdjacentHTML('beforeend', bottomNavigation('profile', (file) => `Image/Icon/${encodeURIComponent(file)}`));
   }
@@ -5914,7 +8030,7 @@ async function render({ preserveScroll = false } = {}) {
     const target = recordSectionIds[routeParams.get('section') || ''];
     if (target) window.requestAnimationFrame(() => document.getElementById(target)?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
   }
-  if (page === 'admin-orders' && routeParams.get('view') === 'scan') {
+  if (page === 'admin-current-order' && routeParams.has('code')) {
     window.requestAnimationFrame(() => document.querySelector('.admin-checkin-scan-panel')?.scrollIntoView({ behavior: 'smooth', block: 'center' }));
   }
   if (page === 'driver' && routeParams.get('view') === 'orders') {

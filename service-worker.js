@@ -14,6 +14,34 @@ self.addEventListener('activate', (event) => {
   })());
 });
 
+self.addEventListener('push', (event) => {
+  let payload = {};
+  try { payload = event.data?.json() || {}; } catch { payload = { body: event.data?.text() || '' }; }
+  event.waitUntil(self.registration.showNotification(payload.title || 'Furgo', {
+    body: payload.body || 'You have a new Furgo update.',
+    icon: payload.icon || 'Image/Icon/Logo.png',
+    badge: payload.badge || 'Image/Icon/Logo.png',
+    tag: payload.tag || undefined,
+    data: payload.data || {},
+  }));
+});
+
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  const target = new URL(event.notification.data?.url || './#home', self.location.origin).href;
+  event.waitUntil((async () => {
+    const clients = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+    for (const client of clients) {
+      if (new URL(client.url).origin === self.location.origin) {
+        await client.focus();
+        if ('navigate' in client) await client.navigate(target);
+        return;
+      }
+    }
+    await self.clients.openWindow(target);
+  })());
+});
+
 self.addEventListener('fetch', (event) => {
   const request = event.request;
   if (request.method !== 'GET' || new URL(request.url).origin !== self.location.origin) return;

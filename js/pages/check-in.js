@@ -99,7 +99,7 @@ function checkInScanUrl(token) {
     ? new URL('https://chinkai23.github.io/Furgo-Web-App/')
     : current;
   base.search = '';
-  base.hash = `admin-orders?code=${encodeURIComponent(formatCheckInToken(token))}`;
+  base.hash = `admin-current-order?code=${encodeURIComponent(formatCheckInToken(token))}`;
   return base.toString();
 }
 

@@ -2,7 +2,8 @@ import { bottomNavigation, escapeHTML } from '../shared.js';
 import { loadMarketplaceOrders, loadMarketplaceProducts, loadMarketplaceSuppliers, marketplaceProductsKey, safeMarketplaceImage } from './marketplace-data.js';
 import { loadGroomingBookings } from './grooming-data.js';
 import { mountDriverLocation } from './driver-location.js';
-import { cacheSyncedRecords } from '../app-data-sync.js';
+import { cacheSyncedRecords, refreshMarketplaceCatalogFromDatabase } from '../app-data-sync.js';
+import { makeReceiptPdf } from '../receipt-pdf.js';
 import { marketplaceOrdersKey } from './marketplace-data.js';
 import { groomingBookingsKey } from './grooming-data.js';
 import { hotelBookingsKey } from './hotel-data.js';
@@ -67,7 +68,7 @@ function canCancelServiceOrder(order) {
   return !/(received order|in progress|pet taxi|checked.?in|service complete|completed|no.?show|cancel|checked.?out)/.test(statuses);
 }
 
-// Marketplace orders may be cancelled only before Furgo confirms receipt or a supplier ships.
+// Marketplace orders may be cancelled only before Furgo confirms receipt or a store ships.
 function canCancelMarketplaceOrder(order) {
   if (order.serviceId !== 'marketplace' || statusCategory(customerOrderStatus(order)) === 'canceled') return false;
   if (order.receipt || order.adminReceiptUploadedAt) return false;
@@ -85,7 +86,7 @@ function hasReturnOrRefund(order) {
 
 function isProgressingOrder(order) {
   const statuses = [customerOrderStatus(order), order.status, order.adminStatus].filter(Boolean).join(' ').toLowerCase();
-  return /(checked.?in|pet taxi|service complete|in progress|shipped|in transit|out for delivery)/.test(statuses);
+  return /(received order|checked.?in|pet taxi|service complete|in progress|shipped|in transit|out for delivery)/.test(statuses);
 }
 
 function matchesOrderStatusTab(order, tab) {
@@ -174,9 +175,14 @@ function marketplaceReturnSection(order, products = loadMarketplaceProducts(), r
     grouped.get(supplier).push(item);
   });
   return `<section class="my-order-marketplace-lines"><h3>Products Purchased &amp; Delivery</h3><div class="marketplace-order-reference-row"><p class="marketplace-order-reference">Order No: ${escapeHTML(order.reference || order.id || '')}</p><div class="marketplace-receipt-control">${receiptAction}</div></div>${[...grouped.entries()].map(([supplier, items]) => {
-    const shipment = order.supplierShipments?.[supplier.toLowerCase()] || Object.entries(order.supplierShipments || {}).find(([key, value]) => key.toLowerCase() === supplier.toLowerCase() || String(value?.supplierName || '').toLowerCase() === supplier.toLowerCase())?.[1] || {};
+    const normalizedSupplier = supplier.trim().toLowerCase();
+    const shipment = Object.entries(order.supplierShipments || {}).find(([key, value]) =>
+      String(key).trim().toLowerCase() === normalizedSupplier
+      || String(value?.supplierName || '').trim().toLowerCase() === normalizedSupplier
+    )?.[1] || (String(order.supplierShipment?.supplierName || '').trim().toLowerCase() === normalizedSupplier || [...grouped.keys()].length === 1 ? order.supplierShipment : null) || {};
     const deliveredAt = shipment.deliveredAt ? new Date(shipment.deliveredAt) : null;
-    const returnWindowOpen = shipment.status === 'Delivered' && deliveredAt && !Number.isNaN(deliveredAt.getTime()) && Date.now() <= deliveredAt.getTime() + 7 * 24 * 60 * 60 * 1000;
+    const shipmentStatus = String(shipment.status || '').trim().toLowerCase();
+    const returnWindowOpen = shipmentStatus === 'delivered' && deliveredAt && !Number.isNaN(deliveredAt.getTime()) && Date.now() <= deliveredAt.getTime() + 7 * 24 * 60 * 60 * 1000;
     const trackingMarkup = marketplaceTrackingForSupplier(shipment);
     return `<section class="my-order-supplier-group"><header><strong>Shop: ${escapeHTML(supplier)}</strong><span>${escapeHTML(shipment.status || 'Preparing order')}</span></header>${items.map((item) => {
       const line = Number(item.lineNumber);
@@ -184,7 +190,7 @@ function marketplaceReturnSection(order, products = loadMarketplaceProducts(), r
       const statusMarkup = returnRequest
         ? `<div class="my-order-return-status"><strong>Return status: ${escapeHTML(returnRequest.status)}</strong><span>Refund amount: MYR ${Number(returnRequest.refundAmount || 0).toFixed(2)} (product MYR ${Number(returnRequest.paidAmount || 0).toFixed(2)} + shipping MYR ${Number(returnRequest.shippingRefund || 0).toFixed(2)})</span>${returnRequest.supplierResponse ? `<span>${escapeHTML(returnRequest.supplierResponse)}</span>` : ''}${returnRequest.decisionReason ? `<span>Review decision: ${escapeHTML(returnRequest.decisionReason)}</span>` : ''}</div>`
         : returnWindowOpen && Number.isInteger(line) ? `<button class="button button-light my-order-return-open" type="button" data-open-marketplace-return data-order-id="${escapeHTML(order.id)}" data-line-number="${line}">Request Return &amp; Refund</button><form class="my-order-return-form" data-marketplace-return-form data-order-id="${escapeHTML(order.id)}" data-line-number="${line}" hidden><label>Reason for return<textarea name="reason" maxlength="2000" required></textarea></label><label>Product photo<input name="photo" type="file" accept="image/jpeg,image/png,image/webp" required /></label><small>One clear product photo, up to 5 MB. Your return request is available for 7 days after delivery.</small><button class="button button-primary" type="submit">Submit Return Request</button><span data-marketplace-return-feedback role="status" aria-live="polite"></span></form>`
-        : shipment.status === 'Delivered' ? '<small class="my-order-return-expired">The 7-day return window has ended.</small>' : '';
+        : shipmentStatus === 'delivered' ? '<small class="my-order-return-expired">The 7-day return window has ended.</small>' : '';
       const product = products.find((entry) => String(entry.id) === String(item.productId || ''));
       const imageSources = [
         ...(Array.isArray(item.images) ? item.images : item.image ? [item.image] : []),
@@ -444,9 +450,11 @@ export function myOrdersPage(routeParams = new URLSearchParams()) {
     const serviceCancelControl = order.serviceId !== 'marketplace' && canCancelServiceOrder(order)
       ? `<button class="marketplace-cancel-order" type="button" data-cancel-customer-order="${escapeHTML(order.serviceId)}|${escapeHTML(order._storageKey)}|${escapeHTML(order.id)}">Cancel Order</button>`
       : '';
-    const receiptAction = order.receipt?.data
-      ? `<a class="button button-primary my-order-receipt-button" href="${escapeHTML(order.receipt.data)}" download="${escapeHTML(order.receipt.name || 'receipt')}">Download Receipt</a>`
-      : `<button class="button button-light my-order-receipt-button" type="button" data-show-receipt-message>Download Receipt</button><p class="my-order-receipt-empty" data-receipt-unavailable-message hidden>Your receipt will be available to download once the outlet has received your order.</p>`;
+    const receiptAction = order.receipt?.document
+      ? `<button class="button button-primary my-order-receipt-button" type="button" data-download-generated-receipt-for-customer="${escapeHTML(order.id)}" data-receipt-key="${escapeHTML(order._storageKey || order.storageKey || '')}">Download Receipt</button>`
+      : order.receipt?.data
+        ? `<a class="button button-primary my-order-receipt-button" href="${escapeHTML(order.receipt.data)}" download="${escapeHTML(order.receipt.name || 'receipt')}">Download Receipt</a>`
+        : `<button class="button button-light my-order-receipt-button" type="button" data-show-receipt-message>Download Receipt</button><p class="my-order-receipt-empty" data-receipt-unavailable-message hidden>Your receipt will be available to download once the outlet has received your order.</p>`;
     if (order.serviceId === 'marketplace') marketplaceDetails = marketplaceReturnSection(order, marketplaceProducts, receiptAction);
     const firstItem = order.items?.[0];
     const firstProduct = marketplaceProducts.find((product) => String(product.id) === String(firstItem?.productId || ''));
@@ -622,6 +630,33 @@ export function setupMyOrders() {
       window.setTimeout(() => window.location.assign(trackingLink.href), 2000);
       return;
     }
+    const generatedReceiptButton = event.target.closest('[data-download-generated-receipt-for-customer]');
+    if (generatedReceiptButton) {
+      const key = generatedReceiptButton.dataset.receiptKey;
+      const orderId = generatedReceiptButton.dataset.downloadGeneratedReceiptForCustomer;
+      const message = generatedReceiptButton.closest('.my-order-expanded')?.querySelector('[data-receipt-unavailable-message]');
+      try {
+        const orders = JSON.parse(localStorage.getItem(key) || '[]');
+        const receipt = orders.find((order) => String(order.id) === String(orderId))?.receipt;
+        if (!receipt?.document) throw new Error('Receipt details are not available yet.');
+        generatedReceiptButton.disabled = true;
+        const pdf = await makeReceiptPdf(receipt.document);
+        const url = URL.createObjectURL(new Blob([pdf], { type: 'application/pdf' }));
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = receipt.name || 'furgo-receipt.pdf';
+        link.click();
+        window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+      } catch (error) {
+        if (message) {
+          message.textContent = error.message || 'The receipt could not be generated. Please try again.';
+          message.hidden = false;
+        } else window.alert(error.message || 'The receipt could not be generated. Please try again.');
+      } finally {
+        generatedReceiptButton.disabled = false;
+      }
+      return;
+    }
     const openReturn = event.target.closest('[data-open-marketplace-return]');
     if (openReturn) {
       const form = openReturn.parentElement?.querySelector('[data-marketplace-return-form]');
@@ -640,7 +675,7 @@ export function setupMyOrders() {
       const orders = loadMarketplaceOrders();
       const order = orders.find((record) => String(record.id) === orderId);
       if (!order || !canCancelMarketplaceOrder({ ...order, serviceId: 'marketplace' })) {
-        window.alert('This order can no longer be cancelled. Furgo may already have confirmed it or a supplier may have shipped it.');
+        window.alert('This order can no longer be cancelled. Furgo may already have confirmed it or a store may have shipped it.');
         window.dispatchEvent(new Event('hashchange'));
         return;
       }
@@ -700,12 +735,8 @@ export function setupMyOrders() {
           order.paymentStatus = 'Paid';
           cacheSyncedRecords(storageKey, records);
           if (serviceId === 'marketplace') {
-            const products = loadMarketplaceProducts();
-            order.items.forEach((item) => {
-              const variant = products.find((product) => product.id === item.productId)?.variants.find((entry) => entry.id === item.variantId);
-              if (variant) variant.stock = Math.max(0, Number(variant.stock) - Number(item.quantity || 0));
-            });
-            localStorage.setItem(marketplaceProductsKey, JSON.stringify(products));
+            try { await refreshMarketplaceCatalogFromDatabase(); }
+            catch (refreshError) { console.warn('Marketplace stock cache refresh deferred:', refreshError); }
           }
         }
         window.dispatchEvent(new Event('hashchange'));
@@ -801,14 +832,8 @@ export function setupMyOrders() {
       try {
         const { error } = await supabase.rpc('cancel_marketplace_order', { p_order_id: orderId, p_reason: reason });
         if (error) throw error;
-        if (order.paymentStatus !== 'Pending Payment' && !order.inventoryRestoredAt) {
-          const products = loadMarketplaceProducts();
-          order.items?.forEach((item) => {
-            const variant = products.find((product) => product.id === item.productId)?.variants.find((entry) => entry.id === item.variantId);
-            if (variant) variant.stock = Number(variant.stock || 0) + Number(item.quantity || 0);
-          });
-          localStorage.setItem(marketplaceProductsKey, JSON.stringify(products));
-        }
+        try { await refreshMarketplaceCatalogFromDatabase(); }
+        catch (refreshError) { console.warn('Marketplace stock cache refresh deferred:', refreshError); }
         dialog.close();
         window.dispatchEvent(new Event('hashchange'));
       } catch (error) {
@@ -846,7 +871,7 @@ export function setupMyOrders() {
         p_photo_path: photoPath,
       });
       if (error) throw error;
-      feedback.textContent = 'Return request submitted to the supplier.';
+      feedback.textContent = 'Return request submitted to the store.';
       window.dispatchEvent(new Event('hashchange'));
     } catch (error) {
       if (photoPath) await supabase.storage.from('marketplace-return-evidence').remove([photoPath]);

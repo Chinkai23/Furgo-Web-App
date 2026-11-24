@@ -24,10 +24,12 @@ export function changePasswordPage(from = 'profile') {
   const profile = JSON.parse(sessionStorage.getItem('furgo-demo-user-profile') || '{}');
   const role = profile.role === 'admin' ? 'director' : profile.role || 'customer';
   const isSupplier = role === 'supplier';
+  const isSeller = from === 'seller' || role === 'seller';
   const isDriver = role === 'driver';
   const isAdmin = ['executive', 'manager', 'director'].includes(role);
   const returnTo = {
     profile: '#profile', driver: '#profile', supplier: '#supplier?tab=profile',
+    seller: '#seller-portal?section=profile',
     admin: '#admin-access', 'admin-access': '#admin-access',
   }[from] || (isSupplier ? '#supplier?tab=profile' : isAdmin ? '#admin-access' : '#profile');
   const form = `<form class="edit-profile-form change-password-form" data-change-password-form><h2>Change Password</h2><p>Enter your current password, then choose a new password.</p>
@@ -36,8 +38,11 @@ export function changePasswordPage(from = 'profile') {
     <div class="edit-field"><label for="profile-confirm-password">Confirm New Password</label><input id="profile-confirm-password" name="confirmPassword" type="password" autocomplete="new-password" minlength="8" required /></div>
     <div class="form-feedback" role="status" aria-live="polite"></div><button class="button button-primary edit-save-button" type="submit">Update Password</button>
   </form>`;
+  if (isSeller) {
+    return `<main class="seller-portal-page seller-change-password-page"><header class="seller-topbar"><a class="seller-brand" href="${returnTo}"><img src="Image/Icon/Logo.png" alt="Furgo"/><span>Furgo Seller</span></a><div><span>${escapeHTML(profile.name || profile.email || 'Seller')}</span></div></header><header class="seller-heading"><div><span>GENERAL</span><h1>Change Password</h1></div></header><section class="seller-card seller-change-password-card">${form}</section></main>`;
+  }
   if (isAdmin || isSupplier) {
-    const portalName = isSupplier ? 'Marketplace Supplier' : 'Admin';
+    const portalName = isSupplier ? 'Marketplace Store' : 'Admin';
     return `<main class="admin-portal-page change-password-page"><header class="admin-portal-header"><a class="admin-portal-brand" href="${returnTo}"><img src="Image/Icon/Logo.png" alt="Furgo" /><span>${portalName} Portal</span></a><div class="admin-portal-account"><span>${escapeHTML(profile.name || profile.supplierName || '')}</span></div></header><header class="admin-market-heading"><a href="${returnTo}" aria-label="Back to General Settings">‹</a><div><span>General</span><h1>Change Password</h1></div></header>${form}</main>`;
   }
   return `<main class="profile-page change-password-page${isDriver ? ' driver-profile-page' : ''}"><header class="profile-heading"><a class="profile-back" href="${returnTo}" aria-label="Back to General Settings">‹</a><h1>Change Password</h1></header>${form}<div class="home-toast" role="status" aria-live="polite"></div></main>`;

@@ -19,7 +19,7 @@ export function notificationSettingsPage(from = 'profile') {
   }[from] || (isSupplier ? '#supplier?tab=profile' : isAdmin ? '#admin-access' : '#profile');
 
   if (isAdmin || isSupplier) {
-    const portalName = isSupplier ? 'Marketplace Supplier' : 'Admin';
+    const portalName = isSupplier ? 'Marketplace Store' : 'Admin';
     return `<main class="admin-portal-page notification-settings-page"><header class="admin-portal-header"><a class="admin-portal-brand" href="${returnTo}"><img src="Image/Icon/Logo.png" alt="Furgo" /><span>${portalName} Portal</span></a><div class="admin-portal-account"><span>${escapeHTML(profile.name || profile.supplierName || '')}</span></div></header><header class="admin-market-heading"><a href="${returnTo}" aria-label="Back to My Profile">‹</a><div><span>General</span><h1>Notification</h1></div></header>${notificationPreferencesMarkup(preferencePortal)}</main>`;
   }
 

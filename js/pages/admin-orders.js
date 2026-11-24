@@ -10,6 +10,7 @@ import { saveOrderRecords } from '../app-data-sync.js';
 import { supabase } from '../supabase.js';
 import { customerOrderStatus, statusCategory } from '../order-status.js';
 import { adminOrderProgressMarkup, adminOrderStatusControl, canMarkOrderNoShow, isOrderCurrentToday } from '../admin-order-ui.js';
+import { makeReceiptPdf } from '../receipt-pdf.js';
 
 const daycareKeys = ['furgo-demo-daycare-bookings', 'furgo-demo-pet-daycare-bookings', 'furgo-demo-daycare-orders'];
 let adminOrderLocationCleanups = [];
@@ -29,7 +30,11 @@ const getAdminStatus = customerOrderStatus;
 function allAdminOrders() {
   let profile = {};
   try { profile = JSON.parse(sessionStorage.getItem('furgo-demo-user-profile') || '{}'); } catch { profile = {}; }
-  return orderSources.flatMap((source) => source.load().map((order) => ({ ...order, serviceId: source.id, serviceLabel: source.label, storageKey: source.key, adminStatus: getAdminStatus(order) })))
+  return orderSources.flatMap((source) => {
+    const records = source.load();
+    return (Array.isArray(records) ? records : []).filter((order) => order && typeof order === 'object' && !Array.isArray(order))
+      .map((order) => ({ ...order, serviceId: source.id, serviceLabel: source.label, storageKey: source.key, adminStatus: getAdminStatus({ ...order, serviceId: source.id }) }));
+  })
     .filter((order) => ['director', 'admin'].includes(profile.role)
       || (profile.outletName && String(order.outlet || '').trim().toLowerCase() === String(profile.outletName).trim().toLowerCase()))
     .sort((a, b) => new Date(b.createdAt || b.date || 0) - new Date(a.createdAt || a.date || 0));
@@ -56,6 +61,7 @@ export function adminOrderCard({ order, serviceLabel, title, summary, details, r
 
 function receiptStatusLabel(order) {
   if (!order.receipt) return 'Not Uploaded';
+  if (order.receipt.document) return `${order.receipt.type || 'Payment'} Receipt Generated`;
   if (/deposit/i.test(order.receipt.type || order.paymentStatus || '')) return 'Deposit Receipt Uploaded';
   if (/full/i.test(order.receipt.type || order.paymentStatus || '')) return 'Full Payment Receipt Uploaded';
   return 'Deposit Receipt Uploaded';
@@ -64,7 +70,7 @@ function receiptStatusLabel(order) {
 function orderStage(order) {
   const status = customerOrderStatus(order);
   if (['completed', 'canceled', 'no-show'].includes(statusCategory(status))) return 'completed';
-  if (order.serviceId === 'marketplace') return status === 'In Progress' ? 'progressing' : 'new';
+  if (order.serviceId === 'marketplace') return ['Received Order', 'Shipped'].includes(status) ? 'progressing' : 'new';
   return order.receipt ? 'progressing' : 'new';
 }
 
@@ -74,12 +80,12 @@ function statusProgressMarkup(order) {
 
 function importantOrderRows(order) {
   const serviceDetails = order.serviceId === 'marketplace'
-    ? [order.items?.map((item) => `${item.name || item.productName || 'Product'} × ${Number(item.quantity) || 1}`).join(', '), order.address?.street, order.address?.city, order.address?.state].filter(Boolean).join(' · ')
+    ? [(Array.isArray(order.items) ? order.items : []).filter((item) => item && typeof item === 'object').map((item) => `${item.name || item.productName || 'Product'} × ${Number(item.quantity) || 1}`).join(', '), order.address?.street, order.address?.city, order.address?.state].filter(Boolean).join(' · ')
     : order.serviceId === 'hotel'
       ? [order.roomName, order.checkIn || order.startDate, order.checkOut || order.endDate, order.outlet].filter(Boolean).join(' · ')
       : [order.packageName || order.planName, order.date || order.bookingDate, order.time || order.dropoffTime, order.pickupTime && `Pick-up ${order.pickupTime}`, order.outlet].filter(Boolean).join(' · ');
   const payment = [order.paymentStatus || 'Pending Payment', order.paymentMethod].filter(Boolean).join(' · ');
-  const pets = order.petNames?.length ? order.petNames.join(' | ') : order.petName || order.pet?.name;
+  const pets = Array.isArray(order.petNames) && order.petNames.length ? order.petNames.join(' | ') : order.petName || order.pet?.name;
   return [
     ['Customer', order.customerName || order.name || order.customer?.name],
     ['Contact', order.customerPhone || order.phone || order.customer?.phone || order.customerEmail || order.email],
@@ -89,6 +95,96 @@ function importantOrderRows(order) {
     ['Receipt Status', receiptStatusLabel(order)],
     ['Total', `MYR ${Number(order.totalAmount ?? order.total ?? 0).toFixed(2)}`],
   ].filter(([, value]) => value != null && String(value).trim());
+}
+
+function receiptDateInputValue(value = new Date()) {
+  if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value)) return value;
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return receiptDateInputValue(new Date());
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+}
+
+function receiptItemLines(order) {
+  if (Array.isArray(order.items) && order.items.length) return order.items.filter((item) => item && typeof item === 'object').map((item) => {
+    const quantity = Number(item.quantity) || 1;
+    const unitPrice = Number(item.unitPrice ?? item.price ?? 0);
+    return `${item.name || item.productName || 'Product'}${item.variantLabel ? ` · ${item.variantLabel}` : ''} × ${quantity}  |  MYR ${(unitPrice * quantity).toFixed(2)}`;
+  }).join('\n');
+  const name = order.packageName || order.roomName || order.planName || order.productName || order.bookingType || order.serviceLabel || 'Service';
+  const amount = Number(order.totalAmount ?? order.total ?? 0);
+  return `${name}  |  MYR ${amount.toFixed(2)}`;
+}
+
+function normalizeMarketplaceReceiptItems(order, saved = {}) {
+  if (Array.isArray(saved.marketplaceItems) && saved.marketplaceItems.length) {
+    return saved.marketplaceItems.map((item) => ({
+      description: String(item.description || 'Product'),
+      quantity: Math.max(1, Number(item.quantity) || 1),
+      price: Math.max(0, Number(item.price) || 0),
+    }));
+  }
+  const savedLines = String(saved.items || '').split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  const parsedSaved = savedLines.map((line) => {
+    const columns = line.split('|').map((value) => value.trim());
+    if (columns.length >= 3 && Number.isFinite(Number(columns[1])) && Number.isFinite(Number(columns[2]))) {
+      return { description: columns[0] || 'Product', quantity: Math.max(1, Number(columns[1]) || 1), price: Math.max(0, Number(columns[2]) || 0) };
+    }
+    const legacy = line.match(/^(.*?)\s*[×x]\s*(\d+)\s*\|\s*MYR\s*([\d,.]+)/i);
+    return legacy ? { description: legacy[1].trim() || 'Product', quantity: Math.max(1, Number(legacy[2]) || 1), price: Math.max(0, Number(legacy[3].replace(/,/g, '')) || 0) } : null;
+  }).filter(Boolean);
+  if (parsedSaved.length) return parsedSaved;
+  return (Array.isArray(order.items) ? order.items : []).filter((item) => item && typeof item === 'object').map((item) => {
+    const quantity = Math.max(1, Number(item.quantity) || 1);
+    const unitPrice = Number(item.unitPrice ?? item.price ?? 0);
+    return {
+      description: `${item.name || item.productName || 'Product'}${item.variantLabel ? ` · ${item.variantLabel}` : ''}`,
+      quantity,
+      price: Math.max(0, unitPrice * quantity),
+    };
+  });
+}
+
+function marketplaceReceiptItemLines(order, saved) {
+  return normalizeMarketplaceReceiptItems(order, saved)
+    .map((item) => `${item.description} | ${item.quantity} | ${item.price.toFixed(2)}`).join('\n');
+}
+
+function receiptEditorMarkup(order, reference, receiptType) {
+  const saved = order.receipt?.document || {};
+  const isMarketplace = order.serviceId === 'marketplace';
+  const total = Number(order.totalAmount ?? order.total ?? saved.total ?? 0);
+  const subtotal = Number(saved.subtotal ?? order.subtotal ?? total);
+  const discount = Number(saved.discount ?? order.discountAmount ?? order.voucherDiscount ?? 0);
+  const delivery = Number(saved.delivery ?? order.deliveryFee ?? order.shippingFee ?? 0);
+  const customerName = saved.customerName ?? order.customerName ?? order.name ?? order.customer?.name ?? '';
+  const customerPhone = saved.customerPhone ?? order.customerPhone ?? order.phone ?? order.customer?.phone ?? '';
+  const customerEmail = saved.customerEmail ?? order.customerEmail ?? order.email ?? order.customer?.email ?? '';
+  const receiptTypeField = isMarketplace
+    ? '<input type="hidden" name="receiptType" value="Full Payment" />'
+    : `<label>Receipt type<select name="receiptType"><option ${receiptType === 'Deposit' ? 'selected' : ''}>Deposit</option><option ${receiptType === 'Full Payment' ? 'selected' : ''}>Full Payment</option></select></label>`;
+  const itemsLabel = isMarketplace ? 'Items (Description | Quantity | Price MYR)' : 'Items and amounts';
+  const itemsValue = isMarketplace ? marketplaceReceiptItemLines(order, saved) : saved.items || receiptItemLines(order);
+  return `<div class="admin-generated-receipt"><div class="admin-generated-receipt-toolbar"><button class="button button-primary admin-generated-receipt-open" type="button" data-open-generated-receipt data-has-generated-receipt="${order.receipt?.document ? 'true' : 'false'}">${order.receipt?.document ? 'Edit Generated Receipt' : 'Generate Receipt'}</button>${order.receipt?.document ? '<button class="button button-primary" type="button" data-download-generated-receipt>Download Receipt</button>' : ''}</div><form class="admin-generated-receipt-form" data-generated-receipt-form data-marketplace-receipt="${isMarketplace ? 'true' : 'false'}" hidden>
+    <div class="admin-generated-receipt-fields">
+      <label>Receipt number<input name="receiptNo" value="${escapeHTML(saved.receiptNo || `RCP-${reference}`)}" maxlength="80" required /></label>
+      <label>Receipt date<input name="receiptDate" type="date" value="${escapeHTML(saved.receiptDate || receiptDateInputValue())}" required /></label>
+      ${receiptTypeField}
+      <label>Customer name<input name="customerName" value="${escapeHTML(customerName)}" maxlength="140" required /></label>
+      <label>Phone<input name="customerPhone" value="${escapeHTML(customerPhone)}" maxlength="80" /></label>
+      <label class="admin-generated-receipt-wide">Email<input name="customerEmail" type="email" value="${escapeHTML(customerEmail)}" maxlength="180" /></label>
+      <label class="admin-generated-receipt-wide">Order number<input name="orderNo" value="${escapeHTML(saved.orderNo || reference)}" maxlength="100" required /></label>
+      <label class="admin-generated-receipt-wide">${itemsLabel}<textarea name="items" rows="4" maxlength="1800" required>${escapeHTML(itemsValue)}</textarea></label>
+      <label>Subtotal (MYR)<input name="subtotal" type="number" min="0" step="0.01" value="${subtotal.toFixed(2)}" required /></label>
+      <label>Discount (MYR)<input name="discount" type="number" min="0" step="0.01" value="${discount.toFixed(2)}" required /></label>
+      <label>Delivery (MYR)<input name="delivery" type="number" min="0" step="0.01" value="${delivery.toFixed(2)}" required /></label>
+      <label>Total paid (MYR)<input name="total" type="number" min="0" step="0.01" value="${total.toFixed(2)}" required /></label>
+      <label>Payment method<input name="paymentMethod" value="${escapeHTML(saved.paymentMethod ?? order.paymentMethod ?? '—')}" maxlength="100" /></label>
+      <label>Payment status<input name="paymentStatus" value="${escapeHTML(saved.paymentStatus ?? order.paymentStatus ?? 'Paid')}" maxlength="100" /></label>
+      <label class="admin-generated-receipt-wide">Issued by<input name="issuedBy" value="${escapeHTML(saved.issuedBy || 'Furgo')}" maxlength="120" /></label>
+    </div>
+    <div class="admin-generated-receipt-actions"><button class="button button-primary" type="button" data-generate-receipt>Generate Receipt</button></div>
+    <p class="admin-generated-receipt-feedback" data-generated-receipt-feedback role="status" aria-live="polite"></p>
+  </form></div>`;
 }
 
 function checkInPreviewMarkup(preview) {
@@ -126,8 +222,12 @@ function checkInPreviewMarkup(preview) {
   return `<div class="admin-checkin-preview-heading"><span>${escapeHTML(service)}</span><h2 id="checkin-preview-title">${escapeHTML(title)}</h2></div><div class="admin-checkin-preview-pet"><img src="${escapeHTML(petImage)}" alt="${escapeHTML(petName)} profile" /><div><strong>${escapeHTML(petName)}</strong><span>${escapeHTML([breed, order.petSex || order.sex || pet?.sex || pet?.gender].filter(Boolean).join(' · ') || 'Pet profile')}</span></div></div><dl class="admin-checkin-preview-details">${rows}</dl><p class="admin-checkin-preview-message">${escapeHTML(message)}</p><footer><button type="button" class="button button-light" data-cancel-checkin-preview>Cancel</button>${confirmButton}</footer>`;
 }
 
-// Admin order board: one place for new orders, service details, status updates, and customer receipts.
-export function adminOrdersPage(routeParams = new URLSearchParams()) {
+function adminCheckInScanPanelMarkup() {
+  return `<section class="admin-market-panel admin-checkin-scan-panel"><div class="admin-market-panel-heading"><div><span>Visit check-in</span><h2>Scan Customer QR Code</h2></div><p>Scan a QR code or enter its manual code to review the matching order. The order updates only after you confirm.</p></div><div class="admin-checkin-scan-controls"><button class="button button-light" type="button" data-start-checkin-scan>Start camera scan</button><video class="admin-checkin-video" data-checkin-video playsinline muted hidden></video><p class="admin-checkin-scan-feedback" data-checkin-scan-feedback role="status" aria-live="polite">Camera access requires HTTPS and permission. You can also enter the scanned code below.</p><form class="admin-checkin-manual-form" data-checkin-manual-form><label>QR code<input name="token" inputmode="text" autocomplete="off" autocapitalize="characters" maxlength="17" minlength="10" pattern="[2-9A-HJ-NP-Z]{5}-?[2-9A-HJ-NP-Z]{5}|[2-9A-HJ-NP-Z]{17}" placeholder="e.g. 7K4MR-9TX2C" required /></label><button class="button button-primary" type="submit">Review Order</button></form></div></section><dialog class="admin-checkin-preview-dialog" data-checkin-preview-dialog aria-labelledby="checkin-preview-title"></dialog>`;
+}
+
+// Furgo Order board: service details, status updates, and customer receipts.
+function renderAdminOrdersPage(routeParams = new URLSearchParams()) {
   const role = sessionStorage.getItem('furgo-demo-user-role') || 'executive';
   let profile = {};
   try { profile = JSON.parse(sessionStorage.getItem('furgo-demo-user-profile') || '{}'); } catch { profile = {}; }
@@ -135,19 +235,39 @@ export function adminOrdersPage(routeParams = new URLSearchParams()) {
   const homeHref = isDirector ? '#admin' : '#admin-access';
   const portalName = role === 'manager' ? 'Manager Portal' : role === 'executive' || role === 'staff' ? 'Executive Portal' : 'Director Portal';
   const allOrders = allAdminOrders();
-  const serviceFilters = [{ id: 'all', label: 'Current Order' }, ...orderSources.filter((source, index, sources) => sources.findIndex((item) => item.id === source.id) === index).map(({ id, label }) => ({ id, label }))];
+  const serviceFilters = [...orderSources.filter((source, index, sources) => sources.findIndex((item) => item.id === source.id) === index).map(({ id, label }) => ({ id, label }))];
   const selectedService = serviceFilters.some((item) => item.id === routeParams.get('service')) ? routeParams.get('service') : 'all';
-  const orders = allOrders.filter((order) => selectedService === 'all' ? isOrderCurrentToday(order) : order.serviceId === selectedService);
-  const stageFilters = [
-    { id: 'new', label: 'New Order' },
-    { id: 'progressing', label: 'Progressing Order' },
-    { id: 'completed', label: 'Completed Order' },
-  ];
-  const selectedStage = stageFilters.some((item) => item.id === routeParams.get('stage')) ? routeParams.get('stage') : 'new';
-  const visibleOrders = selectedService === 'all' ? orders : orders.filter((order) => orderStage(order) === selectedStage);
-  const orderSectionTitle = selectedService !== 'all' ? `${serviceFilters.find((item) => item.id === selectedService)?.label} Orders` : 'Current Order';
-  const newCount = orders.filter((order) => orderStage(order) === 'new').length;
+  const currentOrderView = selectedService === 'all' && routeParams.get('view') !== 'all';
+  const orders = selectedService === 'all' ? allOrders : allOrders.filter((order) => order.serviceId === selectedService);
+  const stageFilters = selectedService === 'marketplace'
+    ? [{ id: 'all', label: 'All Orders' }, { id: 'new', label: 'New Order' }, { id: 'received', label: 'Received Order' }, { id: 'shipped', label: 'Shipped' }, { id: 'completed', label: 'Completed' }, { id: 'cancelled', label: 'Cancelled' }]
+    : selectedService === 'all'
+      ? [{ id: 'all', label: 'All Orders' }, { id: 'new', label: 'New Order' }, { id: 'received', label: 'Received Order' }, { id: 'checked-in', label: 'Checked-In' }, { id: 'in-progress', label: 'In Progress' }, { id: 'pet-taxi', label: 'Pet Taxi' }, { id: 'completed', label: 'Completed' }, { id: 'cancelled', label: 'Cancelled' }, { id: 'no-show', label: 'No-Show' }]
+    : [{ id: 'all', label: 'All Orders' }, { id: 'new', label: 'New Order' }, { id: 'received', label: 'Received Order' }, { id: 'checked-in', label: 'Checked-In' }, { id: 'pet-taxi', label: 'Pet Taxi' }, { id: 'completed', label: 'Completed' }, { id: 'cancelled', label: 'Cancelled' }, { id: 'no-show', label: 'No-Show' }];
+  const requestedStage = routeParams.get('status') || routeParams.get('stage') || (currentOrderView ? '' : 'all');
+  const selectedStage = stageFilters.some((item) => item.id === requestedStage) ? requestedStage : 'all';
+  const matchesStage = (order) => {
+    const status = customerOrderStatus(order);
+    if (selectedStage === 'all') return true;
+    if (selectedStage === 'new') return ['New Order', 'Pending Payment'].includes(status);
+    if (selectedStage === 'received') return status === 'Received Order';
+    if (selectedStage === 'shipped') return status === 'Shipped';
+    if (selectedStage === 'checked-in') return status === 'Checked-In';
+    if (selectedStage === 'pet-taxi') return ['Pet Taxi Delivering...', 'Service Complete · Awaiting Pickup'].includes(status);
+    if (selectedStage === 'in-progress') return status === 'In Progress';
+    if (selectedStage === 'completed') return statusCategory(status) === 'completed';
+    if (selectedStage === 'cancelled') return statusCategory(status) === 'canceled';
+    if (selectedStage === 'no-show') return statusCategory(status) === 'no-show';
+    return true;
+  };
+  const visibleOrders = currentOrderView ? orders.filter(isOrderCurrentToday) : orders.filter(matchesStage);
+  const serviceName = serviceFilters.find((item) => item.id === selectedService)?.label;
+  const orderSectionTitle = `Furgo Orders (${selectedService === 'all' ? 'All' : serviceName})`;
+  const newCount = orders.filter((order) => ['New Order', 'Pending Payment'].includes(customerOrderStatus(order))).length;
+  const receivedCount = orders.filter((order) => customerOrderStatus(order) === 'Received Order').length;
+  const orderSummaryStats = `<section class="admin-market-stats admin-order-summary-stats"><article><span>New Order</span><strong>${newCount}</strong></article><article><span>Received Order</span><strong>${receivedCount}</strong></article></section>`;
   const cards = visibleOrders.map((order) => {
+    try {
     const receipt = order.receipt;
     const taxiStage = order.taxiProgress?.status || 'Scheduled';
     const isTaxiInTransit = order.status === 'Pet Taxi Delivering...' && ['Picked Up', 'Returning to Customer'].includes(taxiStage);
@@ -166,26 +286,128 @@ export function adminOrdersPage(routeParams = new URLSearchParams()) {
       : '';
     const title = order.title || (order.serviceId === 'marketplace' ? `Order ${reference}` : `${order.petName || order.pet?.name || 'Pet'} · ${order.packageName || order.roomName || order.serviceLabel}`);
     const summary = order.summary || [order.packageName || order.roomName || order.productName, order.date || order.checkIn || order.bookingDate, order.time, order.outlet || order.location].filter(Boolean).join(' · ');
-    const receiptSummary = selectedService === 'all' ? '' : `<p class="admin-order-receipt-summary">Receipt: ${escapeHTML(receiptStatusLabel(order))}</p>`;
+    const receiptSummary = currentOrderView ? '' : `<p class="admin-order-receipt-summary">Receipt: ${escapeHTML(receiptStatusLabel(order))}</p>`;
     const commonSummary = `<div class="my-order-card-top"><span class="my-order-service-label">${escapeHTML(order.serviceLabel)}</span><b class="my-order-status admin-orders-status-pill ${statusTone}">${escapeHTML(order.adminStatus)}</b></div><h2>${escapeHTML(title)}</h2><p class="my-order-summary">${escapeHTML(summary || 'Order details will appear here.')}</p>${receiptSummary}<div class="my-order-card-bottom"><small>${[reference, date ? new Date(date).toLocaleDateString('en-MY', { day: 'numeric', month: 'short', year: 'numeric' }) : ''].filter(Boolean).map(escapeHTML).join(' · ')}</small><strong>MYR ${Number(order.totalAmount || order.total || 0).toFixed(2)}</strong></div>`;
     const dataAttributes = `data-order-key="${escapeHTML(order.storageKey)}" data-order-id="${escapeHTML(order.id)}"`;
-    if (selectedService === 'all') return `<article class="my-order-card admin-orders-card admin-current-order-card" ${dataAttributes}><div class="my-order-card-summary">${commonSummary}</div>${adminOrderStatusControl(order)}</article>`;
+    if (currentOrderView) {
+      const target = `#admin-orders?service=${encodeURIComponent(order.serviceId)}&status=all&order=${encodeURIComponent(order.id)}&key=${encodeURIComponent(order.storageKey)}`;
+      return `<a class="my-order-card admin-orders-card admin-current-order-card" href="${target}" ${dataAttributes}><div class="my-order-card-summary">${commonSummary}<span class="my-order-expand-hint">Open Order Details <span aria-hidden="true">→</span></span></div></a>`;
+    }
     const paymentStatus = order.paymentStatus || 'Pending Payment';
-    const receiptType = /full/i.test(order.receipt?.type || '') ? 'Full Payment' : 'Deposit';
+    const receiptType = order.serviceId === 'marketplace' || /full/i.test(order.receipt?.type || '') ? 'Full Payment' : 'Deposit';
     const importantRows = importantOrderRows(order).map(([label, value]) => `<div><dt>${escapeHTML(label)}</dt><dd>${escapeHTML(value)}</dd></div>`).join('');
-    const uploadSection = `<section class="admin-order-receipt-section"><h3>Upload Receipt</h3><div class="admin-order-receipt-controls"><label>Receipt Type<select name="receiptType"><option ${receiptType === 'Deposit' ? 'selected' : ''}>Deposit</option><option ${receiptType === 'Full Payment' ? 'selected' : ''}>Full Payment</option></select></label><label class="admin-orders-upload">Choose Receipt<input type="file" accept="image/png,image/jpeg,image/webp,application/pdf" data-admin-order-receipt="${escapeHTML(order.storageKey)}|${escapeHTML(order.id)}" /></label></div><p class="admin-order-payment-status">${escapeHTML(paymentStatus)}</p><p class="admin-order-receipt-status">${escapeHTML(receiptStatusLabel(order))}</p>${receipt ? `<a class="admin-order-receipt-link" href="${escapeHTML(receipt.data)}" target="_blank" rel="noopener" download="${escapeHTML(receipt.name || 'receipt')}">View uploaded receipt: ${escapeHTML(receipt.name || 'Receipt')}</a><button class="admin-orders-delete-receipt" type="button" data-delete-order-receipt>Delete Receipt</button>` : ''}</section>`;
+    const savedReceiptLink = receipt?.data
+      ? `<a class="admin-order-receipt-link" href="${escapeHTML(receipt.data)}" target="_blank" rel="noopener" download="${escapeHTML(receipt.name || 'receipt')}">View uploaded receipt: ${escapeHTML(receipt.name || 'Receipt')}</a>`
+      : receipt?.document ? '<span class="admin-order-receipt-link">Receipt details ready for customer download</span>' : '';
+    const uploadSection = `<section class="admin-order-receipt-section"><h3>Receipt</h3>${receiptEditorMarkup(order, reference, receiptType)}<p class="admin-order-payment-status">${escapeHTML(paymentStatus)}</p><p class="admin-order-receipt-status">${escapeHTML(receiptStatusLabel(order))}</p>${receipt ? `<div class="admin-order-receipt-file-actions">${savedReceiptLink}<button class="admin-orders-delete-receipt" type="button" data-delete-order-receipt>Delete Receipt</button></div>` : ''}</section>`;
     const statusSection = `<section class="admin-order-status-section"><h3>Order Status</h3>${statusProgressMarkup(order)}${adminOrderStatusControl(order)}</section>`;
-    return `<details class="my-order-card admin-orders-card" ${dataAttributes} data-order-stage="${orderStage(order)}"><summary class="my-order-card-summary">${commonSummary}<span class="my-order-expand-hint">View Order Details <span aria-hidden="true">⌄</span></span></summary><div class="my-order-expanded admin-orders-detail">${uploadSection}${statusSection}${taxiActionMarkup}<dl class="admin-order-important-details">${importantRows}</dl>${taxiTracking}</div></details>`;
+    const openOrder = routeParams.get('order') === String(order.id) && routeParams.get('key') === order.storageKey;
+    return `<details class="my-order-card admin-orders-card" ${dataAttributes} data-order-stage="${orderStage(order)}"${openOrder ? ' open' : ''}><summary class="my-order-card-summary">${commonSummary}<span class="my-order-expand-hint">View Order Details <span aria-hidden="true">⌄</span></span></summary><div class="my-order-expanded admin-orders-detail">${uploadSection}${statusSection}${taxiActionMarkup}<dl class="admin-order-important-details">${importantRows}</dl>${taxiTracking}</div></details>`;
+    } catch (error) {
+      console.error('Admin order could not be rendered:', order?.id || order?.reference || 'unknown order', error);
+      return `<article class="my-order-card admin-orders-card admin-order-render-error"><p>This order could not be displayed. Refresh the page or contact support if it continues.</p><strong>${escapeHTML(order?.reference || order?.id || 'Order')}</strong></article>`;
+    }
   }).join('');
-  const serviceTabs = serviceFilters.filter((item) => item.id !== 'marketplace').map((item) => `<a class="my-orders-tab ${selectedService === item.id ? 'is-active' : ''}" href="#admin-orders${item.id === 'all' ? '' : `?service=${encodeURIComponent(item.id)}`}" ${selectedService === item.id ? 'aria-current="page"' : ''}>${escapeHTML(item.label)}<span>${item.id === 'all' ? orders.length : allOrders.filter((order) => order.serviceId === item.id).length}</span></a>`).join('');
-  const stageTabs = selectedService === 'all' ? '' : `<nav class="my-orders-status-tabs admin-order-stage-tabs" aria-label="Filter orders by status">${stageFilters.map((item) => `<a class="my-orders-status-tab ${selectedStage === item.id ? 'is-active' : ''}" href="#admin-orders?service=${encodeURIComponent(selectedService)}&stage=${encodeURIComponent(item.id)}" ${selectedStage === item.id ? 'aria-current="page"' : ''}>${escapeHTML(item.label)}<span>${orders.filter((order) => orderStage(order) === item.id).length}</span></a>`).join('')}</nav>`;
-  return `<main class="admin-portal-page admin-orders-page"><header class="admin-portal-header"><a class="admin-portal-brand" href="${homeHref}"><img src="Image/Icon/Logo.png" alt="Furgo" /><span>${portalName}</span></a><div class="admin-portal-account"><span>${escapeHTML(profile.name || '')}${profile.outletShortform ? ` · ${escapeHTML(profile.outletShortform)}` : ''}</span><a href="${homeHref}">${isDirector ? 'Dashboard' : 'Admin'}</a><a class="admin-customer-portal-link" href="#home?portal=customer">Open Customer Portal</a></div></header><header class="admin-market-heading"><a href="#admin" aria-label="Admin Home">‹</a><div><span>Customer operations${!isDirector && profile.outletShortform ? ` · ${escapeHTML(profile.outletShortform)}` : ''}</span><h1>${selectedService === 'all' ? 'Current Order' : `${escapeHTML(serviceFilters.find((item) => item.id === selectedService)?.label)} Orders`}</h1></div></header><nav class="my-orders-tabs admin-order-service-tabs" aria-label="Open a service order page">${serviceTabs}</nav>${stageTabs}<section class="admin-market-stats"><article><span>New orders</span><strong>${newCount}</strong></article><article><span>${selectedService === 'all' ? 'Current Orders' : 'All Orders'}</span><strong>${orders.length}</strong></article><article><span>Receipts uploaded</span><strong>${orders.filter((order) => order.receipt).length}</strong></article></section><section class="admin-market-panel admin-checkin-scan-panel"><div class="admin-market-panel-heading"><div><span>Visit check-in</span><h2>Scan Customer QR Code</h2></div><p>Scan a QR code or enter its manual code to review the matching order. The order updates only after you confirm.</p></div><div class="admin-checkin-scan-controls"><button class="button button-light" type="button" data-start-checkin-scan>Start camera scan</button><video class="admin-checkin-video" data-checkin-video playsinline muted hidden></video><p class="admin-checkin-scan-feedback" data-checkin-scan-feedback role="status" aria-live="polite">Camera access requires HTTPS and permission. You can also enter the scanned code below.</p><form class="admin-checkin-manual-form" data-checkin-manual-form><label>QR code<input name="token" inputmode="text" autocomplete="off" autocapitalize="characters" maxlength="17" minlength="10" pattern="[2-9A-HJ-NP-Z]{5}-?[2-9A-HJ-NP-Z]{5}|[2-9A-HJ-NP-Z]{17}" placeholder="e.g. 7K4MR-9TX2C" required /></label><button class="button button-primary" type="submit">Review Order</button></form></div></section><section class="admin-market-panel"><div class="admin-market-panel-heading"><div><span>Order management</span><h2>${escapeHTML(orderSectionTitle)}</h2></div><p>${!isDirector && !profile.outletName ? 'No outlet is assigned to this account yet. Ask a Director to assign one before managing orders.' : selectedService === 'all' ? 'Current order overview. Choose a service above to manage receipts and review full order details.' : 'Upload the outlet receipt, review the order status timeline, and check key customer and booking information.'}</p></div><div class="admin-orders-list">${visibleOrders.length ? cards : '<p class="admin-market-empty">No orders in this section.</p>'}</div></section><dialog class="admin-checkin-preview-dialog" data-checkin-preview-dialog aria-labelledby="checkin-preview-title"></dialog></main>`;
+  const serviceTabs = `<a class="my-orders-tab ${selectedService === 'all' && !currentOrderView ? 'is-active' : ''}" href="#admin-orders?view=all" ${selectedService === 'all' && !currentOrderView ? 'aria-current="page"' : ''}>All Orders</a>${serviceFilters.map((item) => `<a class="my-orders-tab ${selectedService === item.id && !currentOrderView ? 'is-active' : ''}" href="#admin-orders?service=${encodeURIComponent(item.id)}" ${selectedService === item.id && !currentOrderView ? 'aria-current="page"' : ''}>${escapeHTML(item.label)}</a>`).join('')}`;
+  const stageTabs = currentOrderView ? '' : `<nav class="my-orders-status-tabs admin-order-stage-tabs" aria-label="Filter orders by status">${stageFilters.map((item) => `<a class="my-orders-status-tab ${selectedStage === item.id ? 'is-active' : ''}" href="#admin-orders?service=${encodeURIComponent(selectedService)}${selectedService === 'all' ? '&view=all' : ''}&status=${encodeURIComponent(item.id)}" ${selectedStage === item.id ? 'aria-current="page"' : ''}>${escapeHTML(item.label)}<span>${orders.filter((order) => {
+    if (item.id === 'all') return true;
+    const status = customerOrderStatus(order);
+    if (item.id === 'new') return ['New Order', 'Pending Payment'].includes(status);
+    if (item.id === 'received') return status === 'Received Order';
+    if (item.id === 'shipped') return status === 'Shipped';
+    if (item.id === 'checked-in') return status === 'Checked-In';
+    if (item.id === 'pet-taxi') return ['Pet Taxi Delivering...', 'Service Complete · Awaiting Pickup'].includes(status);
+    if (item.id === 'in-progress') return status === 'In Progress';
+    if (item.id === 'completed') return statusCategory(status) === 'completed';
+    if (item.id === 'cancelled') return statusCategory(status) === 'canceled';
+    return statusCategory(status) === 'no-show';
+  }).length}</span></a>`).join('')}</nav>`;
+  return `<main class="admin-portal-page admin-orders-page"><header class="admin-portal-header"><a class="admin-portal-brand" href="${homeHref}"><img src="Image/Icon/Logo.png" alt="Furgo" /><span>${portalName}</span></a><div class="admin-portal-account"><span>${escapeHTML(profile.name || '')}${profile.outletShortform ? ` · ${escapeHTML(profile.outletShortform)}` : ''}</span><a href="${homeHref}">${isDirector ? 'Dashboard' : 'Admin'}</a><a class="admin-customer-portal-link" href="#home?portal=customer">Open Customer Portal</a></div></header><header class="admin-market-heading"><a href="#admin" aria-label="Admin Home">‹</a><div><span>Customer operations${!isDirector && profile.outletShortform ? ` · ${escapeHTML(profile.outletShortform)}` : ''}</span><h1>${escapeHTML(orderSectionTitle)}</h1></div></header>${currentOrderView ? '<p class="admin-order-subtitle">Received orders scheduled for today and orders currently checked in.</p>' : ''}<nav class="my-orders-tabs admin-order-service-tabs" aria-label="Filter all orders by service">${serviceTabs}</nav>${stageTabs}${orderSummaryStats}<section class="admin-market-panel"><div class="admin-market-panel-heading"><div><span>Order management</span><h2>${escapeHTML(orderSectionTitle)}</h2></div><p>${!isDirector && !profile.outletName ? 'No outlet is assigned to this account yet. Ask a Director to assign one before managing orders.' : currentOrderView ? 'Showing Received Orders scheduled for today and all orders currently Checked-In. Select an order to open its full details.' : 'Review receipts, update order status, and view customer and booking details.'}</p></div><div class="admin-orders-list">${visibleOrders.length ? cards : '<p class="admin-market-empty">No orders in this section.</p>'}</div></section></main>`;
 }
+
+export function adminOrdersPage(routeParams = new URLSearchParams()) {
+  try {
+    return renderAdminOrdersPage(routeParams);
+  } catch (error) {
+    console.error('Admin Orders failed to render:', error);
+    return `<main class="admin-portal-page admin-orders-page"><section class="admin-market-panel"><h1>Orders could not be loaded</h1><p>${escapeHTML(error?.message || 'Unexpected page error')}</p><a class="button button-primary" href="#admin-orders?service=all&view=all">Reload Orders</a></section></main>`;
+  }
+}
+
+export function adminCurrentOrderPage(routeParams = new URLSearchParams()) {
+  const role = sessionStorage.getItem('furgo-demo-user-role') || 'executive';
+  let profile = {};
+  try { profile = JSON.parse(sessionStorage.getItem('furgo-demo-user-profile') || '{}'); } catch { profile = {}; }
+  const isDirector = ['admin', 'director'].includes(role);
+  const homeHref = isDirector ? '#admin' : '#admin-access';
+  const portalName = role === 'manager' ? 'Manager Portal' : role === 'executive' || role === 'staff' ? 'Executive Portal' : 'Director Portal';
+  const selectedTab = routeParams.get('tab') === 'checked-in' ? 'checked-in' : 'today';
+  const orders = allAdminOrders();
+  const todaysReceivedOrders = orders.filter((order) => order.adminStatus === 'Received Order' && isOrderCurrentToday(order));
+  const checkedInOrders = orders.filter((order) => order.adminStatus === 'Checked-In');
+  const visibleOrders = selectedTab === 'checked-in' ? checkedInOrders : todaysReceivedOrders;
+  const orderCards = visibleOrders.map((order) => {
+    const reference = order.reference || order.id || 'Order';
+    const title = order.title || (order.serviceId === 'marketplace'
+      ? `Order ${reference}`
+      : `${order.petName || order.pet?.name || 'Pet'} · ${order.packageName || order.roomName || order.serviceLabel}`);
+    const summary = order.summary || [order.packageName || order.roomName || order.productName || order.itemName,
+      order.date || order.checkIn || order.bookingDate, order.time || order.slot, order.outlet || order.location].filter(Boolean).join(' · ');
+    const scheduledDate = order.serviceId === 'hotel'
+      ? order.checkIn || order.startDate || order.date || order.bookingDate
+      : order.date || order.visitDate || order.bookingDate || order.checkIn;
+    const createdDate = order.createdAt || order.created_at || scheduledDate || '';
+    const dateLabel = createdDate && !Number.isNaN(new Date(createdDate).getTime())
+      ? new Date(createdDate).toLocaleDateString('en-MY', { day: 'numeric', month: 'short', year: 'numeric' })
+      : '';
+    const amount = Number(order.totalAmount || order.total || order.amount || 0);
+    const target = `#admin-orders?service=${encodeURIComponent(order.serviceId)}&view=all&status=all&order=${encodeURIComponent(order.id)}&key=${encodeURIComponent(order.storageKey)}`;
+    const statusTone = statusCategory(order.adminStatus) === 'completed' ? 'is-complete' : '';
+    return `<a class="my-order-card admin-orders-card admin-current-order-card" href="${target}"><div class="my-order-card-summary"><div class="my-order-card-top"><span class="my-order-service-label">${escapeHTML(order.serviceLabel)}</span><b class="my-order-status admin-orders-status-pill ${statusTone}">${escapeHTML(order.adminStatus)}</b></div><h2>${escapeHTML(title)}</h2><p class="my-order-summary">${escapeHTML(summary || 'Order details will appear here.')}</p><div class="my-order-card-bottom"><small>${[reference, dateLabel].filter(Boolean).map(escapeHTML).join(' · ')}</small><strong>MYR ${Number.isFinite(amount) ? amount.toFixed(2) : '0.00'}</strong></div><span class="my-order-expand-hint">Open in Furgo Order <span aria-hidden="true">→</span></span></div></a>`;
+  }).join('');
+  const tabs = `<nav class="my-orders-status-tabs admin-current-order-tabs" aria-label="Current order lists"><a class="my-orders-status-tab ${selectedTab === 'today' ? 'is-active' : ''}" href="#admin-current-order?tab=today" ${selectedTab === 'today' ? 'aria-current="page"' : ''}>Today’s Order <span>${todaysReceivedOrders.length}</span></a><a class="my-orders-status-tab ${selectedTab === 'checked-in' ? 'is-active' : ''}" href="#admin-current-order?tab=checked-in" ${selectedTab === 'checked-in' ? 'aria-current="page"' : ''}>Checked-In Order <span>${checkedInOrders.length}</span></a></nav>`;
+  const emptyMessage = selectedTab === 'today' ? 'No received orders are scheduled for today.' : 'No orders are currently checked in.';
+  return `<main class="admin-portal-page admin-orders-page admin-current-order-page"><header class="admin-portal-header"><a class="admin-portal-brand" href="${homeHref}"><img src="Image/Icon/Logo.png" alt="Furgo" /><span>${portalName}</span></a><div class="admin-portal-account"><span>${escapeHTML(profile.name || '')}${profile.outletShortform ? ` · ${escapeHTML(profile.outletShortform)}` : ''}</span><a href="${homeHref}">${isDirector ? 'Dashboard' : 'Admin'}</a><a class="admin-customer-portal-link" href="#home?portal=customer">Open Customer Portal</a></div></header><header class="admin-market-heading"><a href="${homeHref}" aria-label="Admin Home">‹</a><div><span>Customer operations</span><h1>Current Order</h1></div></header>${adminCheckInScanPanelMarkup()}${tabs}<section class="admin-market-panel admin-current-order-list-panel"><div class="admin-market-panel-heading"><div><span>${selectedTab === 'today' ? 'Today' : 'Checked-In'}</span><h2>${selectedTab === 'today' ? 'Today’s Order' : 'Checked-In Order'}</h2></div><p>Select an order to open its details in Furgo Order.</p></div><div class="admin-orders-list">${orderCards || `<p class="admin-market-empty">${emptyMessage}</p>`}</div></section></main>`;
+}
+
+function readGeneratedReceipt(form) {
+  const fields = form.elements;
+  const isMarketplace = form.dataset.marketplaceReceipt === 'true';
+  const items = fields.items.value.trim();
+  const marketplaceItems = isMarketplace ? items.split(/\r?\n/).map((line) => {
+    const [description = '', quantity = '', price = ''] = line.split('|').map((value) => value.trim());
+    return { description, quantity: Math.max(1, Number(quantity) || 1), price: Math.max(0, Number(price) || 0) };
+  }).filter((item) => item.description) : [];
+  return {
+    receiptNo: fields.receiptNo.value.trim(),
+    receiptDate: fields.receiptDate.value,
+    receiptType: isMarketplace ? 'Full Payment' : fields.receiptType.value,
+    isMarketplace,
+    customerName: fields.customerName.value.trim(),
+    customerPhone: fields.customerPhone.value.trim(),
+    customerEmail: fields.customerEmail.value.trim(),
+    orderNo: fields.orderNo.value.trim(),
+    items,
+    marketplaceItems,
+    subtotal: Number(fields.subtotal.value),
+    discount: Number(fields.discount.value),
+    delivery: Number(fields.delivery.value),
+    total: Number(fields.total.value),
+    paymentMethod: fields.paymentMethod.value.trim(),
+    paymentStatus: fields.paymentStatus.value.trim(),
+    issuedBy: fields.issuedBy.value.trim(),
+  };
+}
+
 
 // Saves admin status changes and receipt files into the same storage records read by My Orders.
 export function setupAdminOrders() {
   adminOrderLocationCleanups.forEach((cleanup) => cleanup());
   adminOrderLocationCleanups = [...document.querySelectorAll('[data-live-driver-location]')].map(mountDriverLocation);
+  const openedOrder = document.querySelector('.admin-orders-card[open]');
+  if (openedOrder && new URLSearchParams(window.location.hash.split('?')[1] || '').has('order')) {
+    window.setTimeout(() => openedOrder.scrollIntoView({ behavior: 'smooth', block: 'start' }), 0);
+  }
   const scanStatus = document.querySelector('[data-checkin-scan-feedback]');
   const video = document.querySelector('[data-checkin-video]');
   const startScanButton = document.querySelector('[data-start-checkin-scan]');
@@ -424,31 +646,75 @@ export function setupAdminOrders() {
     card?.querySelector('[data-admin-order-receipt]')?.click();
   }));
 
-  document.querySelectorAll('[data-admin-order-receipt]').forEach((input) => input.addEventListener('change', async () => {
-    const file = input.files?.[0];
-    if (!file) return;
-    if (file.size > 1.5 * 1024 * 1024 || (!file.type.startsWith('image/') && file.type !== 'application/pdf')) { window.alert('Choose a receipt image or PDF no larger than 1.5 MB.'); input.value = ''; return; }
-    const [key, id] = input.dataset.adminOrderReceipt.split('|');
-    const data = await new Promise((resolve) => { const reader = new FileReader(); reader.onload = () => resolve(reader.result); reader.onerror = () => resolve(null); reader.readAsDataURL(file); });
+  document.querySelectorAll('[data-open-generated-receipt]').forEach((button) => button.addEventListener('click', () => {
+    const form = button.closest('.admin-generated-receipt')?.querySelector('[data-generated-receipt-form]');
+    if (!form) return;
+    form.hidden = !form.hidden;
+    button.textContent = form.hidden ? (button.dataset.hasGeneratedReceipt === 'true' ? 'Edit Generated Receipt' : 'Generate Receipt') : 'Close Receipt Editor';
+  }));
+
+  document.querySelectorAll('[data-download-generated-receipt]').forEach((button) => button.addEventListener('click', async () => {
+    const card = button.closest('.admin-orders-card');
+    const order = readOrders(card?.dataset.orderKey).find((item) => String(item.id) === String(card?.dataset.orderId));
+    if (!order?.receipt?.document) {
+      window.alert('Receipt details are not available yet.');
+      return;
+    }
+    button.disabled = true;
+    try {
+      const pdf = await makeReceiptPdf(order.receipt.document);
+      const url = URL.createObjectURL(new Blob([pdf], { type: 'application/pdf' }));
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = order.receipt.name || 'furgo-receipt.pdf';
+      link.click();
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (error) {
+      window.alert(error.message || 'The receipt could not be generated. Please try again.');
+    } finally {
+      button.disabled = false;
+    }
+  }));
+
+  document.querySelectorAll('[data-generate-receipt]').forEach((button) => button.addEventListener('click', async () => {
+    const form = button.closest('[data-generated-receipt-form]');
+    const card = button.closest('.admin-orders-card');
+    if (!form?.reportValidity() || !card) return;
+    const receiptDocument = readGeneratedReceipt(form);
+    const key = card.dataset.orderKey;
+    const id = card.dataset.orderId;
     const orders = readOrders(key);
     const order = orders.find((item) => String(item.id) === id);
-    if (!order || !data) { window.alert('The receipt could not be read. Please choose it again.'); return; }
-    const previousStatus = order.receipt?.previousStatus || getAdminStatus(order);
+    if (!order) { window.alert('The order could not be found. Refresh and try again.'); return; }
+    const previousStatus = order.receipt?.previousStatus || getAdminStatus({ ...order, serviceId: key === marketplaceOrdersKey ? 'marketplace' : order.serviceId });
     const previousPaymentStatus = order.receipt?.previousPaymentStatus ?? order.paymentStatus;
     const uploadedAt = new Date().toISOString();
-    const receiptType = input.closest('.admin-order-receipt-section')?.querySelector('[name="receiptType"]')?.value || '';
-    order.receipt = { name: file.name, data, type: receiptType, uploadedAt, previousStatus, previousPaymentStatus };
+    order.receipt = {
+      name: `${receiptDocument.receiptNo.replace(/[^a-z0-9-_]+/gi, '-') || 'furgo-receipt'}.pdf`,
+      type: receiptDocument.receiptType,
+      uploadedAt,
+      previousStatus,
+      previousPaymentStatus,
+      document: receiptDocument,
+    };
     const taxiTripStarted = Boolean(order.includeTaxi || order.taxi?.pickup || order.taxi?.dropoff)
       && !['Scheduled', 'Assigned'].includes(order.taxiProgress?.status || 'Scheduled');
-    if (key !== marketplaceOrdersKey && !taxiTripStarted && !['Checked-In', 'Completed', 'Cancelled'].includes(previousStatus)) {
+    if ((key === marketplaceOrdersKey || !taxiTripStarted) && !['Checked-In', 'Completed', 'Cancelled', 'Shipped'].includes(previousStatus)) {
       order.status = 'Received Order';
       order.adminStatus = 'Received Order';
-      order.statusHistory = [...(order.statusHistory || []), { status: 'Received Order', previousStatus, changedAt: order.receipt.uploadedAt, changedBy: 'Admin receipt upload' }];
+      order.statusHistory = [...(order.statusHistory || []), { status: 'Received Order', previousStatus, changedAt: uploadedAt, changedBy: 'Generated receipt' }];
     }
-    try { await saveOrderRecords(key, order, orders); }
-    catch (error) { window.alert(`The receipt could not be saved or synced: ${error.message}`); return; }
-    void recordAdminAction('receipt_uploaded', 'order', order.reference || id);
-    window.dispatchEvent(new Event('hashchange'));
+    button.disabled = true;
+    const feedback = form.querySelector('[data-generated-receipt-feedback]');
+    if (feedback) feedback.textContent = 'Saving receipt details…';
+    try {
+      await saveOrderRecords(key, order, orders);
+      void recordAdminAction('receipt_generated', 'order', order.reference || id, { generated: true, receiptNo: receiptDocument.receiptNo });
+      window.dispatchEvent(new Event('hashchange'));
+    } catch (error) {
+      button.disabled = false;
+      if (feedback) feedback.textContent = `Receipt details could not be saved: ${error.message || 'Please try again.'}`;
+    }
   }));
 
   document.querySelectorAll('[data-delete-order-receipt]').forEach((button) => button.addEventListener('click', async () => {

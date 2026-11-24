@@ -18,9 +18,23 @@ export function customerOrderStatus(order = {}) {
   if (/cancel/.test(normalized)) return 'Cancelled';
   if (/service complete/.test(normalized)) return 'Service Complete · Awaiting Pickup';
   if (/pet taxi|returning to customer|picked up/.test(normalized)) return 'Pet Taxi Delivering...';
+  if (order.serviceId === 'marketplace') {
+    const shipments = [order.supplierShipment, ...Object.values(order.supplierShipments || {})]
+      .filter((shipment) => shipment && typeof shipment === 'object')
+      .map((shipment) => String(shipment.status || '').trim().toLowerCase());
+    const deliveredShipments = shipments.filter((shipment) => shipment === 'delivered');
+    const shippedShipments = shipments.filter((shipment) => ['shipped', 'delivered'].includes(shipment));
+    if (deliveredShipments.length && deliveredShipments.length === shipments.length) return 'Delivered';
+    if (shippedShipments.length) return 'Shipped';
+    if (/complete|delivered|checked out/.test(normalized)) return 'Completed';
+    if (/^shipped$/.test(normalized)) return 'Shipped';
+    if (/^received order$/.test(normalized) || order.receipt || order.adminReceiptUploadedAt) return 'Received Order';
+    // Older Marketplace orders used “In Progress” after Furgo uploaded a receipt.
+    if (/^in progress$/.test(normalized)) return 'Received Order';
+  }
   if (/complete|delivered|checked out/.test(normalized)) return 'Completed';
   if (/checked in/.test(normalized)) return 'Checked-In';
-  if (/shipped|in progress/.test(normalized)) return order.serviceId === 'marketplace' ? 'In Progress' : 'Received Order';
+  if (/shipped|in progress/.test(normalized)) return 'Received Order';
   if (/received order/.test(normalized)) return 'Received Order';
   if (/^new order$/.test(normalized)) return 'New Order';
   if (/^pending payment$/.test(normalized)) return 'Pending Payment';
