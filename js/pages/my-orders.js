@@ -331,6 +331,20 @@ function orderPetCards(order) {
   }).join('')}</div>`;
 }
 
+function formatDeliveryAddress(address) {
+  if (typeof address === 'string') return address;
+  if (!address || typeof address !== 'object' || Array.isArray(address)) return '';
+
+  return ['name', 'phone', 'street', 'postcode', 'city', 'state']
+    .map((field) => {
+      const value = address[field];
+      if (typeof value === 'string') return value.trim();
+      return Number.isFinite(value) ? String(value) : '';
+    })
+    .filter(Boolean)
+    .join(', ');
+}
+
 function orderDetailRows(order) {
   const appointment = order.serviceId === 'hotel'
     ? [order.roomName, order.checkIn || order.startDate, order.checkOut || order.endDate, order.outlet].filter(Boolean).join(' · ')
@@ -348,7 +362,8 @@ function orderDetailRows(order) {
     ['Payment', payment],
     ['Refund Status', order.refundStatus],
     ['Total Paid', Number.isFinite(total) ? `MYR ${total.toFixed(2)}` : ''],
-    ['Delivery Address', order.shippingAddress || order.deliveryAddress || order.address],
+    ['Delivery Address', [order.shippingAddress, order.deliveryAddress, order.address]
+      .map(formatDeliveryAddress).find((address) => address.trim())],
     ['Order Notes', order.notes || order.specialRequests],
   ].filter(([, value]) => value != null && String(value).trim());
   return rows.map(([label, value]) => `<div><dt>${escapeHTML(label)}</dt><dd>${escapeHTML(value)}</dd></div>`).join('');

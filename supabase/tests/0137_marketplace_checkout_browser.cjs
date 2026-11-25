@@ -77,7 +77,7 @@ const stub = `
 const fixture = `<!doctype html><html><body><div id="app"></div><script type="module">
   import { marketplaceCheckoutPage } from '/js/pages/cart.js';
   import { setupMarketplaceCheckout, readCheckoutAttempt } from '/js/marketplace-checkout.js';
-  import { loadCloudAppData } from '/js/app-data-sync.js';
+  import { cacheSyncedRecords, loadCloudAppData } from '/js/app-data-sync.js';
   import { loadMarketplaceOrders } from '/js/pages/marketplace-data.js';
   window.testOwner = new URLSearchParams(location.search).get('owner') || '${owner}';
   window.confirmations = [];
@@ -95,6 +95,11 @@ const fixture = `<!doctype html><html><body><div id="app"></div><script type="mo
   await loadCloudAppData(window.testOwner, 'customer');
   window.testAttempt = () => readCheckoutAttempt(window.testOwner);
   window.testOrders = () => loadMarketplaceOrders({ archiveOwner: window.testOwner });
+  window.renderTestMyOrders = async (orders) => {
+    const { myOrdersPage } = await import('/js/pages/my-orders.js');
+    cacheSyncedRecords('${historyKey}', orders, { notify: false });
+    document.querySelector('#app').innerHTML = myOrdersPage();
+  };
   document.querySelector('#app').innerHTML = marketplaceCheckoutPage();
   setupMarketplaceCheckout();
   window.ready = true;
@@ -409,4 +414,68 @@ test('a failed local seal preserves the original and blocks startup', async (t) 
   assert.equal(state.blockedAppImports, 0);
   assert.equal(state.envelopes.length, 0);
   assert.ok((await page.evaluate((key) => localStorage.getItem(key), historyKey)).includes('offline-only-dummy'));
+});
+
+async function renderMyOrdersAddress(t, addressFields) {
+  const { open } = await harness(t);
+  const page = await open();
+  await page.evaluate(({ owner, addressFields }) => window.renderTestMyOrders([{
+    id: 'address-fixture', userId: owner, reference: 'FG-ADDRESS', total: 12,
+    status: 'Pending Payment Verification', paymentStatus: 'Pending Payment Verification',
+    items: [], ...addressFields,
+  }]), { owner, addressFields });
+  const order = page.locator('.my-order-card').filter({ has: page.getByText('Order No: FG-ADDRESS', { exact: true }) });
+  const details = order.locator('.marketplace-order-info .my-order-detail-list');
+  assert.equal(await details.count(), 1, 'rendered the order in Customer My Orders');
+  const label = details.getByText('Delivery Address', { exact: true });
+  return { label, value: label.locator('xpath=following-sibling::dd[1]') };
+}
+
+test('My Orders formats all six structured address fields and escapes their values', async (t) => {
+  const { value } = await renderMyOrdersAddress(t, { address: { ...address, name: 'Test <strong>Buyer</strong>' } });
+  assert.equal(await value.textContent(), 'Test <strong>Buyer</strong>, 0123456789, Test Road, 50000, KL, KL');
+  assert.equal(await value.locator('strong').count(), 0);
+});
+
+test('My Orders preserves legacy address text and its field precedence', async (t) => {
+  const legacy = '12 <Old Road>\nKuala Lumpur';
+  const { value } = await renderMyOrdersAddress(t, { shippingAddress: legacy, address });
+  assert.equal(await value.textContent(), legacy);
+  assert.equal(await value.locator('*').count(), 0);
+});
+
+test('My Orders skips missing address fields and falls back past empty address values', async (t) => {
+  const { value } = await renderMyOrdersAddress(t, {
+    shippingAddress: {}, deliveryAddress: ' ', address: { street: ' Test Road ', postcode: 50000, city: null, phone: {} },
+  });
+  assert.equal(await value.textContent(), 'Test Road, 50000');
+});
+
+test('My Orders omits the delivery row when no address is available', async (t) => {
+  const { label } = await renderMyOrdersAddress(t, { address: { name: '', street: null, state: ' ' } });
+  assert.equal(await label.count(), 0);
+});
+
+test('checkout keeps an explicit bank transfer selection after an unavailable voucher', async (t) => {
+  const { open, state } = await harness(t);
+  const page = await open();
+  assert.equal(await page.locator('[name="payment"]:checked').inputValue(), 'gateway');
+
+  await fill(page, 'bank-transfer');
+  await page.locator('[data-market-coupon]').fill('invalid');
+  await page.locator('[data-apply-coupon]').click();
+  await page.locator('[data-coupon-feedback]').getByText(/unavailable/).waitFor();
+  await page.locator('[data-market-coupon]').fill('');
+  assert.equal(await page.locator('[name="payment"]:checked').inputValue(), 'bank-transfer');
+
+  state.interrupt = 'before';
+  await submit(page).click();
+  await page.locator('.form-feedback').getByText(/could not confirm/).waitFor();
+  assert.equal(state.creates.length, 1);
+  const { p_checkout: checkout, p_expected_total_cents: confirmedTotal } = state.creates[0];
+  assert.equal(checkout.payment, 'bank-transfer');
+  assert.equal(checkout.transferSlip.name, 'payment.pdf');
+  assert.deepEqual(checkout.items, [cart[0]]);
+  assert.deepEqual(Object.keys(checkout).sort(), ['address', 'items', 'payment', 'transferSlip', 'voucherCode']);
+  assert.equal(confirmedTotal, state.cents);
 });
