@@ -19,7 +19,8 @@ const sellerSalesToday = () => {
   const { year, month, day } = Object.fromEntries(sellerSalesDateFormat.formatToParts(new Date()).map(({ type, value }) => [type, value]));
   return new Date(Number(year), Number(month) - 1, Number(day));
 };
-const eligibleForMarketplaceFees = (sale) => !['Cancelled', 'Returned', 'Refunded'].includes(sale.product_sale_status);
+const activeSale = (sale) => !['Cancelled', 'Returned', 'Refunded'].includes(sale.product_sale_status);
+const eligibleForMarketplaceFees = (sale) => !sale.demo_payment && activeSale(sale);
 const totalMarketplaceFees = (sales) => sales.reduce((sum, sale) => sum + Number(sale.commission_amount || 0), 0);
 const expiryState = (expiry) => {
   if (!expiry) return 'none';
@@ -472,7 +473,7 @@ export async function setupSellerPortal() {
     // live Marketplace aggregate is a fallback until the sales-sync migration
     // has backfilled this seller's historical order lines.
     const allTimeMarketplaceUnits = marketplaceProducts.reduce((sum, product) => sum + (product.variants || []).reduce((variantSum, variant) => variantSum + Number(variant.units_sold || 0), 0), 0);
-    const eligibleSales = sales.filter(eligibleForMarketplaceFees);
+    const eligibleSales = sales.filter(activeSale);
     const ledgerUnits = eligibleSales.reduce((sum, row) => sum + Number(row.quantity || 0), 0);
     const units = hasBoundedSalesPeriod ? ledgerUnits : (ledgerUnits || allTimeMarketplaceUnits);
     const availableStock = inventory.reduce((sum, row) => sum + Number(row.available_stock || 0), 0);
@@ -480,7 +481,7 @@ export async function setupSellerPortal() {
     const salesPageCount = Math.max(1, Math.ceil(salesForTable.length / salesPageSize));
     salesPage = Math.min(salesPage, salesPageCount);
     const visibleSales = salesForTable.slice((salesPage - 1) * salesPageSize, salesPage * salesPageSize);
-    const salesRows = visibleSales.map((row) => `<tr><td><code>${text(row.sale_reference)}</code></td><td>${safeDate(row.sale_date)}</td><td><div class="seller-product-cell">${row.product_image ? `<img src="${text(row.product_image)}" alt=""/>` : ''}<span><strong>${text(row.product_name)}</strong><small>${text(row.variant)}</small></span></div></td><td>${text(row.seller_sku)}</td><td>${Number(row.quantity || 0)}</td><td>${money(row.unit_price)}</td><td>${money(row.gross_sales)}</td><td><span class="seller-status">${text(row.product_sale_status)}</span></td></tr>`).join('');
+    const salesRows = visibleSales.map((row) => `<tr><td><code>${text(row.sale_reference)}</code></td><td>${safeDate(row.sale_date)}</td><td><div class="seller-product-cell">${row.product_image ? `<img src="${text(row.product_image)}" alt=""/>` : ''}<span><strong>${text(row.product_name)}</strong><small>${text(row.variant)}</small></span></div></td><td>${text(row.seller_sku)}</td><td>${Number(row.quantity || 0)}</td><td>${money(row.unit_price)}</td><td>${money(row.gross_sales)}</td><td><span class="seller-status">${text(row.product_sale_status)}${row.demo_payment ? ' · Demo' : ''}</span></td></tr>`).join('');
     const productForInventory = (row) => products.find((product) => String(product.seller_product_id) === String(row.product_id));
     const storeListingStatus = (warehouseProductId) => storeListingStatuses.get(String(warehouseProductId)) || 'Hidden';
     const optionLabelFor = (variant) => {
@@ -1307,7 +1308,7 @@ export async function setupSellerPortal() {
     let headers = []; let rows = [];
     if (kind === 'sales') {
       headers = ['Sale Ref','Date','Product','SKU','Variant','Quantity','Unit Price MYR','Gross Sales MYR','Status'];
-      rows = filteredSales().map((sale) => [sale.sale_reference,sale.sale_date,sale.product_name,sale.seller_sku,sale.variant,sale.quantity,sale.unit_price,sale.gross_sales,sale.product_sale_status]);
+      rows = filteredSales().map((sale) => [sale.sale_reference,sale.sale_date,sale.product_name,sale.seller_sku,sale.variant,sale.quantity,sale.unit_price,sale.gross_sales,`${sale.product_sale_status}${sale.demo_payment ? ' · Demo' : ''}`]);
     } else if (kind === 'inventory') { headers = ['Product','SKU','Stock Received','Available Stock','Units Sold','Low Stock Threshold','Last Updated']; rows = (snapshot.inventory || []).map((item) => [item.name,item.sku,item.stock_received,item.available_stock,item.units_sold,item.low_stock_threshold,item.last_updated]); }
     else if (kind === 'returns') { headers = ['Sale Ref','Date','Product','SKU','Variant','Quantity','Refund MYR','Status']; rows = filteredSales().filter((sale) => ['Returned','Refunded'].includes(sale.product_sale_status)).map((sale) => [sale.sale_reference,sale.sale_date,sale.product_name,sale.seller_sku,sale.variant,sale.quantity,sale.refund_amount,sale.product_sale_status]); }
     else return;

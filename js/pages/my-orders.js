@@ -1,8 +1,8 @@
 import { bottomNavigation, escapeHTML } from '../shared.js';
-import { loadMarketplaceOrders, loadMarketplaceProducts, loadMarketplaceSuppliers, marketplaceProductsKey, safeMarketplaceImage } from './marketplace-data.js';
+import { isMarketplaceDemoPayment, marketplacePaymentLabel, loadMarketplaceOrders, loadMarketplaceProducts, loadMarketplaceSuppliers, marketplaceProductsKey, safeMarketplaceImage } from './marketplace-data.js';
 import { loadGroomingBookings } from './grooming-data.js';
 import { mountDriverLocation } from './driver-location.js';
-import { cacheSyncedRecords, refreshMarketplaceCatalogFromDatabase } from '../app-data-sync.js';
+import { cacheSyncedRecords, marketplaceCheckoutOwner, refreshMarketplaceCatalogFromDatabase } from '../app-data-sync.js';
 import { makeReceiptPdf } from '../receipt-pdf.js';
 import { marketplaceOrdersKey } from './marketplace-data.js';
 import { groomingBookingsKey } from './grooming-data.js';
@@ -36,6 +36,7 @@ let myOrderLocationCleanups = [];
 
 // Loads future Pet Hotel and Pet Daycare records from the local prototype storage keys.
 function loadLocalOrders(key, alternateKeys = []) {
+  if (key === marketplaceOrdersKey) return loadMarketplaceOrders();
   const records = [];
   const seen = new Set();
   for (const storageKey of [key, ...alternateKeys]) {
@@ -70,7 +71,7 @@ function canCancelServiceOrder(order) {
 
 // Marketplace orders may be cancelled only before Furgo confirms receipt or a store ships.
 function canCancelMarketplaceOrder(order) {
-  if (order.serviceId !== 'marketplace' || statusCategory(customerOrderStatus(order)) === 'canceled') return false;
+  if (order.serviceId !== 'marketplace' || order._legacyArchive || statusCategory(customerOrderStatus(order)) === 'canceled') return false;
   if (order.receipt || order.adminReceiptUploadedAt) return false;
   const shipments = Object.values(order.supplierShipments || {});
   if (shipments.some((shipment) => ['shipped', 'delivered', 'in transit'].includes(String(shipment?.status || '').toLowerCase()))) return false;
@@ -99,6 +100,8 @@ function matchesOrderStatusTab(order, tab) {
 }
 
 function onlinePaymentActions(order) {
+  if (order._legacyArchive) return '<p class="marketplace-payment-pending">Archived order history. Contact Customer Service for assistance.</p>';
+  const demo = order.serviceId === 'marketplace' && isMarketplaceDemoPayment(order);
   const paymentStatus = String(order.paymentStatus || '').toLowerCase();
   const paid = /paid|successful|succeeded|completed/.test(paymentStatus);
   const deadline = order.paymentDeadlineAt ? new Date(order.paymentDeadlineAt) : null;
@@ -107,7 +110,7 @@ function onlinePaymentActions(order) {
     ? `<div class="marketplace-online-payment"><strong>Payment due in <span data-payment-countdown="${escapeHTML(deadline.toISOString())}">—</span></strong><small>Payment has not completed yet; this does not mean it failed.</small><button class="button button-primary" type="button" data-complete-online-payment="${escapeHTML(order.serviceId)}|${escapeHTML(order.id)}">Retry Payment</button><small>Demo payment only. No charge is made in this prototype.</small></div>`
     : '';
   const refundMarkup = order.refundStatus
-    ? `<p class="marketplace-cancellation-refund"><strong>Refund status: ${escapeHTML(order.refundStatus)}</strong>${Number(order.refundAmount) > 0 ? ` · MYR ${Number(order.refundAmount).toFixed(2)} to your original payment method` : ''}</p>`
+    ? `<p class="marketplace-cancellation-refund"><strong>Refund status: ${escapeHTML(order.refundStatus)}</strong>${Number(order.refundAmount) > 0 ? ` · MYR ${Number(order.refundAmount).toFixed(2)} ${demo ? 'demo refund' : 'to your original payment method'}` : ''}</p>`
     : '';
   const cancellationMarkup = order.cancellationReason || order.customerCancellationReason
     ? `<p class="marketplace-payment-pending"><strong>Cancellation reason:</strong> ${escapeHTML(order.customerCancellationReason || order.cancellationReason)}</p>`
@@ -182,7 +185,7 @@ function marketplaceReturnSection(order, products = loadMarketplaceProducts(), r
     )?.[1] || (String(order.supplierShipment?.supplierName || '').trim().toLowerCase() === normalizedSupplier || [...grouped.keys()].length === 1 ? order.supplierShipment : null) || {};
     const deliveredAt = shipment.deliveredAt ? new Date(shipment.deliveredAt) : null;
     const shipmentStatus = String(shipment.status || '').trim().toLowerCase();
-    const returnWindowOpen = shipmentStatus === 'delivered' && deliveredAt && !Number.isNaN(deliveredAt.getTime()) && Date.now() <= deliveredAt.getTime() + 7 * 24 * 60 * 60 * 1000;
+    const returnWindowOpen = !order._legacyArchive && shipmentStatus === 'delivered' && deliveredAt && !Number.isNaN(deliveredAt.getTime()) && Date.now() <= deliveredAt.getTime() + 7 * 24 * 60 * 60 * 1000;
     const trackingMarkup = marketplaceTrackingForSupplier(shipment);
     return `<section class="my-order-supplier-group"><header><strong>Shop: ${escapeHTML(supplier)}</strong><span>${escapeHTML(shipment.status || 'Preparing order')}</span></header>${items.map((item) => {
       const line = Number(item.lineNumber);
@@ -335,7 +338,7 @@ function orderDetailRows(order) {
   const addOns = Array.isArray(order.addOns)
     ? order.addOns.map((item) => typeof item === 'string' ? item : item.name).filter(Boolean).join(', ')
     : '';
-  const payment = [order.paymentStatus, order.paymentMethod, order.paymentReference && `Ref ${order.paymentReference}`].filter(Boolean).join(' · ');
+  const payment = [order.paymentStatus, order.serviceId === 'marketplace' ? marketplacePaymentLabel(order) : order.paymentMethod, order.paymentReference && `Ref ${order.paymentReference}`].filter(Boolean).join(' · ');
   const total = Number(order.totalAmount ?? order.total);
   const rows = [
     [order.serviceId === 'marketplace' ? '' : 'Service', order.serviceId === 'marketplace' ? '' : order.serviceLabel],
@@ -362,7 +365,8 @@ export function myOrdersPage(routeParams = new URLSearchParams()) {
   const serviceName = selectedServices.length ? selectedServices.map((id) => orderServices.find((item) => item.id === id)?.label).filter(Boolean).join(', ') : 'All';
   const status = orderStatuses.some((item) => item.id === routeParams.get('status')) ? routeParams.get('status') : 'new';
   const returnTo = ['home', 'marketplace', 'grooming', 'hotel', 'daycare', 'profile'].includes(routeParams.get('from')) ? routeParams.get('from') : 'home';
-  const marketplace = loadMarketplaceOrders().filter((order) => belongsToCurrentUser(order, profile)).map((order) => ({
+  const marketplace = loadMarketplaceOrders({ archiveOwner: profile.id })
+    .filter((order) => order.userId && profile.id ? order.userId === profile.id : belongsToCurrentUser(order, profile)).map((order) => ({
     ...order,
     serviceId: 'marketplace',
     _storageKey: marketplaceOrdersKey,
@@ -556,7 +560,7 @@ export function setupMyOrders() {
         ...loadGroomingBookings().map((order) => ({ ...order, serviceId: 'grooming' })),
         ...loadLocalOrders(hotelBookingsKey, ['furgo-demo-pet-hotel-bookings']).map((order) => ({ ...order, serviceId: 'hotel' })),
         ...loadLocalOrders(daycareBookingsKey, ['furgo-demo-daycare-bookings']).map((order) => ({ ...order, serviceId: 'daycare' })),
-      ].filter((order) => order.paymentStatus === 'Pending Payment' && order.paymentDeadlineAt && new Date(order.paymentDeadlineAt).getTime() <= Date.now());
+      ].filter((order) => !order._legacyArchive && order.paymentStatus === 'Pending Payment' && order.paymentDeadlineAt && new Date(order.paymentDeadlineAt).getTime() <= Date.now());
       for (const order of orders) {
         try {
           const { data, error } = order.serviceId === 'marketplace'
@@ -564,7 +568,7 @@ export function setupMyOrders() {
             : await supabase.rpc('expire_service_pending_payment', { p_service: order.serviceId, p_order_id: String(order.id) });
           if (!error && data) {
             const storageKey = ({ marketplace: marketplaceOrdersKey, grooming: groomingBookingsKey, hotel: hotelBookingsKey, daycare: daycareBookingsKey })[order.serviceId];
-            const cachedRecords = (() => { try { return JSON.parse(localStorage.getItem(storageKey) || '[]'); } catch { return []; } })();
+            const cachedRecords = loadLocalOrders(storageKey);
             const cachedOrder = Array.isArray(cachedRecords) ? cachedRecords.find((record) => String(record.id) === String(order.id)) : null;
             if (cachedOrder) {
               cachedOrder.status = 'Cancelled';
@@ -636,7 +640,8 @@ export function setupMyOrders() {
       const orderId = generatedReceiptButton.dataset.downloadGeneratedReceiptForCustomer;
       const message = generatedReceiptButton.closest('.my-order-expanded')?.querySelector('[data-receipt-unavailable-message]');
       try {
-        const orders = JSON.parse(localStorage.getItem(key) || '[]');
+        const orders = key === marketplaceOrdersKey
+          ? loadMarketplaceOrders({ archiveOwner: marketplaceCheckoutOwner() }) : loadLocalOrders(key);
         const receipt = orders.find((order) => String(order.id) === String(orderId))?.receipt;
         if (!receipt?.document) throw new Error('Receipt details are not available yet.');
         generatedReceiptButton.disabled = true;
@@ -693,7 +698,9 @@ export function setupMyOrders() {
       form.querySelector('[data-marketplace-cancel-kind]').textContent = 'Marketplace order';
       form.querySelector('#marketplace-cancel-title').textContent = 'Are you sure you want to cancel this order?';
       form.querySelector('[data-marketplace-cancel-note]').textContent = paid
-        ? `After confirmation, MYR ${refund.toFixed(2)} will be recorded for refund to your original payment method. The refund is not sent automatically.`
+        ? isMarketplaceDemoPayment(order)
+          ? `After confirmation, MYR ${refund.toFixed(2)} will be recorded as a demo refund.`
+          : `After confirmation, MYR ${refund.toFixed(2)} will be recorded for refund to your original payment method. The refund is not sent automatically.`
         : 'This order has not been paid. Confirming will cancel it.';
       dialog.showModal();
       return;
@@ -706,8 +713,8 @@ export function setupMyOrders() {
     if (completePayment) {
       const [serviceId, orderId] = completePayment.dataset.completeOnlinePayment.split('|');
       const storageKey = ({ marketplace: marketplaceOrdersKey, grooming: groomingBookingsKey, hotel: hotelBookingsKey, daycare: daycareBookingsKey })[serviceId];
-      let records = [];
-      try { records = JSON.parse(localStorage.getItem(storageKey) || '[]'); } catch { records = []; }
+      const checkoutOwner = marketplaceCheckoutOwner();
+      const records = loadLocalOrders(storageKey);
       const order = Array.isArray(records) ? records.find((record) => String(record.id) === orderId) : null;
       if (!order || !window.confirm(`Complete the demo payment of MYR ${Number(order.total || 0).toFixed(2)}? No real charge will be made.`)) return;
       completePayment.disabled = true;
@@ -716,6 +723,7 @@ export function setupMyOrders() {
           ? await supabase.rpc('complete_marketplace_demo_payment', { p_order_id: orderId })
           : await supabase.rpc('complete_service_demo_payment', { p_service: serviceId, p_order_id: orderId });
         if (error) throw error;
+        if (serviceId === 'marketplace' && checkoutOwner !== marketplaceCheckoutOwner()) return;
         if (data === 'expired') {
           order.status = 'Cancelled';
           order.adminStatus = 'Cancelled';

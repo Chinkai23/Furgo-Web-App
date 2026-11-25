@@ -1,3 +1,5 @@
+import { readMarketplaceOrderCache } from '../app-data-sync.js';
+
 // Shared marketplace demo records used by the customer catalog and Admin Portal.
 export const marketplaceProductsKey = 'furgo-demo-marketplace-products';
 export const marketplaceSuppliersKey = 'furgo-demo-marketplace-suppliers';
@@ -138,11 +140,21 @@ export function loadMarketplaceFavorites() {
 }
 
 // Reads customer order snapshots shared with the Admin Portal prototype.
-export function loadMarketplaceOrders() {
-  try {
-    const saved = JSON.parse(localStorage.getItem(marketplaceOrdersKey) || '[]');
-    return Array.isArray(saved) ? saved : [];
-  } catch { return []; }
+export function loadMarketplaceOrders({ archiveOwner } = {}) {
+  return readMarketplaceOrderCache(archiveOwner);
+}
+
+export function isMarketplaceDemoPayment(order) {
+  if (order.paymentChannel) return ['demo_online', 'demo_credit'].includes(order.paymentChannel);
+  const method = String(order.paymentMethod || '').trim().toLowerCase();
+  return ['online payment', 'gateway', 'demo online payment', 'furgo credit', 'wallet', 'demo furgo credit'].includes(method)
+    || String(order.paymentStatus || '').toLowerCase() === 'paid with furgo credit';
+}
+
+export function marketplacePaymentLabel(order) {
+  if (!isMarketplaceDemoPayment(order)) return order.paymentMethod;
+  return order.paymentChannel === 'demo_credit' || /credit|wallet/i.test(order.paymentMethod || '')
+    ? 'Demo Furgo Credit' : 'Demo online payment';
 }
 
 // Calculates a cart line using the selected product variant's current retail price.

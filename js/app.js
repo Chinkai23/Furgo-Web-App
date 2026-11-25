@@ -16,6 +16,7 @@ import { paymentMethodPage } from './pages/payment-method.js';
 import { creditPage } from './pages/credit.js';
 import { coinTopupPage, setupTokensPage, tokensPage } from './pages/tokens.js';
 import { marketplaceFavoritesPage, marketplacePage, marketplaceProductPage, marketplaceSellerPage } from './pages/marketplace.js';
+import { setupMarketplaceCheckout } from './marketplace-checkout.js';
 import { marketplaceCartPage, marketplaceCheckoutPage } from './pages/cart.js';
 import { adminMarketplaceManagePage, adminMarketplacePage, adminMarketplaceProductsPage } from './pages/admin-marketplace.js';
 import { marketplaceSupplierPage, marketplaceSupplierProductEditPage, matchesSupplierOrderStatus, supplierDefaultCourierStorageKey, supplierOrderRows, supplierTrackingForm, supplierProductRows } from './pages/marketplace-supplier.js';
@@ -57,7 +58,7 @@ import { localFinderFavoritesPage, localFinderListPage, localFinderPage, localFi
 import { adminLocalFinderPage, setupAdminLocalFinder } from './pages/admin-local-finder.js';
 import { supabase, toMalaysianE164 } from './supabase.js';
 import { refreshSharedOutlets } from './pages/outlet-directory.js';
-import { cacheSyncedRecords, loadCloudAppData, refreshMarketplaceCatalogFromDatabase, saveMarketplaceOrder, saveSharedAppData, updateMarketplaceOrder } from './app-data-sync.js';
+import { cacheSyncedRecords, clearMarketplaceOrderCache, loadCloudAppData, marketplaceCheckoutOwner, preserveBrowserMarketplaceHistory, refreshMarketplaceCatalogFromDatabase, saveSharedAppData, updateMarketplaceOrder } from './app-data-sync.js';
 import { refreshFurgoCoinBalance } from './coin-wallet.js';
 import { startQRScanner } from './qr-scanner.js';
 import { adminSellerManagementPage, adminSellerPayoutFeePage, sellerPortalPage, setupAdminSellerManagement, setupAdminSellerPayoutFee, setupSellerPortal } from './pages/seller-portal.js';
@@ -546,6 +547,7 @@ function friendlyAuthError(error) {
 // Section: Authentication identity
 // Function: Load the signed-in user's trusted role, profile, and account status from Supabase.
 async function loadSupabaseIdentity(user) {
+  if (marketplaceCheckoutOwner() !== user.id) clearMarketplaceOrderCache();
   activeSupabaseUserId = user.id;
   const [{ data: roleRows, error: roleError }, { data: profile, error: profileError }, { data: account, error: accountError }, portalAccessResult, supplierAccessResult, sellerAccessResult] = await Promise.all([
     supabase.from('user_roles').select('role').eq('user_id', user.id),
@@ -588,7 +590,10 @@ async function loadSupabaseIdentity(user) {
   sessionStorage.setItem('furgo-demo-profile-complete', 'true');
   sessionStorage.setItem('furgo-demo-user-role', role);
   sessionStorage.setItem('furgo-demo-auth-channel', snapshot.authChannel);
-  if (role === 'supplier' || role === 'seller') return snapshot;
+  if (role === 'supplier' || role === 'seller') {
+    await preserveBrowserMarketplaceHistory();
+    return snapshot;
+  }
   try {
     await loadCloudAppData(user.id, role);
   } catch (error) {
@@ -2328,184 +2333,7 @@ function setupMarketplaceInteractions() {
     });
   }
 
-  const form = document.querySelector('[data-market-checkout]');
-  if (form) {
-    const addressSelect = form.querySelector('[data-saved-address]');
-    const manualAddress = form.querySelector('[data-manual-address]');
-    const transferUpload = form.querySelector('[data-transfer-upload]');
-    const cartAtCheckout = loadMarketplaceCart();
-    let checkoutSelection = null;
-    try {
-      const saved = JSON.parse(localStorage.getItem(marketplaceCheckoutSelectionKey) || 'null');
-      checkoutSelection = Array.isArray(saved) ? saved : null;
-    } catch { checkoutSelection = null; }
-    const lines = cartAtCheckout.filter((item) => !checkoutSelection || checkoutSelection.includes(marketplaceCartLineKey(item))).map((item) => marketplaceLine(item)).filter(Boolean);
-    const subtotal = lines.reduce((sum, item) => sum + item.total, 0);
-    const offerSettings = loadMarketplaceOfferSettings();
-    const furgoVouchers = Array.isArray(offerSettings.furgoVouchers) ? offerSettings.furgoVouchers : [offerSettings.voucher].filter(Boolean);
-    const freeShippingMinimum = Number(offerSettings.freeShippingMinimum) || 0;
-    const shipping = subtotal >= freeShippingMinimum ? 0 : Number(offerSettings.deliveryFee) || 0;
-    const discountRow = form.querySelector('[data-checkout-discount]');
-    const shippingDiscountRow = form.querySelector('[data-checkout-shipping-discount]');
-    let appliedFurgoVoucher = null;
-    const allocateCents = (amount, weights) => {
-      const cents = Math.max(0, Math.round(Number(amount || 0) * 100));
-      const weightTotal = weights.reduce((sum, weight) => sum + Math.max(0, Number(weight) || 0), 0);
-      let assigned = 0;
-      return weights.map((weight, index) => {
-        const share = index === weights.length - 1
-          ? cents - assigned
-          : weightTotal ? Math.floor(cents * Math.max(0, Number(weight) || 0) / weightTotal) : Math.floor(cents / weights.length);
-        assigned += share;
-        return share / 100;
-      });
-    };
-    const lineTotals = lines.map((line) => Math.max(0, Number(line.total) || 0));
-    const allocatedShippingBase = allocateCents(shipping, lineTotals);
-    const currentFurgoDiscount = () => Number(form.dataset.furgoDiscount || 0);
-    const currentFurgoShippingDiscount = () => form.dataset.furgoFreeShipping === 'true' ? shipping : 0;
-    const updateTotals = () => {
-      const discount = Math.min(subtotal, currentFurgoDiscount());
-      const shippingDiscount = Math.min(shipping, currentFurgoShippingDiscount());
-      form.dataset.discount = String(discount);
-      form.dataset.shippingDiscount = String(shippingDiscount);
-      const payableShipping = Math.max(0, shipping - shippingDiscount);
-      form.querySelector('[data-checkout-shipping]').textContent = payableShipping ? `MYR ${payableShipping.toFixed(2)}` : 'Free';
-      discountRow.hidden = discount <= 0;
-      discountRow.querySelector('b').textContent = `− MYR ${discount.toFixed(2)}`;
-      shippingDiscountRow.hidden = shippingDiscount <= 0;
-      shippingDiscountRow.querySelector('b').textContent = `− MYR ${shippingDiscount.toFixed(2)}`;
-      form.querySelector('[data-checkout-total]').textContent = `MYR ${Math.max(0, subtotal + shipping - discount - shippingDiscount).toFixed(2)}`;
-    };
-    const updateAddressFields = () => {
-      const saved = addressSelect && addressSelect.value !== 'manual';
-      manualAddress.hidden = Boolean(saved);
-      manualAddress.querySelectorAll('input').forEach((input) => { input.disabled = Boolean(saved); input.required = !saved && input.name !== 'saveAddress'; });
-    };
-    const updateTransferField = () => {
-      const transfer = form.elements.payment.value === 'bank-transfer';
-      transferUpload.hidden = !transfer;
-      transferUpload.querySelector('input').required = transfer;
-    };
-    addressSelect?.addEventListener('change', updateAddressFields);
-    form.querySelectorAll('[name="payment"]').forEach((input) => input.addEventListener('change', updateTransferField));
-    updateAddressFields();
-    updateTransferField();
-    updateTotals();
-    form.querySelector('[data-apply-coupon]')?.addEventListener('click', () => {
-      const code = form.querySelector('[data-market-coupon]').value.trim().toUpperCase();
-      const message = form.querySelector('[data-coupon-feedback]');
-      const matchingVoucher = furgoVouchers.find((voucher) => voucher.enabled && String(voucher.code || '').trim().toUpperCase() === code);
-      const minimumSpend = Number(matchingVoucher?.minimumSpend) || 0;
-      if (matchingVoucher && subtotal >= minimumSpend) {
-        appliedFurgoVoucher = matchingVoucher;
-        if (matchingVoucher.discountType === 'free_shipping') {
-          form.dataset.furgoDiscount = '0';
-          form.dataset.furgoFreeShipping = 'true';
-          message.textContent = `${matchingVoucher.code} applied. Free shipping added.`;
-        } else {
-          const rawDiscount = matchingVoucher.discountType === 'percent' ? subtotal * (Number(matchingVoucher.discountValue) / 100) : Number(matchingVoucher.discountValue);
-          const discount = Math.min(subtotal, Math.round(rawDiscount * 100) / 100);
-          form.dataset.furgoDiscount = String(discount);
-          form.dataset.furgoFreeShipping = 'false';
-          message.textContent = `${matchingVoucher.code} applied.`;
-        }
-        message.className = 'market-coupon-feedback success';
-      } else {
-        appliedFurgoVoucher = null;
-        form.dataset.furgoDiscount = '0';
-        form.dataset.furgoFreeShipping = 'false';
-        message.textContent = matchingVoucher && subtotal < minimumSpend ? `This voucher requires a MYR ${minimumSpend.toFixed(2)} minimum subtotal.` : 'That voucher code is not valid.';
-        message.className = 'market-coupon-feedback error';
-      }
-      updateTotals();
-    });
-    form.addEventListener('submit', async (event) => {
-      event.preventDefault();
-      const feedback = form.querySelector('.form-feedback');
-      if (!form.reportValidity()) return;
-      let address;
-      if (addressSelect && addressSelect.value !== 'manual') {
-        try { address = JSON.parse(localStorage.getItem('furgo-demo-addresses') || '[]')[Number(addressSelect.value)]; } catch { address = null; }
-      } else address = { name: form.elements.recipient.value.trim(), phone: form.elements.phone.value.trim(), street: form.elements.street.value.trim(), postcode: form.elements.postcode.value.trim(), city: form.elements.city.value.trim(), state: form.elements.state.value.trim() };
-      if (!address) { feedback.textContent = 'Choose or enter a delivery address.'; feedback.classList.add('visible'); return; }
-      const payment = form.elements.payment.value;
-      const discount = Number(form.dataset.discount || 0);
-      const furgoDiscount = Math.min(currentFurgoDiscount(), discount);
-      const shippingDiscount = Number(form.dataset.shippingDiscount || 0);
-      const furgoShippingDiscount = currentFurgoShippingDiscount();
-      const total = Math.max(0, subtotal + shipping - discount - shippingDiscount);
-      if (payment === 'wallet') {
-        const balance = Number(localStorage.getItem('furgo-demo-credit-balance') || 0);
-        if (balance < total) {
-          feedback.textContent = `Your Furgo Credit balance is MYR ${balance.toFixed(2)}. Add Furgo Credit or choose another payment method.`;
-          feedback.classList.add('visible');
-          const link = document.createElement('a'); link.href = '#credit?from=checkout'; link.className = 'market-credit-link'; link.textContent = 'Go to My Furgo Credit'; feedback.append(link);
-          return;
-        }
-      }
-      let transferSlip = null;
-      if (payment === 'bank-transfer') {
-        const file = form.querySelector('[data-transfer-slip]').files?.[0];
-        if (!file || file.size > 1.5 * 1024 * 1024) { feedback.textContent = 'Choose a transfer slip up to 1.5 MB.'; feedback.classList.add('visible'); return; }
-        transferSlip = await new Promise((resolve) => { const reader = new FileReader(); reader.onload = () => resolve({ name: file.name, data: reader.result }); reader.onerror = () => resolve(null); reader.readAsDataURL(file); });
-        if (!transferSlip) { feedback.textContent = 'The transfer slip could not be read. Try another file.'; feedback.classList.add('visible'); return; }
-      }
-      if (form.elements.saveAddress?.checked) {
-        const addresses = JSON.parse(localStorage.getItem('furgo-demo-addresses') || '[]');
-        addresses.push({ label: 'Delivery', ...address });
-        localStorage.setItem('furgo-demo-addresses', JSON.stringify(addresses));
-      }
-      const products = loadMarketplaceProducts();
-      const allocatedFurgoDiscounts = allocateCents(furgoDiscount, lineTotals);
-      const allocatedDiscounts = allocatedFurgoDiscounts;
-      const allocatedShipping = allocatedShippingBase.map((amount) => form.dataset.furgoFreeShipping === 'true' ? 0 : amount);
-      const items = lines.map(({ product, variant, quantity, total: lineTotal }, index) => {
-        const allocatedDiscount = allocatedDiscounts[index] || 0;
-        const shippingFeeAllocated = allocatedShipping[index] || 0;
-        const paidAmount = Math.max(0, Math.round((Number(lineTotal) - allocatedDiscount) * 100) / 100);
-        return { lineNumber: index + 1, productId: product.id, variantId: variant.id, imageUrl: variant.imageUrl || product.images?.[0] || '', name: product.name, category: product.category || 'Uncategorised', nutrition: product.nutrition || '', ingredients: product.ingredients || '', variantLabel: variant.label, supplierId: variant.supplierId || variant.supplier || '', cost: Number(variant.cost) || 0, quantity, unitPrice: variant.price, total: lineTotal, allocatedDiscount, shippingFeeAllocated, paidAmount, refundableAmount: Math.round((paidAmount + shippingFeeAllocated) * 100) / 100 };
-      });
-      const profile = JSON.parse(sessionStorage.getItem('furgo-demo-user-profile') || '{}');
-      const reference = `FG-${new Date().toISOString().slice(2, 10).replace(/-/g, '')}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
-      const now = new Date();
-      const awaitingOnlinePayment = payment === 'gateway';
-      const status = payment === 'bank-transfer' ? 'Pending Payment Verification' : awaitingOnlinePayment ? 'Pending Payment' : 'Paid / Processing';
-      const orders = loadMarketplaceOrders();
-      const orderDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-      const order = { id: `order-${Date.now()}`, userId: profile.id || '', reference, date: orderDate, createdAt: now.toISOString(), customerEmail: profile.email || '', customerName: profile.name || address.name, customerPhone: profile.phone || address.phone, deliveryPhone: address.phone, address: { name: address.name, phone: address.phone, street: address.street, postcode: address.postcode, city: address.city, state: address.state }, items, subtotal, shipping, shippingDiscount, discount, furgoVoucherDiscount: furgoDiscount, furgoShippingDiscount, furgoVoucherId: appliedFurgoVoucher?.id || '', total, paymentMethod: payment === 'wallet' ? 'Furgo Credit' : payment === 'gateway' ? 'Online Payment' : 'Manual bank transfer', paymentStatus: payment === 'bank-transfer' ? 'Pending Payment Verification' : awaitingOnlinePayment ? 'Pending Payment' : 'Paid', paymentDeadlineAt: awaitingOnlinePayment ? new Date(now.getTime() + 60 * 60 * 1000).toISOString() : '', transferSlip, status, coupon: appliedFurgoVoucher && (furgoDiscount || furgoShippingDiscount) ? String(appliedFurgoVoucher.code || '').toUpperCase() : '', trackingNumber: '', courier: '', trackingUrl: '' };
-      orders.unshift(order);
-      const placeOrderButton = form.querySelector('[type="submit"]');
-      if (placeOrderButton) { placeOrderButton.disabled = true; placeOrderButton.textContent = 'Saving Order…'; }
-      feedback.classList.remove('visible', 'is-error');
-      try {
-        await saveMarketplaceOrder(order, orders);
-      } catch (error) {
-        orders.shift();
-        if (placeOrderButton) { placeOrderButton.disabled = false; placeOrderButton.textContent = 'Place Order'; }
-        feedback.textContent = `Your order was not placed because it could not be saved online. ${error?.message || 'Please try again.'}`;
-        feedback.classList.add('visible', 'is-error');
-        return;
-      }
-      if (payment === 'wallet') {
-        const balance = Number(localStorage.getItem('furgo-demo-credit-balance') || 0);
-        localStorage.setItem('furgo-demo-credit-balance', Math.max(0, balance - total).toFixed(2));
-        const transactions = JSON.parse(localStorage.getItem('furgo-demo-credit-transactions') || '[]');
-        transactions.unshift({ label: `Marketplace order ${reference}`, amount: -total, date: new Date().toLocaleDateString() });
-        localStorage.setItem('furgo-demo-credit-transactions', JSON.stringify(transactions));
-      }
-      try { await refreshMarketplaceCatalogFromDatabase(); }
-      catch (error) { console.warn('Marketplace stock cache refresh deferred:', error); }
-      const purchasedKeys = new Set(checkoutSelection || cartAtCheckout.map(marketplaceCartLineKey));
-      const remainingCart = loadMarketplaceCart().filter((item) => !purchasedKeys.has(marketplaceCartLineKey(item)));
-      localStorage.setItem(marketplaceCartKey, JSON.stringify(remainingCart));
-      const previousSelection = loadMarketplaceCartSelection();
-      if (previousSelection) localStorage.setItem(marketplaceCartSelectionKey, JSON.stringify(previousSelection.filter((key) => !purchasedKeys.has(key))));
-      localStorage.removeItem(marketplaceCheckoutSelectionKey);
-      // Return to the Marketplace when a customer opens their new order from checkout.
-      window.location.hash = '#orders?from=marketplace';
-    });
-  }
+  setupMarketplaceCheckout();
 }
 
 // Handles live product filters and marketplace order fulfillment.
@@ -2790,7 +2618,7 @@ function setupAdminMarketplace() {
       return;
     }
     const cases = data || [];
-    returnCasesTarget.innerHTML = cases.length ? `<div class="admin-market-return-case-list">${cases.map((itemReturn) => `<article class="admin-market-return-case"><header><strong>${escapeHTML(itemReturn.productName || 'Product')} · ${escapeHTML(itemReturn.variantLabel || 'Variant')} × ${Number(itemReturn.quantity) || 1}</strong><span>${escapeHTML(itemReturn.status)}</span></header><p>Order ${escapeHTML(itemReturn.orderReference || itemReturn.orderId)} · Store ${escapeHTML(itemReturn.supplierName || '—')}</p><p>Customer: ${escapeHTML(itemReturn.customerName || '—')} · ${escapeHTML(itemReturn.customerPhone || '—')}</p><p>Reason: ${escapeHTML(itemReturn.reason || '—')}</p>${itemReturn.supplierResponse ? `<p>Store response: ${escapeHTML(itemReturn.supplierResponse)}</p>` : ''}<b>Refund: MYR ${Number(itemReturn.refundAmount || 0).toFixed(2)} (product ${Number(itemReturn.paidAmount || 0).toFixed(2)} + shipping ${Number(itemReturn.shippingRefund || 0).toFixed(2)})</b>${itemReturn.photoPath ? `<a href="#" data-marketplace-return-photo="${escapeHTML(itemReturn.photoPath)}" target="_blank" rel="noopener noreferrer">View customer photo</a>` : ''}<div class="admin-market-return-actions">${itemReturn.status === 'Admin Review' ? `<button type="button" class="button button-primary" data-admin-return-action="approve" data-return-id="${escapeHTML(itemReturn.returnId)}">Approve Return</button><button type="button" class="button button-light" data-admin-return-action="reject" data-return-id="${escapeHTML(itemReturn.returnId)}">Reject Return</button>` : `<button type="button" class="button button-light" data-admin-return-action="refunded" data-return-id="${escapeHTML(itemReturn.returnId)}">Mark Refund Sent</button><small>Use only after the refund has been sent through the original payment method.</small>`}</div></article>`).join('')}</div>` : '<p class="admin-market-empty">No return cases need Manager or Director review.</p>';
+    returnCasesTarget.innerHTML = cases.length ? `<div class="admin-market-return-case-list">${cases.map((itemReturn) => `<article class="admin-market-return-case"><header><strong>${escapeHTML(itemReturn.productName || 'Product')} · ${escapeHTML(itemReturn.variantLabel || 'Variant')} × ${Number(itemReturn.quantity) || 1}</strong><span>${escapeHTML(itemReturn.status)}</span></header><p>Order ${escapeHTML(itemReturn.orderReference || itemReturn.orderId)} · Store ${escapeHTML(itemReturn.supplierName || '—')}</p><p>Customer: ${escapeHTML(itemReturn.customerName || '—')} · ${escapeHTML(itemReturn.customerPhone || '—')}</p><p>Reason: ${escapeHTML(itemReturn.reason || '—')}</p>${itemReturn.supplierResponse ? `<p>Store response: ${escapeHTML(itemReturn.supplierResponse)}</p>` : ''}<b>Refund: MYR ${Number(itemReturn.refundAmount || 0).toFixed(2)} (product ${Number(itemReturn.paidAmount || 0).toFixed(2)} + shipping ${Number(itemReturn.shippingRefund || 0).toFixed(2)})</b>${itemReturn.photoPath ? `<a href="#" data-marketplace-return-photo="${escapeHTML(itemReturn.photoPath)}" target="_blank" rel="noopener noreferrer">View customer photo</a>` : ''}<div class="admin-market-return-actions">${itemReturn.status === 'Admin Review' ? `<button type="button" class="button button-primary" data-admin-return-action="approve" data-return-id="${escapeHTML(itemReturn.returnId)}">Approve Return</button><button type="button" class="button button-light" data-admin-return-action="reject" data-return-id="${escapeHTML(itemReturn.returnId)}">Reject Return</button>` : `<button type="button" class="button button-light" data-admin-return-action="refunded" data-return-id="${escapeHTML(itemReturn.returnId)}" data-demo-payment="${Boolean(itemReturn.demoPayment)}">${itemReturn.demoPayment ? 'Record Demo Refund' : 'Mark Refund Sent'}</button><small>${itemReturn.demoPayment ? 'Records the simulated refund.' : 'Use only after the refund has been sent through the original payment method.'}</small>`}</div></article>`).join('')}</div>` : '<p class="admin-market-empty">No return cases need Manager or Director review.</p>';
     for (const link of returnCasesTarget.querySelectorAll('[data-marketplace-return-photo]')) {
       const { data: signed } = await supabase.storage.from('marketplace-return-evidence').createSignedUrl(link.dataset.marketplaceReturnPhoto, 300);
       if (signed?.signedUrl) link.href = signed.signedUrl;
@@ -2803,19 +2631,20 @@ function setupAdminMarketplace() {
     const button = event.target.closest('[data-admin-return-action]');
     if (!button) return;
     const action = button.dataset.adminReturnAction;
+    const demoPayment = button.dataset.demoPayment === 'true';
     const reason = action === 'reject' ? window.prompt('Enter the reason for rejecting this return request.') : '';
     if (action === 'reject' && !reason?.trim()) return;
-    if (action !== 'reject' && !window.confirm(action === 'approve' ? 'Approve this return? The store will coordinate the return shipment.' : 'Confirm that the refund has already been sent through the original payment method?')) return;
+    if (action !== 'reject' && !window.confirm(action === 'approve' ? 'Approve this return? The store will coordinate the return shipment.' : demoPayment ? 'Record the demo refund?' : 'Confirm that the refund has already been sent through the original payment method?')) return;
     button.disabled = true;
     const result = action === 'refunded'
-      ? await supabase.rpc('complete_marketplace_item_refund', { p_return_id: button.dataset.returnId })
+      ? await supabase.rpc('complete_marketplace_item_refund', { p_return_id: button.dataset.returnId, p_demo: demoPayment })
       : await supabase.rpc('review_marketplace_item_return', { p_return_id: button.dataset.returnId, p_decision: action, p_reason: reason || '' });
     if (result.error) {
       button.disabled = false;
       toastAdmin(result.error.message || 'The return request could not be updated.');
       return;
     }
-    toastAdmin(action === 'approve' ? 'Return approved. The store can coordinate its return.' : action === 'reject' ? 'Return rejected with the recorded reason.' : 'Refund marked as sent.');
+    toastAdmin(action === 'approve' ? 'Return approved. The store can coordinate its return.' : action === 'reject' ? 'Return rejected with the recorded reason.' : demoPayment ? 'Demo refund recorded.' : 'Refund marked as sent.');
     await loadReturnCases();
   });
   const orderList = document.querySelector('.admin-market-order-list');
@@ -2829,48 +2658,51 @@ function setupAdminMarketplace() {
     orderList.addEventListener('click', async (event) => {
       const cancellationRefundButton = event.target.closest('[data-marketplace-cancellation-refund]');
       if (cancellationRefundButton) {
-        if (!window.confirm('Confirm that the refund has already been sent through the original payment method?')) return;
+        const demoPayment = cancellationRefundButton.dataset.demoPayment === 'true';
+        if (!window.confirm(demoPayment ? 'Record the demo refund?' : 'Confirm that the refund has already been sent through the original payment method?')) return;
         cancellationRefundButton.disabled = true;
         const { error } = await supabase.rpc('complete_marketplace_order_cancellation_refund', {
-          p_order_id: cancellationRefundButton.dataset.marketplaceCancellationRefund,
+          p_order_id: cancellationRefundButton.dataset.marketplaceCancellationRefund, p_demo: demoPayment,
         });
         if (error) {
           cancellationRefundButton.disabled = false;
           toastAdmin(error.message || 'The cancellation refund could not be updated.');
           return;
         }
-        toastAdmin('Cancellation refund marked as sent.');
+        toastAdmin(demoPayment ? 'Demo refund recorded.' : 'Cancellation refund marked as sent.');
         window.setTimeout(() => window.dispatchEvent(new Event('hashchange')), 400);
         return;
       }
       const button = event.target.closest('[data-admin-return-action]');
       if (!button) return;
       const action = button.dataset.adminReturnAction;
+      const demoPayment = button.dataset.demoPayment === 'true';
       const reason = action === 'reject' ? window.prompt('Enter the reason for rejecting this return request.') : '';
       if (action === 'reject' && !reason?.trim()) return;
-      if (action !== 'reject' && !window.confirm(action === 'approve' ? 'Approve the return request? The store will coordinate the return shipment.' : 'Confirm that the refund has already been sent through the original payment method?')) return;
+      if (action !== 'reject' && !window.confirm(action === 'approve' ? 'Approve the return request? The store will coordinate the return shipment.' : demoPayment ? 'Record the demo refund?' : 'Confirm that the refund has already been sent through the original payment method?')) return;
       button.disabled = true;
       const result = action === 'refunded'
-        ? await supabase.rpc('complete_marketplace_item_refund', { p_return_id: button.dataset.returnId })
+        ? await supabase.rpc('complete_marketplace_item_refund', { p_return_id: button.dataset.returnId, p_demo: demoPayment })
         : await supabase.rpc('review_marketplace_item_return', { p_return_id: button.dataset.returnId, p_decision: action, p_reason: reason || '' });
       if (result.error) {
         button.disabled = false;
         toastAdmin(result.error.message || 'The return request could not be updated.');
         return;
       }
-      toastAdmin(action === 'approve' ? 'Return approved. The store can coordinate its return.' : action === 'reject' ? 'Return rejected with the recorded reason.' : 'Refund marked as sent.');
+      toastAdmin(action === 'approve' ? 'Return approved. The store can coordinate its return.' : action === 'reject' ? 'Return rejected with the recorded reason.' : demoPayment ? 'Demo refund recorded.' : 'Refund marked as sent.');
       window.setTimeout(() => window.dispatchEvent(new Event('hashchange')), 400);
     });
   }
   // Shipping and Furgo Voucher settings save independently so each can be managed on its own.
-  const saveMarketplaceSettings = (settings, feedback, successMessage, actionKey) => {
+  const saveMarketplaceSettings = async (settings, feedback, successMessage, actionKey) => {
     try {
-      localStorage.setItem(marketplaceOfferSettingsKey, JSON.stringify(settings));
+      await saveSharedAppData(marketplaceOfferSettingsKey, settings, { notify: false });
       void recordAdminAction('marketplace_offer_settings_updated', 'marketplace', actionKey);
       feedback.textContent = successMessage;
       feedback.className = 'admin-market-offer-feedback success';
-    } catch {
-      feedback.textContent = 'Settings could not be saved in this browser.';
+      return true;
+    } catch (error) {
+      feedback.textContent = error.message || 'Settings could not be saved online.';
       feedback.className = 'admin-market-offer-feedback error';
     }
   };
@@ -2882,7 +2714,7 @@ function setupAdminMarketplace() {
     const settings = loadMarketplaceOfferSettings();
     settings.freeShippingMinimum = Number(fields.freeShippingMinimum.value);
     settings.deliveryFee = Number(fields.deliveryFee.value);
-    saveMarketplaceSettings(settings, shippingForm.querySelector('[data-market-shipping-feedback]'), 'Shipping settings saved and applied to customer checkout.', 'shipping');
+    void saveMarketplaceSettings(settings, shippingForm.querySelector('[data-market-shipping-feedback]'), 'Shipping settings saved and applied to customer checkout.', 'shipping');
   });
   const offerForm = document.querySelector('[data-admin-market-offer]');
   const voucherStatusLabel = offerForm?.querySelector('[data-admin-voucher-status]');
@@ -2940,7 +2772,7 @@ function setupAdminMarketplace() {
     offerForm?.elements.voucherCode.focus();
   });
   cancelVoucherEdit?.addEventListener('click', () => resetFurgoVoucherForm());
-  voucherList?.addEventListener('click', (event) => {
+  voucherList?.addEventListener('click', async (event) => {
     const editButton = event.target.closest('[data-edit-furgo-voucher]');
     const deleteButton = event.target.closest('[data-delete-furgo-voucher]');
     if (editButton && offerForm) {
@@ -2965,13 +2797,14 @@ function setupAdminMarketplace() {
       if (!voucher || !window.confirm(`Delete the ${voucher.code} Furgo voucher?`)) return;
       settings.furgoVouchers = settings.furgoVouchers.filter((entry) => String(entry.id) !== String(voucher.id));
       settings.voucher = settings.furgoVouchers[0] || { ...settings.voucher, enabled: false };
-      localStorage.setItem(marketplaceOfferSettingsKey, JSON.stringify(settings));
+      const feedback = offerForm.querySelector('[data-admin-offer-feedback]');
+      if (!await saveMarketplaceSettings(settings, feedback, 'Furgo voucher deleted.', 'furgo-voucher')) return;
       void recordAdminAction('marketplace_furgo_voucher_deleted', 'marketplace', voucher.id || voucher.code);
       if (offerForm?.elements.voucherId.value === String(voucher.id || '')) resetFurgoVoucherForm(true);
       renderAdminFurgoVouchers();
     }
   });
-  offerForm?.addEventListener('submit', (event) => {
+  offerForm?.addEventListener('submit', async (event) => {
     event.preventDefault();
     if (!offerForm.reportValidity()) return;
     const fields = offerForm.elements;
@@ -3008,7 +2841,7 @@ function setupAdminMarketplace() {
     settings.offerTitle = fields.offerTitle.value.trim();
     settings.offerDescription = fields.offerDescription.value.trim();
     settings.voucher = vouchers[0] || { ...settings.voucher, enabled: false };
-    saveMarketplaceSettings(settings, feedback, editingId ? 'Furgo voucher updated.' : 'Furgo voucher created.', 'furgo-voucher');
+    if (!await saveMarketplaceSettings(settings, feedback, editingId ? 'Furgo voucher updated.' : 'Furgo voucher created.', 'furgo-voucher')) return;
     renderAdminFurgoVouchers();
     resetFurgoVoucherForm(true);
     fields.offerTitle.value = settings.offerTitle;
@@ -7575,6 +7408,7 @@ function wireForms() {
 
   document.querySelectorAll('[data-logout]').forEach((button) => button.addEventListener('click', (event) => {
     event.preventDefault();
+    clearMarketplaceOrderCache();
     void supabase.auth.signOut().finally(() => {
       sessionStorage.removeItem('furgo-demo-auth');
       sessionStorage.removeItem('furgo-customer-portal-view');
@@ -8098,4 +7932,10 @@ window.addEventListener('storage', (event) => {
   if (event.key === 'furgo-service-outlet-directory' || /furgo-demo-(grooming-bookings|hotel-bookings|hotel-settings|pet-hotel-bookings|daycare-bookings|daycare-settings|pet-daycare-bookings|daycare-orders|check-in-tokens|driver-locations|customer-records|help-center-details|support-requests|marketplace-orders|marketplace-products|marketplace-offers|promotions|service-banners|marketplace-cart|marketplace-subscription-cart|marketplace-favorites|local-finder-favorites|addresses|payment-methods|credit-balance|credit-transactions|daycare-passes)/.test(event.key || '')) render();
 });
 
+supabase.auth.onAuthStateChange((event, session) => {
+  if (event === 'SIGNED_OUT' || (session?.user && session.user.id !== marketplaceCheckoutOwner())) {
+    clearMarketplaceOrderCache();
+    if (event === 'SIGNED_OUT') window.setTimeout(() => { if (document.querySelector('.my-orders-page, .admin-portal-page')) render(); }, 0);
+  }
+});
 void initializeSupabaseSession();

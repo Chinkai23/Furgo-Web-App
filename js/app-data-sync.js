@@ -1,6 +1,7 @@
 // Section: Supabase application data sync
 // Function: Keep prototype customer state and Admin-managed catalogs in shared Supabase storage.
 import { supabase } from './supabase.js';
+import { uploadMarketplaceLegacySnapshots } from './marketplace-legacy-recovery.js';
 
 const marketplaceOrdersKey = 'furgo-demo-marketplace-orders';
 
@@ -112,6 +113,7 @@ function compactStoredOrderCache() {
   const setItem = originalSetItem || globalThis.Storage?.prototype?.setItem;
   if (!setItem) return;
   for (const key of receiptOrderKeys) {
+    if (key === marketplaceOrdersKey) continue;
     try {
       const storage = globalThis.localStorage;
       const current = storage.getItem(key);
@@ -147,6 +149,7 @@ function canManageSharedKey(role, key) {
 }
 
 function readLocal(key) {
+  if (key === marketplaceOrdersKey) return readMarketplaceOrderCache();
   const raw = localStorage.getItem(key);
   if (raw == null) return null;
   try { return JSON.parse(raw); } catch { return raw; }
@@ -195,40 +198,35 @@ function safeDate(value) {
   return /^\d{4}-\d{2}-\d{2}$/.test(String(value || '')) ? value : null;
 }
 
-// Preserve the existing first-login import for old customer orders. This path
-// only fills missing rows and cannot update or delete an existing order or line.
-async function restoreLegacyMarketplaceOrder(record, ownerId) {
-  record = compactReceiptOrder(record);
-  const id = String(record.id);
-  const { _cloudOwnerId, _orderVersion, userId, items = [], ...details } = record;
-  const { data: existing, error: lookupError } = await supabase.from('marketplace_orders').select('id').eq('id', id).maybeSingle();
-  if (lookupError) throw lookupError;
-  if (existing) {
-    const { data: existingItems, error } = await supabase.from('marketplace_order_items').select('line_number').eq('order_id', id).limit(1);
-    if (error) throw error;
-    if (existingItems?.length) return;
-  } else {
-    const { error } = await supabase.from('marketplace_orders').insert({
-      id,
-      user_id: ownerId,
-      reference: String(record.reference || id),
-      status: String(record.status || 'New'),
-      payment_status: String(record.paymentStatus || 'Pending'),
-      total: Number(record.total) || 0,
-      outlet: String(record.outlet || record.fulfillmentOutlet || ''),
-      details,
-      created_at: safeTimestamp(record.createdAt),
-      updated_at: new Date().toISOString(),
+// Marketplace order snapshots live only for the current authenticated tab.
+let marketplaceCacheOwner = '';
+let marketplaceOrderCache = [];
+let marketplaceLegacyHistory = [];
+
+export function clearMarketplaceOrderCache() {
+  marketplaceCacheOwner = '';
+  marketplaceOrderCache = [];
+  marketplaceLegacyHistory = [];
+}
+
+export function readMarketplaceOrderCache(archiveOwner) {
+  if (!archiveOwner) return structuredClone(marketplaceOrderCache);
+  if (archiveOwner !== marketplaceCacheOwner) return [];
+  const ids = new Set(marketplaceOrderCache.map((record) => String(record.id)));
+  return structuredClone([...marketplaceOrderCache, ...marketplaceLegacyHistory.filter((record) => !ids.has(String(record.id)))]);
+}
+
+// Upload encrypted evidence as-is. The intake RPC cannot grant history
+// ownership and acknowledges an identical retry without storing it twice.
+export async function preserveBrowserMarketplaceHistory() {
+  try {
+    await uploadMarketplaceLegacySnapshots(async (envelope) => {
+      const { data, error } = await supabase.rpc('preserve_marketplace_legacy_snapshot', { p_snapshot: envelope });
+      if (error) throw error;
+      return data;
     });
-    if (error) throw error;
-  }
-  if (Array.isArray(items) && items.length) {
-    const { error } = await supabase.from('marketplace_order_items').insert(items.map((item, index) => ({
-      order_id: id,
-      line_number: index + 1,
-      item,
-    })));
-    if (error) throw error;
+  } catch {
+    console.warn('Encrypted Marketplace history will retry on the next authenticated load.');
   }
 }
 
@@ -306,28 +304,58 @@ export async function saveDedicatedBooking(key, booking, records) {
   window.dispatchEvent(new StorageEvent('storage', { key }));
 }
 
-// Marketplace checkout must commit to the dedicated order tables before it
-// reports success. The legacy app_data mirror cannot feed store order RPCs.
-export async function saveMarketplaceOrder(order, records) {
-  if (!order?.id || !Array.isArray(records)) throw new Error('This Marketplace order could not be saved.');
-  if (!activeUserId) throw new Error('Please sign in again before placing your order.');
-  if (!Array.isArray(order.items) || order.items.length === 0) throw new Error('Your cart has no products to save. Please return to your cart and try again.');
-  const { error } = await supabase.rpc('create_marketplace_order', {
-    p_order: { ...order, userId: activeUserId },
+export function marketplaceCheckoutOwner() {
+  return marketplaceCacheOwner;
+}
+
+export async function quoteMarketplaceOrder(items, voucherCode) {
+  const { data, error } = await supabase.rpc('quote_marketplace_order', { p_items: items, p_voucher_code: voucherCode });
+  if (error) throw error;
+  if (!Number.isSafeInteger(data?.totalCents)) throw new Error('The checkout total could not be confirmed.');
+  return data;
+}
+
+function confirmedMarketplaceCheckout(owner, requestId, result) {
+  if (owner !== marketplaceCacheOwner) throw new Error('The checkout account changed. Sign in to the original account to recover the order.');
+  if (result?.requestId !== requestId || !result.order?.id || result.order.user_id !== owner || !Array.isArray(result.items) || !result.items.length) {
+    throw new Error('The order response could not be confirmed.');
+  }
+  try { applyDedicatedRow(marketplaceOrdersKey, result.order, result.items); }
+  catch (error) { console.warn('The committed Marketplace order could not be cached:', error); }
+  return dedicatedRecordFromRow(marketplaceOrdersKey, result.order, result.items);
+}
+
+export async function findMarketplaceCheckout(owner, requestId) {
+  if (!owner || owner !== marketplaceCacheOwner) throw new Error('Please sign in to recover your order.');
+  const { data, error } = await supabase.rpc('get_marketplace_checkout', { p_request_id: requestId });
+  if (error) throw error;
+  return data == null ? null : confirmedMarketplaceCheckout(owner, requestId, data);
+}
+
+export async function saveMarketplaceOrder(owner, { id, payload, totalCents }) {
+  if (!owner || owner !== marketplaceCacheOwner) throw new Error('Please sign in before placing your order.');
+  const { data, error } = await supabase.rpc('create_marketplace_order', {
+    p_request_id: id, p_checkout: payload, p_expected_total_cents: totalCents,
   });
   if (error) throw error;
+  if (data?.outcome === 'quote_changed' && Number.isSafeInteger(data.quote?.totalCents)) return { quote: data.quote };
+  return { order: confirmedMarketplaceCheckout(owner, id, data) };
+}
 
-  const nextRecords = records.map((record) => String(record.id) === String(order.id)
-    ? { ...order, userId: activeUserId }
-    : record);
-  if (!nextRecords.some((record) => String(record.id) === String(order.id))) {
-    nextRecords.unshift({ ...order, userId: activeUserId });
+export async function syncConfirmedMarketplaceCart(owner, cart) {
+  if (!owner || owner !== marketplaceCacheOwner) throw new Error('Sign in to finish updating your cart.');
+  await writeRemote('furgo-demo-marketplace-cart', cart);
+}
+
+export async function refreshMarketplaceDemoCredit(owner) {
+  const keys = ['furgo-demo-credit-balance', 'furgo-demo-credit-transactions'];
+  const { data, error } = await supabase.from('app_data').select('storage_key,payload')
+    .eq('owner_id', owner).eq('scope', 'customer').in('record_id', keys.map((key) => rowId('customer', key, owner)));
+  if (error) throw error;
+  if (owner !== marketplaceCacheOwner) return;
+  for (const row of data || []) {
+    originalSetItem.call(localStorage, row.storage_key, JSON.stringify(row.payload));
   }
-  if (!originalSetItem) originalSetItem = Storage.prototype.setItem;
-  applyingRemoteData = true;
-  try { originalSetItem.call(localStorage, marketplaceOrdersKey, JSON.stringify(compactReceiptRecords(marketplaceOrdersKey, nextRecords))); }
-  finally { applyingRemoteData = false; }
-  window.dispatchEvent(new StorageEvent('storage', { key: marketplaceOrdersKey }));
 }
 
 // Admin actions submit only the intended change and the version rendered in the UI.
@@ -336,6 +364,7 @@ export async function updateMarketplaceOrder(orderId, expectedVersion, action, p
   if (expectedVersion == null || expectedVersion === '' || !Number.isSafeInteger(version) || version < 0) {
     throw new Error('Refresh the order before making changes.');
   }
+  const owner = marketplaceCacheOwner;
   const { data, error } = await supabase.rpc('update_admin_marketplace_order', {
     p_order_id: orderId,
     p_expected_version: version,
@@ -347,6 +376,7 @@ export async function updateMarketplaceOrder(orderId, expectedVersion, action, p
   if (data?.id !== orderId || data?.order_version == null || !Number.isSafeInteger(confirmedVersion) || confirmedVersion < version) {
     throw new Error('The order update could not be confirmed. Refresh the order before trying again.');
   }
+  if (owner !== marketplaceCacheOwner) return;
   try { applyDedicatedRow(marketplaceOrdersKey, data); }
   catch (cacheError) { console.warn('The Marketplace order was saved, but its local cache could not be updated:', cacheError); }
 }
@@ -379,10 +409,15 @@ export async function saveOrderRecords(key, order, records) {
 export function cacheSyncedRecords(key, records, { notify = true } = {}) {
   if (!key || !Array.isArray(records)) return;
   records = compactReceiptRecords(key, records);
-  if (!originalSetItem) originalSetItem = Storage.prototype.setItem;
-  applyingRemoteData = true;
-  try { originalSetItem.call(localStorage, key, JSON.stringify(records)); }
-  finally { applyingRemoteData = false; }
+  if (key === marketplaceOrdersKey) {
+    if (!marketplaceCacheOwner) return;
+    marketplaceOrderCache = structuredClone(records);
+  } else {
+    if (!originalSetItem) originalSetItem = Storage.prototype.setItem;
+    applyingRemoteData = true;
+    try { originalSetItem.call(localStorage, key, JSON.stringify(records)); }
+    finally { applyingRemoteData = false; }
+  }
   if (notify) window.dispatchEvent(new StorageEvent('storage', { key }));
 }
 
@@ -391,6 +426,7 @@ export async function refreshMarketplaceCatalogFromDatabase({ notify = true } = 
   const { data, error } = await supabase.from('app_data')
     .select('payload')
     .eq('record_id', 'shared:furgo-demo-marketplace-products:shared')
+    .eq('scope', 'shared').eq('storage_key', 'furgo-demo-marketplace-products').is('owner_id', null)
     .maybeSingle();
   if (error) throw error;
   if (!Array.isArray(data?.payload)) return null;
@@ -403,6 +439,7 @@ function dedicatedRecordFromRow(key, row, items = []) {
   if (key === marketplaceOrdersKey) {
     record._orderVersion = row.order_version;
     record.paymentStatus = row.payment_status;
+    record.paymentChannel = row.payment_channel;
     record.total = Number(row.total) || 0;
     record.outlet = row.outlet || record.outlet || '';
     record.items = items;
@@ -483,19 +520,16 @@ async function loadDedicatedOperations(userId, role) {
       return Boolean((email && recordEmail === email) || (phone && recordPhone === phone));
     };
     for (const [key, records] of values) {
-      if (records.length) continue;
+      if (key === marketplaceOrdersKey || records.length) continue;
       const localRecords = Array.isArray(localValues.get(key)) ? localValues.get(key).filter(belongsToCustomer) : [];
       for (const record of localRecords) {
-        if (key === marketplaceOrdersKey && record.id) await restoreLegacyMarketplaceOrder(record, userId);
-        else if (key !== marketplaceOrdersKey) await writeDedicatedRecord(key, record, userId);
+        await writeDedicatedRecord(key, record, userId);
       }
       if (localRecords.length) values.set(key, localRecords.map((record) => ({ ...record, userId })));
     }
   }
-  for (const [key, records] of values) {
-    originalSetItem.call(localStorage, key, JSON.stringify(records));
-    window.dispatchEvent(new StorageEvent('storage', { key }));
-  }
+  if (marketplaceCacheOwner !== userId) return values;
+  for (const [key, records] of values) cacheSyncedRecords(key, records);
   for (const key of ['furgo-demo-pet-daycare-bookings', 'furgo-demo-daycare-orders']) {
     originalSetItem.call(localStorage, key, '[]');
   }
@@ -520,9 +554,11 @@ function applyDedicatedRow(key, row, items, removed = false) {
   cacheSyncedRecords(key, records);
 }
 
-async function refreshDedicatedMarketplaceOrder(orderId, removed = false) {
+async function refreshDedicatedMarketplaceOrder(owner, orderId, removed = false) {
+  if (owner !== marketplaceCacheOwner) return;
   const { data: order, error } = await supabase.from('marketplace_orders').select('*').eq('id', orderId).maybeSingle();
   if (error) throw error;
+  if (owner !== marketplaceCacheOwner) return;
   if (!order) {
     applyDedicatedRow(marketplaceOrdersKey, { id: orderId }, [], true);
     return;
@@ -537,6 +573,7 @@ async function refreshDedicatedMarketplaceOrder(orderId, removed = false) {
     refundAmount: Number(itemReturn.refund_amount) || 0, supplierResponse: itemReturn.supplier_response || '',
     decisionReason: itemReturn.decision_reason || '', requestedAt: itemReturn.requested_at, refundedAt: itemReturn.refunded_at,
   }]));
+  if (owner !== marketplaceCacheOwner) return;
   applyDedicatedRow(marketplaceOrdersKey, order, (items || []).map((row) => ({ ...row.item, lineNumber: Number(row.line_number), returnRequest: returnByLine.get(Number(row.line_number)) || null })), removed);
 }
 
@@ -570,6 +607,7 @@ function installStorageMirror(userId, role) {
   if (!originalRemoveItem) originalRemoveItem = Storage.prototype.removeItem;
   compactStoredOrderCache();
   Storage.prototype.setItem = function(key, value) {
+    if (this === localStorage && key === marketplaceOrdersKey) return;
     if (this === localStorage && receiptOrderKeys.has(key)) {
       try { value = JSON.stringify(compactReceiptRecords(key, JSON.parse(value))); } catch { /* Keep invalid JSON for the existing error path. */ }
     }
@@ -631,8 +669,10 @@ async function loadMarketplaceSupplierContacts(role) {
 
 function applyRealtimeRow(row, removed = false) {
   const key = row?.storage_key;
-  if (!allSyncedKeys.has(key) || dedicatedTablesReady && (dedicatedOperationKeys.has(key) || key === 'furgo-demo-daycare-orders')) return;
+  if (key === marketplaceOrdersKey || !allSyncedKeys.has(key) || dedicatedTablesReady && (dedicatedOperationKeys.has(key) || key === 'furgo-demo-daycare-orders')) return;
   const scope = row.scope || getScope(key);
+  if (['furgo-demo-marketplace-products', 'furgo-demo-marketplace-offers'].includes(key)
+    && (scope !== 'shared' || row.record_id !== rowId('shared', key, null) || row.owner_id != null)) return;
   // Shared catalogs (including Marketplace products) must stay fresh in
   // director/admin sessions too. Previously full admin roles skipped this
   // branch and then fell through to the owner/operation checks, so realtime
@@ -690,6 +730,8 @@ function applyGroomingRealtimeRow(row, removed = false) {
 
 // Loads cloud-owned values before the portal renders and seeds missing rows from this browser's saved prototype data.
 export async function loadCloudAppData(userId, role) {
+  clearMarketplaceOrderCache();
+  marketplaceCacheOwner = userId;
   if (!originalSetItem) originalSetItem = Storage.prototype.setItem;
   if (!originalRemoveItem) originalRemoveItem = Storage.prototype.removeItem;
   activeUserId = userId;
@@ -707,6 +749,7 @@ export async function loadCloudAppData(userId, role) {
   }
   const { data, error } = await supabase.from('app_data').select('record_id,scope,storage_key,owner_id,payload');
   if (error) throw error;
+  if (marketplaceCacheOwner !== userId) return { recordsLoaded: 0 };
   const rows = data || [];
   const byRecordId = new Map(rows.map((row) => [row.record_id, row]));
   let dedicatedDataReady = false;
@@ -714,6 +757,7 @@ export async function loadCloudAppData(userId, role) {
   try {
     try {
       await loadDedicatedOperations(userId, role);
+      if (marketplaceCacheOwner !== userId) return { recordsLoaded: 0 };
       dedicatedDataReady = true;
       dedicatedTablesReady = true;
     } catch (dedicatedError) {
@@ -721,13 +765,17 @@ export async function loadCloudAppData(userId, role) {
     }
     for (const key of allSyncedKeys) {
       if (role === 'executive' && !staffLegacyOrderKeys.has(key) && key !== 'furgo-demo-check-in-tokens' && !executiveMarketplaceKeys.has(key)) continue;
+      if (key === marketplaceOrdersKey) continue;
       if (dedicatedDataReady && (dedicatedOperationKeys.has(key) || key === 'furgo-demo-daycare-orders')) continue;
       const scope = getScope(key);
       if (scope === 'shared') {
         if (role === 'manager' && !managerSharedSettingsKeys.has(key)) continue;
         const shared = byRecordId.get(rowId('shared', key, null));
-        if (shared) originalSetItem.call(localStorage, key, JSON.stringify(compactReceiptRecords(key, shared.payload)));
-        else if (canManageSharedKey(role, key)) await writeRemote(key, readLocal(key));
+        if (shared?.scope === 'shared' && shared.storage_key === key && shared.owner_id == null) {
+          originalSetItem.call(localStorage, key, JSON.stringify(compactReceiptRecords(key, shared.payload)));
+        } else if (['furgo-demo-marketplace-products', 'furgo-demo-marketplace-offers'].includes(key)) {
+          originalRemoveItem.call(localStorage, key);
+        } else if (canManageSharedKey(role, key)) await writeRemote(key, readLocal(key));
         continue;
       }
 
@@ -751,6 +799,15 @@ export async function loadCloudAppData(userId, role) {
   } finally {
     applyingRemoteData = false;
   }
+  if (marketplaceCacheOwner !== userId) return { recordsLoaded: 0 };
+  await preserveBrowserMarketplaceHistory();
+  if (role === 'customer' && marketplaceCacheOwner === userId) {
+    const { data: history, error: historyError } = await supabase.rpc('get_marketplace_legacy_history');
+    if (!historyError && marketplaceCacheOwner === userId && Array.isArray(history)) {
+      marketplaceLegacyHistory = history;
+    }
+  }
+  if (marketplaceCacheOwner !== userId) return { recordsLoaded: 0 };
   try { await loadMarketplaceSupplierContacts(role); }
   catch (error) { console.warn('Supabase marketplace store contacts are not ready yet:', error); }
   originalSetItem.call(localStorage, cacheOwnerKey, userId);
@@ -779,15 +836,15 @@ export async function loadCloudAppData(userId, role) {
     realtimeChannel
       .on('postgres_changes', { event: '*', schema: 'public', table: 'marketplace_orders' }, (change) => {
         const row = change.new?.id ? change.new : change.old;
-        if (row) void refreshDedicatedMarketplaceOrder(row.id, change.eventType === 'DELETE').catch((syncError) => console.warn('Could not refresh Marketplace order:', syncError));
+        if (row) void refreshDedicatedMarketplaceOrder(userId, row.id, change.eventType === 'DELETE').catch((syncError) => console.warn('Could not refresh Marketplace order:', syncError));
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'marketplace_order_items' }, (change) => {
         const row = change.new?.order_id ? change.new : change.old;
-        if (row?.order_id) void refreshDedicatedMarketplaceOrder(row.order_id).catch((syncError) => console.warn('Could not refresh Marketplace order items:', syncError));
+        if (row?.order_id) void refreshDedicatedMarketplaceOrder(userId, row.order_id).catch((syncError) => console.warn('Could not refresh Marketplace order items:', syncError));
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'marketplace_item_returns' }, (change) => {
         const row = change.new?.order_id ? change.new : change.old;
-        if (row?.order_id) void refreshDedicatedMarketplaceOrder(row.order_id).then(() => {
+        if (row?.order_id) void refreshDedicatedMarketplaceOrder(userId, row.order_id).then(() => {
           document.querySelector('[data-marketplace-return-cases]')?.dispatchEvent(new Event('marketplace-return-change'));
           document.querySelector('[data-marketplace-return-notification]')?.dispatchEvent(new Event('marketplace-return-change'));
         }).catch((syncError) => console.warn('Could not refresh Marketplace return status:', syncError));
@@ -807,7 +864,7 @@ export async function loadCloudAppData(userId, role) {
 
 // Explicit Save actions need to await the shared Supabase write. The generic
 // localStorage mirror is intentionally fire-and-forget for prototype settings.
-export async function saveSharedAppData(key, value) {
+export async function saveSharedAppData(key, value, { notify = true } = {}) {
   if (!sharedKeys.has(key)) throw new Error('This is not a shared setting.');
   if (!activeUserId) throw new Error('Please sign in again before saving.');
   if (!canManageSharedKey(activeRole, key)) throw new Error('Manager or Director access is required to save these settings.');
@@ -819,5 +876,5 @@ export async function saveSharedAppData(key, value) {
   } finally {
     applyingRemoteData = false;
   }
-  window.dispatchEvent(new StorageEvent('storage', { key }));
+  if (notify) window.dispatchEvent(new StorageEvent('storage', { key }));
 }

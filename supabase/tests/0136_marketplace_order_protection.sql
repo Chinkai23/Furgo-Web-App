@@ -1,4 +1,4 @@
--- Run against a disposable or staging database after migration 0136.
+-- Run against a disposable or staging database after the checkout migration.
 -- All test fixtures and mutations are rolled back.
 begin;
 
@@ -19,7 +19,9 @@ declare
   order_b text := 'order-test-b-' || gen_random_uuid();
   bank_order text := 'order-test-bank-' || gen_random_uuid();
   failed_bank_order text := 'order-test-failed-bank-' || gen_random_uuid();
-  checkout_order text := 'order-test-checkout-' || gen_random_uuid();
+  checkout_request uuid := gen_random_uuid();
+  checkout_items jsonb;
+  checkout_total bigint;
   store_order text := 'order-test-store-' || gen_random_uuid();
   product_id text := 'product-test-' || gen_random_uuid();
   warehouse_id uuid := gen_random_uuid();
@@ -76,7 +78,7 @@ begin
   values ('shared:furgo-demo-marketplace-products:shared', 'shared', 'furgo-demo-marketplace-products', '[]')
   on conflict (record_id) do nothing;
   update public.app_data set payload = payload || jsonb_build_array(jsonb_build_object('id', product_id,
-    'name', 'Test stock', 'warehouseProductId', warehouse_id, 'variants', '[{"id":"standard","label":"Standard","stock":2}]'::jsonb))
+    'name', 'Test stock', 'warehouseProductId', warehouse_id, 'variants', '[{"id":"standard","label":"Standard","stock":2,"price":15}]'::jsonb))
   where record_id = 'shared:furgo-demo-marketplace-products:shared';
 
   set local role authenticated;
@@ -124,8 +126,15 @@ begin
     raise exception 'A customer edited their own Marketplace order through the admin RPC.';
   exception when insufficient_privilege then null;
   end;
-  perform public.create_marketplace_order(jsonb_build_object('id', checkout_order, 'status', 'Pending Payment',
-    'paymentStatus', 'Pending Payment', 'paymentMethod', 'Online Payment', 'items', jsonb_build_array(existing_item)));
+  checkout_items := jsonb_build_array(jsonb_build_object('productId', product_id, 'variantId', 'standard', 'quantity', 1));
+  checkout_total := (public.quote_marketplace_order(checkout_items)->>'totalCents')::bigint;
+  select public.create_marketplace_order(checkout_request, jsonb_build_object(
+    'payment', 'gateway', 'items', checkout_items,
+    'address', '{"name":"Test Buyer","phone":"0123456789","street":"Test Street","postcode":"50000","city":"Kuala Lumpur","state":"Kuala Lumpur"}'::jsonb
+  ), checkout_total) into saved;
+  if saved->'order'->>'payment_status' is distinct from 'Pending Payment' then
+    raise exception 'Customer checkout failed under P0 order protection.';
+  end if;
   perform set_config('request.jwt.claim.sub', driver_id::text, true);
   begin
     perform public.update_admin_marketplace_order(order_a, 3, 'save_receipt', existing_receipt);

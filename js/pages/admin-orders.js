@@ -1,5 +1,5 @@
 import { escapeHTML } from '../shared.js';
-import { marketplaceOrdersKey, loadMarketplaceOrders } from './marketplace-data.js';
+import { marketplaceOrdersKey, loadMarketplaceOrders, marketplacePaymentLabel } from './marketplace-data.js';
 import { groomingBookingsKey, loadGroomingBookings } from './grooming-data.js';
 import { hotelBookingsKey, loadHotelBookings } from './hotel-data.js';
 import { applyCheckInScan, extractCheckInCode, formatCheckInToken, previewCheckInScan, refreshCheckInTokens, setupCheckInCodeInput } from './check-in.js';
@@ -22,6 +22,7 @@ const orderSources = [
 ];
 
 function readOrders(key) {
+  if (key === marketplaceOrdersKey) return loadMarketplaceOrders();
   try { const value = JSON.parse(localStorage.getItem(key) || '[]'); return Array.isArray(value) ? value : []; } catch { return []; }
 }
 
@@ -84,7 +85,7 @@ function importantOrderRows(order) {
     : order.serviceId === 'hotel'
       ? [order.roomName, order.checkIn || order.startDate, order.checkOut || order.endDate, order.outlet].filter(Boolean).join(' · ')
       : [order.packageName || order.planName, order.date || order.bookingDate, order.time || order.dropoffTime, order.pickupTime && `Pick-up ${order.pickupTime}`, order.outlet].filter(Boolean).join(' · ');
-  const payment = [order.paymentStatus || 'Pending Payment', order.paymentMethod].filter(Boolean).join(' · ');
+  const payment = [order.paymentStatus || 'Pending Payment', order.serviceId === 'marketplace' ? marketplacePaymentLabel(order) : order.paymentMethod].filter(Boolean).join(' · ');
   const pets = Array.isArray(order.petNames) && order.petNames.length ? order.petNames.join(' | ') : order.petName || order.pet?.name;
   return [
     ['Customer', order.customerName || order.name || order.customer?.name],
@@ -178,7 +179,7 @@ function receiptEditorMarkup(order, reference, receiptType) {
       <label>Discount (MYR)<input name="discount" type="number" min="0" step="0.01" value="${discount.toFixed(2)}" required /></label>
       <label>Delivery (MYR)<input name="delivery" type="number" min="0" step="0.01" value="${delivery.toFixed(2)}" required /></label>
       <label>Total paid (MYR)<input name="total" type="number" min="0" step="0.01" value="${total.toFixed(2)}" required /></label>
-      <label>Payment method<input name="paymentMethod" value="${escapeHTML(saved.paymentMethod ?? order.paymentMethod ?? '—')}" maxlength="100" /></label>
+      <label>Payment method<input name="paymentMethod" value="${escapeHTML(saved.paymentMethod ?? (isMarketplace ? marketplacePaymentLabel(order) : order.paymentMethod) ?? '—')}" maxlength="100" /></label>
       <label>Payment status<input name="paymentStatus" value="${escapeHTML(saved.paymentStatus ?? order.paymentStatus ?? 'Paid')}" maxlength="100" /></label>
       <label class="admin-generated-receipt-wide">Issued by<input name="issuedBy" value="${escapeHTML(saved.issuedBy || 'Furgo')}" maxlength="120" /></label>
     </div>
