@@ -58,6 +58,7 @@ import { localFinderFavoritesPage, localFinderListPage, localFinderPage, localFi
 import { adminLocalFinderPage, setupAdminLocalFinder } from './pages/admin-local-finder.js';
 import { supabase, toMalaysianE164 } from './supabase.js';
 import { refreshSharedOutlets } from './pages/outlet-directory.js';
+import { recoverWarehouseStockRequest, submitWarehouseStockRequest } from './warehouse-stock.js';
 import { cacheSyncedRecords, clearMarketplaceOrderCache, loadCloudAppData, marketplaceCheckoutOwner, preserveBrowserMarketplaceHistory, refreshMarketplaceCatalogFromDatabase, saveSharedAppData, updateMarketplaceOrder } from './app-data-sync.js';
 import { refreshFurgoCoinBalance } from './coin-wallet.js';
 import { startQRScanner } from './qr-scanner.js';
@@ -2443,9 +2444,11 @@ function setupAdminMarketplace() {
     sortRows();
     filterRows();
     const livePhotoStates = new WeakMap();
+    const liveProductBaselines = new WeakMap();
+    const liveProductSnapshot = loadMarketplaceProducts();
     const livePhotoState = (form) => {
       if (!livePhotoStates.has(form)) {
-        const product = loadMarketplaceProducts().find((entry) => entry.id === form.dataset.liveProductExtraDetails);
+        const product = liveProductSnapshot.find((entry) => entry.id === form.dataset.liveProductExtraDetails);
         livePhotoStates.set(form, (product?.images || []).map((url) => ({ url, previewUrl: safeMarketplaceImage(url) })));
       }
       return livePhotoStates.get(form);
@@ -2477,7 +2480,14 @@ function setupAdminMarketplace() {
       return '';
     };
     const liveProductRows = document.querySelector('[data-live-product-rows]');
-    liveProductRows?.querySelectorAll('[data-live-product-extra-details]').forEach(renderLiveProductPhotos);
+    liveProductRows?.querySelectorAll('[data-live-product-extra-details]').forEach((form) => {
+      const product = liveProductSnapshot.find((entry) => entry.id === form.dataset.liveProductExtraDetails);
+      const variant = form.dataset.variantId
+        ? product?.variants?.find((entry) => String(entry.id) === form.dataset.variantId)
+        : product?.variants?.[Number(form.dataset.variantIndex)];
+      if (product && variant) liveProductBaselines.set(form, { product, variant, fields: new FormData(form) });
+      renderLiveProductPhotos(form);
+    });
     liveProductRows?.addEventListener('change', async (event) => {
       const form = event.target.closest('[data-live-product-extra-details]');
       if (!form) return;
@@ -2545,14 +2555,21 @@ function setupAdminMarketplace() {
       const form = event.target.closest('[data-live-product-extra-details]');
       if (!form) return;
       event.preventDefault();
-      const products = loadMarketplaceProducts();
-      const product = products.find((entry) => entry.id === form.dataset.liveProductExtraDetails);
-      if (!product) return;
-      const fields = form.elements;
-      const variant = (form.dataset.variantId
-        ? (product.variants || []).find((item) => String(item.id || '') === form.dataset.variantId)
-        : null) || product.variants?.[Number(form.dataset.variantIndex)];
-      if (!variant) return;
+      const baseline = liveProductBaselines.get(form);
+      if (!baseline) return;
+      const fields = new FormData(form);
+      const changed = (key) => fields.has(key) && fields.get(key) !== baseline.fields.get(key);
+      const fieldValue = (key) => String(fields.get(key) || '').trim();
+      const productFields = Object.fromEntries(
+        ['name', 'category', 'description', 'petTypes', 'suitableBreeds', 'issues', 'extraDescription', 'ingredients', 'nutrition']
+          .filter(changed).map((key) => [key, fieldValue(key)]));
+      const variantFields = {};
+      for (const [input, key] of [['variantLabel', 'label'], ['supplierName', 'supplierId'], ['supplierName', 'supplier'], ['sku', 'sku'], ['supplierSku', 'supplierSku']]) {
+        if (changed(input)) variantFields[key] = fieldValue(input);
+      }
+      for (const key of ['price', 'cost', 'stock']) {
+        if (changed(key)) variantFields[key] = Number(fields.get(key));
+      }
       const feedback = form.querySelector('.admin-live-product-save-feedback');
       const photos = livePhotoState(form);
       const photoValidationError = await validateAdminProductPhotos(photos.filter((photo) => photo.file).map((photo) => photo.file), photos.length);
@@ -2560,27 +2577,8 @@ function setupAdminMarketplace() {
         feedback.textContent = photoValidationError;
         return;
       }
-      product.name = fields.name.value.trim();
-      product.category = fields.category.value.trim();
-      product.description = fields.description.value.trim();
-      product.petTypes = fields.petTypes.value.trim();
-      product.suitableBreeds = fields.suitableBreeds.value.trim();
-      product.issues = fields.issues.value.trim();
-      product.extraDescription = fields.extraDescription.value.trim();
-      product.ingredients = fields.ingredients.value.trim();
-      product.nutrition = fields.nutrition.value.trim();
-      const supplierName = fields.supplierName.value.trim();
-      variant.label = fields.variantLabel.value.trim();
-      variant.supplierId = supplierName;
-      variant.supplier = supplierName;
-      variant.price = Number(fields.price.value);
-      // Linked Marketplace stock is derived from warehouse lots by Supabase.
-      // Keep the catalogue cache from sending an editable/stale quantity.
-      if (fields.stock) variant.stock = Number(fields.stock.value);
-      variant.cost = Number(fields.cost.value) || 0;
-      variant.sku = fields.sku.value.trim();
-      variant.supplierSku = fields.supplierSku.value.trim();
       const submit = form.querySelector('[type="submit"]');
+      if (submit.disabled) return;
       submit.disabled = true;
       feedback.textContent = 'Saving product details…';
       try {
@@ -2596,10 +2594,16 @@ function setupAdminMarketplace() {
           if (uploadError) throw uploadError;
           images.push(supabase.storage.from('marketplace-submissions').getPublicUrl(path).data.publicUrl);
         }
-        product.images = images;
-        await saveSharedAppData(marketplaceProductsKey, products);
-        try { await refreshMarketplaceCatalogFromDatabase(); }
-        catch (stockRefreshError) { console.warn('Saved Marketplace product, but could not refresh its warehouse stock total:', stockRefreshError); }
+        if (JSON.stringify(images) !== JSON.stringify(baseline.product.images || [])) productFields.images = images;
+        const { data, error: updateError } = await supabase.rpc('admin_update_marketplace_product_fields', {
+          p_product_id: baseline.product.id,
+          p_variant_id: baseline.variant.id ? 'id:' + baseline.variant.id : 'label:' + (baseline.variant.label || 'Standard'),
+          p_expected_product: baseline.product,
+          p_product_fields: productFields,
+          p_variant_fields: variantFields,
+        });
+        if (updateError) throw updateError;
+        cacheSyncedRecords(marketplaceProductsKey, data, { notify: false });
         photos.forEach((photo) => { if (photo.previewUrl?.startsWith('blob:')) URL.revokeObjectURL(photo.previewUrl); });
         render();
         toastAdmin('All product details saved.');
@@ -2979,6 +2983,8 @@ function setupAdminMarketplace() {
 }
 
 // Store users can submit products and see only order lines assigned to their supplier.
+let recoverWarehouseStockOnReconnect;
+
 function setupMarketplaceSupplierPortal() {
   setupPortalNotifications();
   const supplierProfile = (() => {
@@ -3275,7 +3281,10 @@ function setupMarketplaceSupplierPortal() {
       return `<article class="supplier-photo-item" draggable="true" data-supplier-photo-index="${index}" aria-label="Product photo ${index + 1}; drag to reorder"><span class="supplier-photo-drag-handle" aria-hidden="true">⠿</span><img src="${escapeHTML(preview || '')}" alt="Product photo ${index + 1}" draggable="false" /><span>${index === 0 ? 'Product cover photo' : `Product photo ${index + 1}`}</span><label class="supplier-photo-change">Change<input type="file" accept="image/png,image/jpeg,image/webp,image/gif" data-replace-supplier-photo="${index}" aria-label="Change product photo ${index + 1}" /></label><button type="button" data-remove-supplier-photo="${index}" aria-label="Delete product photo ${index + 1}">Delete</button></article>`;
     }).join('');
   };
+  let supplierProductBaseline = null;
   const resetSupplierEditor = () => {
+    supplierProductBaseline = null;
+    if (supplierForm) delete supplierForm.dataset.createRequestId;
     supplierForm?.reset();
     clearSupplierPhotoPreviews();
     supplierEditorImages = [];
@@ -3316,6 +3325,7 @@ function setupMarketplaceSupplierPortal() {
     const product = supplierCatalog.find((entry) => entry.id === productId);
     const variant = product?.variants?.find((entry) => entry.id === variantId) || product?.variants?.[0];
     if (!product || !variant) return false;
+    supplierProductBaseline = structuredClone(product);
     const fields = supplierForm.elements;
     if (warehouseSupplierFields) warehouseSupplierFields.hidden = true;
     fields.productId.value = product.id;
@@ -3340,6 +3350,7 @@ function setupMarketplaceSupplierPortal() {
     if (!row || !supplierForm) return false;
     const fields = supplierForm.elements;
     const data = row.product_data && typeof row.product_data === 'object' ? row.product_data : {};
+    supplierProductBaseline = structuredClone({ ...data, name: row.name });
     fields.productId.value = '';
     fields.variantId.value = '';
     fields.pendingSubmissionId.value = '';
@@ -3514,6 +3525,9 @@ function setupMarketplaceSupplierPortal() {
     supplierDetailsDialog.innerHTML = '<form class="supplier-stock-details-content supplier-details-form" data-supplier-details-form><h2>Seller Details</h2><p class="supplier-stock-details-total" data-supplier-details-product></p><div class="supplier-inventory-form"><label>Business name<input name="sellerName" readonly /></label><label>Contact name<input name="sellerContact" readonly /></label><label>Contact email<input name="sellerEmail" type="email" readonly /></label><label>Contact phone<input name="sellerPhone" readonly /></label><label class="supplier-inventory-notes">Business address<input name="sellerAddress" readonly /></label></div><div class="supplier-inventory-form-actions"><button type="button" class="button button-light" data-supplier-details-close>Close</button></div></form>';
     inventorySection.append(supplierDetailsDialog);
     stockDialog.addEventListener('cancel', () => { stockDetailContext = null; });
+    let lotEditBaseline = null;
+    let warehouseProductBaseline = null;
+    let lowStockBaseline = null;
     let inventoryRows = [];
     let warehouseProducts = [];
     let inventoryLoaded = false;
@@ -3641,6 +3655,8 @@ function setupMarketplaceSupplierPortal() {
       target.innerHTML = rows.map((variant) => `<div class="supplier-variant-row" data-warehouse-product-variant><input type="hidden" name="warehouseVariantId" value="${escapeHTML(variant.id || '')}" /><label>Option<input name="variantOption" maxlength="100" placeholder="e.g. Chicken Flavour (optional)" value="${escapeHTML(variant.option || '')}" /></label><label>Variant<input name="variantLabel" required maxlength="100" placeholder="e.g. 100 g" value="${escapeHTML(variant.variant || variant.label || '')}" /></label><label>Retail price (MYR)<input name="price" type="number" min="0" step="0.01" required value="${variant.price == null ? '' : Number(variant.price)}" /></label><label>Option SKU<input name="variantSku" maxlength="80" value="${escapeHTML(variant.sku || '')}" /></label><label>Option photo URL<input name="variantImageUrl" type="url" placeholder="Optional image URL" value="${escapeHTML(variant.imageUrl || '')}" /></label><button type="button" class="supplier-variant-remove" data-remove-warehouse-variant aria-label="Remove option" ${rows.length === 1 ? 'disabled' : ''}>×</button></div>`).join('');
     };
     const openWarehouseProductForm = (row = null) => {
+      warehouseProductBaseline = row ? structuredClone(row) : null;
+      delete productForm.dataset.createRequestId;
       productForm.reset();
       productForm.elements.id.value = row?.id || '';
       const data = productData(row);
@@ -3682,7 +3698,9 @@ function setupMarketplaceSupplierPortal() {
       return matchesProduct && String(lot.variant || 'Standard') === String(variantLabel || 'Standard');
     }).sort((a, b) => (Number(a.pick_order) || Number.MAX_SAFE_INTEGER) - (Number(b.pick_order) || Number.MAX_SAFE_INTEGER)
       || String(a.expires_on || '9999-12-31').localeCompare(String(b.expires_on || '9999-12-31'))
-      || String(a.received_on || '').localeCompare(String(b.received_on || '')));
+      || String(a.received_on || '').localeCompare(String(b.received_on || ''))
+      || String(a.created_at || '').localeCompare(String(b.created_at || ''))
+      || String(a.id).localeCompare(String(b.id)));
     renderPackagingOrders = () => {
       if (!packagingTarget) return;
       const paidOrders = supplierOrders.filter((order) => String(order.paymentStatus || '').toLowerCase() === 'paid');
@@ -3834,7 +3852,9 @@ function setupMarketplaceSupplierPortal() {
     };
     const renderStockDetails = (productId, productName, variantLabel, variantId = '') => {
       const product = warehouseProducts.find((entry) => entry.id === productId) || warehouseProducts.find((entry) => entry.name === productName);
-      const selectedVariant = productVariants(product).find((entry) => String(entry.id || entry.label || 'Standard') === String(variantId || '') || String(entry.label || 'Standard') === String(variantLabel || 'Standard'));
+      const selectedVariant = productVariants(product).find((entry) => variantId
+        ? String(entry.id || entry.label || 'Standard') === String(variantId)
+        : String(entry.label || 'Standard') === String(variantLabel || 'Standard'));
       const lots = stockLotsFor(productId, productName, variantLabel);
       const activeLots = lots.filter((lot) => (Number(lot.quantity) || 0) > 0);
       const total = lots.reduce((sum, lot) => sum + (Number(lot.quantity) || 0), 0);
@@ -3851,9 +3871,10 @@ function setupMarketplaceSupplierPortal() {
       if (!stockDetailContext?.productId) return;
       const product = warehouseProducts.find((entry) => String(entry.id) === String(stockDetailContext.productId));
       if (!product) return;
-      const variant = productVariants(product).find((entry) => String(entry.id || entry.label || 'Standard') === String(stockDetailContext.variantId || '')
-        || String(entry.label || 'Standard') === String(stockDetailContext.variantLabel || 'Standard'));
+      const variant = productVariants(product).find((entry) =>
+        String(entry.id || entry.label || 'Standard') === String(stockDetailContext.variantId || ''));
       if (!variant) return;
+      lowStockBaseline = structuredClone(variant);
       const form = lowStockDialog.querySelector('[data-low-stock-form]');
       form.elements.enabled.checked = variant.lowStockAlertEnabled ?? variant.low_stock_alert_enabled ?? true;
       form.elements.threshold.value = String(Math.max(0, Number(variant.lowStockThreshold ?? variant.low_stock_threshold ?? 5) || 0));
@@ -3876,32 +3897,25 @@ function setupMarketplaceSupplierPortal() {
       const context = { ...stockDetailContext };
       const product = warehouseProducts.find((entry) => String(entry.id) === String(context.productId));
       if (!product) return;
-      const variantIndex = productVariants(product).findIndex((entry) => String(entry.id || entry.label || 'Standard') === String(context.variantId || '')
-        || String(entry.label || 'Standard') === String(context.variantLabel || 'Standard'));
-      if (variantIndex < 0) return;
+      if (!lowStockBaseline) return;
       const formFields = lowStockForm.elements;
-      const threshold = Math.max(0, Math.floor(Number(formFields.threshold.value) || 0));
-      const nextData = { ...productData(product) };
-      const variants = productVariants(product).map((entry) => ({ ...entry }));
-      variants[variantIndex] = {
-        ...variants[variantIndex],
-        lowStockThreshold: threshold,
+      const variant = {
+        ...lowStockBaseline,
+        lowStockThreshold: Math.max(0, Math.floor(Number(formFields.threshold.value) || 0)),
         lowStockAlertEnabled: Boolean(formFields.enabled.checked),
       };
-      nextData.variants = variants;
       const submit = lowStockForm.querySelector('[type="submit"]');
       const feedback = lowStockDialog.querySelector('[data-low-stock-feedback]');
       submit.disabled = true;
       feedback.textContent = 'Saving low stock setting…';
       feedback.classList.remove('is-error');
       try {
-        const { error } = await supabase.from('warehouse_products')
-          .update({ product_data: nextData, updated_at: new Date().toISOString() })
-          .eq('id', product.id);
+        const { data: saved, error } = await supabase.rpc('update_warehouse_product', {
+          p_product_id: product.id, p_expected: { variants: [lowStockBaseline] },
+          p_desired: { variants: [variant] },
+        });
         if (error) throw error;
-        warehouseProducts = warehouseProducts.map((entry) => String(entry.id) === String(product.id)
-          ? { ...entry, product_data: nextData }
-          : entry);
+        warehouseProducts = warehouseProducts.map((entry) => entry.id === saved.id ? saved : entry);
         lowStockDialog.close();
         renderInventory();
         renderStockDetails(context.productId, context.productName, context.variantLabel, context.variantId);
@@ -4378,7 +4392,7 @@ function setupMarketplaceSupplierPortal() {
       try {
         const owners = warehouseOwnerIds();
         let lotQuery = supabase.from('warehouse_inventory_lots')
-          .select('id,product_name,sku,variant,batch_number,quantity,received_on,expires_on,location,notes,warehouse_product_id,pick_order')
+          .select('id,product_name,sku,variant,batch_number,quantity,received_on,expires_on,location,notes,warehouse_product_id,pick_order,created_at')
           .order('pick_order', { ascending: true })
           .order('expires_on', { ascending: true, nullsFirst: false })
           .order('received_on', { ascending: true });
@@ -4510,31 +4524,38 @@ function setupMarketplaceSupplierPortal() {
     });
     productForm?.addEventListener('submit', async (event) => {
       event.preventDefault();
-      if (!productForm.reportValidity()) return;
+      const submit = productForm.querySelector('[type="submit"]');
+      if (submit.disabled || !productForm.reportValidity()) return;
       const fields = productForm.elements;
       const id = fields.id.value;
-      const previousRow = warehouseProducts.find((entry) => entry.id === id);
+      const previousRow = warehouseProductBaseline?.id === id ? warehouseProductBaseline : null;
+      if (id && !previousRow) return;
       const previousData = productData(previousRow);
-      const previousVariantsById = new Map(productVariants(previousRow).map((variant) => [String(variant.id || variant.label || 'Standard'), variant]));
-      const variantRows = [...productForm.querySelectorAll('[data-warehouse-product-variant]')].map((row, index) => ({
-        ...(previousVariantsById.get(String(row.querySelector('[name="warehouseVariantId"]').value || '')) || {}),
-        id: row.querySelector('[name="warehouseVariantId"]').value || `warehouse-option-${crypto.randomUUID()}-${index + 1}`,
-        option: row.querySelector('[name="variantOption"]').value.trim(),
-        variant: row.querySelector('[name="variantLabel"]').value.trim(),
-        label: composeSupplierVariantLabel(row.querySelector('[name="variantOption"]').value, row.querySelector('[name="variantLabel"]').value),
-        price: Number(row.querySelector('[name="price"]').value),
-        sku: row.querySelector('[name="variantSku"]').value.trim(),
-        imageUrl: row.querySelector('[name="variantImageUrl"]').value.trim(),
-      }));
+      const previousVariants = previousData.variants || [];
+      const variantRows = [...productForm.querySelectorAll('[data-warehouse-product-variant]')].map((row, index) => {
+        const id = row.querySelector('[name="warehouseVariantId"]').value;
+        const option = row.querySelector('[name="variantOption"]').value.trim();
+        const variant = row.querySelector('[name="variantLabel"]').value.trim();
+        const label = composeSupplierVariantLabel(option, variant);
+        const previous = previousVariants.find((entry) => id ? String(entry.id) === id : !entry.id && entry.label === label);
+        return {
+          ...previous,
+          id: id || (previous ? undefined : 'warehouse-option-' + crypto.randomUUID() + '-' + (index + 1)),
+          option, variant, label,
+          price: Number(row.querySelector('[name="price"]').value),
+          sku: row.querySelector('[name="variantSku"]').value.trim(),
+          imageUrl: row.querySelector('[name="variantImageUrl"]').value.trim(),
+        };
+      });
       if (new Set(variantRows.map((variant) => variant.label.toLocaleLowerCase())).size !== variantRows.length) { setProductFeedback('Each option and variant combination needs a different name.', true); return; }
-      const { data: authData } = await supabase.auth.getUser();
+      submit.disabled = true;
       const imageUrl = fields.imageUrl.value.trim();
       const coverFile = fields.coverPhoto.files?.[0] || null;
       let uploadedCoverPath = '';
       let coverImageUrl = imageUrl || previousData.images?.[0] || '';
       try {
         const coverValidationError = coverFile ? await validateSupplierPhotos([coverFile], 1) : '';
-        if (coverValidationError) { setProductFeedback(coverValidationError, true); return; }
+        if (coverValidationError) { setProductFeedback(coverValidationError, true); submit.disabled = false; return; }
         if (coverFile) {
           const extension = coverFile.type === 'image/jpeg' ? 'jpg' : coverFile.type.split('/')[1];
         uploadedCoverPath = `${warehouseInsertOwnerId()}/warehouse/${id || crypto.randomUUID()}/${crypto.randomUUID()}.${extension}`;
@@ -4544,6 +4565,7 @@ function setupMarketplaceSupplierPortal() {
         }
       } catch (error) {
         setProductFeedback(error.message || 'The cover photo could not be uploaded.', true);
+        submit.disabled = false;
         return;
       }
       const product = {
@@ -4558,20 +4580,21 @@ function setupMarketplaceSupplierPortal() {
         images: coverImageUrl ? [coverImageUrl, ...(previousData.images || []).slice(1)] : (previousData.images || []),
         variants: variantRows,
       };
-      const submit = productForm.querySelector('[type="submit"]');
-      submit.disabled = true;
       setProductFeedback(id ? 'Saving warehouse product…' : 'Adding warehouse product…');
       let warehouseProductSaved = false;
       try {
         let savedProductId = id;
         if (id) {
-          const { error } = await supabase.from('warehouse_products').update({ name: product.name, product_data: product, updated_by: authData?.user?.id || null, updated_at: new Date().toISOString() }).eq('id', id);
+          const { error } = await supabase.rpc('update_warehouse_product', {
+            p_product_id: id, p_expected: { ...previousData, name: previousRow.name }, p_desired: product,
+          });
           if (error) throw error;
         } else {
-          const { data: savedProduct, error } = await supabase.from('warehouse_products')
-            .insert({ name: product.name, product_data: product, created_by: warehouseInsertOwnerId() || authData?.user?.id || null })
-            .select('id')
-            .single();
+          productForm.dataset.createRequestId ||= crypto.randomUUID();
+          const { data: savedProduct, error } = await supabase.rpc('create_warehouse_product', {
+            p_name: product.name, p_product_data: product, p_owner: warehouseInsertOwnerId(),
+            p_product_id: productForm.dataset.createRequestId,
+          });
           if (error) throw error;
           savedProductId = savedProduct.id;
           fields.id.value = savedProductId;
@@ -4586,7 +4609,9 @@ function setupMarketplaceSupplierPortal() {
         await refreshSupplierPortal();
         setInventoryFeedback(id ? 'Warehouse product updated.' : 'Warehouse product added. Use Live in Warehouse Stock when it is ready to publish.');
       } catch (error) {
-        if (uploadedCoverPath && !warehouseProductSaved) await supabase.storage.from('marketplace-submissions').remove([uploadedCoverPath]);
+        if (uploadedCoverPath && !warehouseProductSaved && /^(PT(403|409|422)|22[A-Z0-9]{3}|23[A-Z0-9]{3})$/.test(error.code || '')) {
+          await supabase.storage.from('marketplace-submissions').remove([uploadedCoverPath]);
+        }
         if (warehouseProductSaved) {
           productsLoaded = false;
           await refreshWarehouseProducts(true).catch(() => {});
@@ -4632,10 +4657,12 @@ function setupMarketplaceSupplierPortal() {
       if (stockDetailContext) { renderStockDetails(stockDetailContext.productId, stockDetailContext.productName, stockDetailContext.variantLabel); stockDialog.showModal(); }
     });
     let stockBatchDrag = null;
-    const saveStockBatchOrder = async (orderedIds) => {
+    const saveStockBatchOrder = async (orderedIds, expectedIds) => {
       if (!stockDetailContext || !orderedIds.length) return;
       try {
-        const { error } = await supabase.rpc('reorder_warehouse_inventory_lots', { p_lot_ids: orderedIds });
+        const { error } = await supabase.rpc('reorder_active_warehouse_inventory_lots', {
+          p_lot_ids: orderedIds, p_expected_ids: expectedIds,
+        });
         if (error) throw error;
         inventoryRows = inventoryRows.map((lot) => {
           const nextIndex = orderedIds.indexOf(lot.id);
@@ -4675,7 +4702,7 @@ function setupMarketplaceSupplierPortal() {
       if (!shouldSave) {
         renderStockDetails(stockDetailContext.productId, stockDetailContext.productName, stockDetailContext.variantLabel);
       } else if (orderedIds.length && orderedIds.some((id, index) => id !== drag.startOrder[index])) {
-        void saveStockBatchOrder(orderedIds);
+        void saveStockBatchOrder(orderedIds, drag.startOrder);
       }
     };
     stockDialog.addEventListener('pointerup', (event) => finishStockBatchDrag(event));
@@ -4693,6 +4720,7 @@ function setupMarketplaceSupplierPortal() {
       } else if (editButton) {
         const lot = inventoryRows.find((row) => row.id === editButton.dataset.stockBatchEdit);
         if (!lot) return;
+        lotEditBaseline = lot;
         Object.entries(lot).forEach(([key, value]) => { if (editForm.elements[key]) editForm.elements[key].value = value ?? ''; });
         setProductForSelect(editForm.querySelector('[data-inventory-edit-product]'), editForm.querySelector('[data-inventory-edit-variant]'), lot.warehouse_product_id, lot.variant);
         syncBatchNumber(editForm);
@@ -4703,6 +4731,7 @@ function setupMarketplaceSupplierPortal() {
         const lot = inventoryRows.find((row) => row.id === adjustButton.dataset.stockBatchAdjust);
         if (!lot) return;
         stockAdjustmentForm.reset();
+        delete stockAdjustmentForm.dataset.requestId;
         stockAdjustmentForm.elements.lotId.value = lot.id;
         stockAdjustmentForm.elements.quantity.max = String(Number(lot.quantity) || 0);
         stockAdjustmentForm.querySelector('[data-stock-adjust-all]').disabled = Number(lot.quantity) < 1;
@@ -4740,16 +4769,18 @@ function setupMarketplaceSupplierPortal() {
       const quantity = Number(fields.quantity.value);
       const submit = stockAdjustmentForm.querySelector('[type="submit"]');
       const feedback = stockAdjustmentForm.querySelector('[data-stock-adjust-feedback]');
+      if (submit.disabled) return;
       submit.disabled = true;
       feedback.textContent = 'Saving stock adjustment…';
       try {
-        const { error } = await supabase.rpc('adjust_warehouse_inventory_lot', {
+        stockAdjustmentForm.dataset.requestId ||= crypto.randomUUID();
+        await submitWarehouseStockRequest(supabase, supplierProfile.id, 'adjust', {
           p_lot_id: fields.lotId.value,
           p_quantity: quantity,
           p_reason: fields.reason.value,
           p_notes: fields.notes.value.trim() || null,
-        });
-        if (error) throw error;
+        }, stockAdjustmentForm.dataset.requestId);
+        delete stockAdjustmentForm.dataset.requestId;
         stockAdjustmentDialog.close();
         inventoryLoaded = false;
         await refreshWarehouseInventory();
@@ -4779,22 +4810,23 @@ function setupMarketplaceSupplierPortal() {
       const product = warehouseProducts.find((entry) => entry.id === fields.warehouse_product_id.value);
       const variant = product ? productVariants(product).find((entry) => String(entry.id || entry.label) === fields.variant.value) : null;
       if (!product || !variant) { setInventoryFeedback('Choose a warehouse product and option first.', true); return; }
-      const payload = Object.fromEntries(['batch_number', 'quantity', 'received_on', 'expires_on', 'location', 'notes'].map((key) => [key, String(fields[key].value || '').trim()]));
-      payload.warehouse_product_id = product.id;
-      payload.product_name = product.name;
-      payload.variant = variant.label || 'Standard';
-      payload.sku = variant.sku || productData(product).productCode || null;
-      payload.quantity = Number(payload.quantity);
-      payload.batch_number = batchNumberFromDate(payload.received_on);
-      payload.batch_number ||= null; payload.expires_on ||= null; payload.location ||= null; payload.notes ||= null;
+      const payload = {
+        ...Object.fromEntries(['received_on', 'expires_on', 'location', 'notes']
+          .map((key) => [key, String(fields[key].value || '').trim() || null])),
+        warehouse_product_id: product.id,
+        variant: variant.id ? null : variant.label || 'Standard',
+        quantity: Number(fields.quantity.value),
+      };
       if (!Number.isInteger(payload.quantity) || payload.quantity < 1) { setInventoryFeedback('Enter a whole number of units received.', true); return; }
-      const { data: authData } = await supabase.auth.getUser();
-      payload.created_by = warehouseInsertOwnerId() || authData?.user?.id || null;
+      payload.created_by = warehouseInsertOwnerId();
+      payload.variant_id = variant.id || null;
       const submitButton = inventoryForm.querySelector('[type="submit"]');
+      if (submitButton.disabled) return;
       submitButton.disabled = true;
       try {
-        const { error } = await supabase.from('warehouse_inventory_lots').insert(payload);
-        if (error) throw error;
+        inventoryForm.dataset.requestId ||= crypto.randomUUID();
+        await submitWarehouseStockRequest(supabase, supplierProfile.id, 'receive', payload, inventoryForm.dataset.requestId);
+        delete inventoryForm.dataset.requestId;
         inventoryForm.reset();
         fields.received_on.value = localPetDate();
         syncBatchNumber(inventoryForm);
@@ -4822,6 +4854,7 @@ function setupMarketplaceSupplierPortal() {
       } else if (editButton) {
         const row = inventoryRows.find((entry) => entry.id === editButton.dataset.inventoryEdit);
         if (!row) return;
+        lotEditBaseline = row;
         Object.entries(row).forEach(([key, value]) => { if (editForm.elements[key]) editForm.elements[key].value = value ?? ''; });
         const productSelect = editForm.querySelector('[data-inventory-edit-product]');
         const variantSelect = editForm.querySelector('[data-inventory-edit-variant]');
@@ -4833,7 +4866,7 @@ function setupMarketplaceSupplierPortal() {
         if (!window.confirm('Remove this inventory lot? This cannot be undone.')) return;
         deleteButton.disabled = true;
         try {
-          const { error } = await supabase.from('warehouse_inventory_lots').delete().eq('id', deleteButton.dataset.inventoryDelete);
+          const { error } = await supabase.rpc('delete_warehouse_inventory_lot', { p_lot_id: deleteButton.dataset.inventoryDelete });
           if (error) throw error;
           inventoryLoaded = false;
           await refreshWarehouseInventory();
@@ -4849,25 +4882,16 @@ function setupMarketplaceSupplierPortal() {
       event.preventDefault();
       const fields = editForm.elements;
       const id = fields.id.value;
-      const product = warehouseProducts.find((entry) => entry.id === fields.warehouse_product_id.value);
-      const variant = product ? productVariants(product).find((entry) => String(entry.id || entry.label) === fields.variant.value) : null;
-      if (!product || !variant) { setInventoryFeedback('Choose a warehouse product and option first.', true); return; }
-      const payload = Object.fromEntries(['batch_number', 'quantity', 'received_on', 'expires_on', 'location', 'notes'].map((key) => [key, String(fields[key].value || '').trim()]));
-      payload.warehouse_product_id = product.id;
-      payload.product_name = product.name;
-      payload.variant = variant.label || 'Standard';
-      payload.sku = variant.sku || productData(product).productCode || null;
-      payload.quantity = Number(payload.quantity);
-      payload.batch_number = batchNumberFromDate(payload.received_on);
-      payload.batch_number ||= null; payload.expires_on ||= null; payload.location ||= null; payload.notes ||= null;
-      if (!Number.isInteger(payload.quantity) || payload.quantity < 0) { setInventoryFeedback('Quantity must be a whole number of zero or more.', true); return; }
-      const { data: authData } = await supabase.auth.getUser();
-      payload.updated_by = authData?.user?.id || null;
-      payload.updated_at = new Date().toISOString();
+      if (!lotEditBaseline || lotEditBaseline.id !== id) return;
+      const metadata = Object.fromEntries(['received_on', 'expires_on', 'location', 'notes']
+        .map((key) => [key, String(fields[key].value || '').trim() || null]));
       const submitButton = editForm.querySelector('[type="submit"]');
+      if (submitButton.disabled) return;
       submitButton.disabled = true;
       try {
-        const { error } = await supabase.from('warehouse_inventory_lots').update(payload).eq('id', id);
+        const { error } = await supabase.rpc('update_warehouse_inventory_lot', {
+          p_lot_id: id, p_expected: lotEditBaseline, p_fields: metadata,
+        });
         if (error) throw error;
         editDialog.close();
         inventoryLoaded = false;
@@ -4878,6 +4902,33 @@ function setupMarketplaceSupplierPortal() {
       } catch (error) { setInventoryFeedback(error.message || 'The inventory lot could not be updated.', true); }
       finally { submitButton.disabled = false; }
     });
+    const recoverStockMovement = async () => {
+      try {
+        const operation = await recoverWarehouseStockRequest(supabase, supplierProfile.id);
+        if (!operation || !inventorySection.isConnected) return;
+        if (operation === 'receive' && inventoryForm.dataset.requestId) {
+          receiveDialog.close();
+          inventoryForm.reset();
+          delete inventoryForm.dataset.requestId;
+        }
+        if (operation === 'adjust' && stockAdjustmentForm.dataset.requestId) {
+          stockAdjustmentDialog.close();
+          stockAdjustmentForm.reset();
+          delete stockAdjustmentForm.dataset.requestId;
+        }
+        inventoryLoaded = false;
+        await refreshWarehouseInventory();
+        try { await refreshMarketplaceCatalogFromDatabase(); }
+        catch (error) { console.warn('Marketplace stock cache refresh deferred:', error); }
+        setInventoryFeedback(operation === 'receive' ? 'Received stock confirmed.' : 'Stock adjustment confirmed.');
+      } catch (error) {
+        if (inventorySection.isConnected) setInventoryFeedback(error.message || 'Stock confirmation is pending.', true);
+      }
+    };
+    window.removeEventListener('online', recoverWarehouseStockOnReconnect);
+    recoverWarehouseStockOnReconnect = () => { if (inventorySection.isConnected) void recoverStockMovement(); };
+    window.addEventListener('online', recoverWarehouseStockOnReconnect);
+    void recoverStockMovement();
   }
   document.querySelectorAll('[data-supplier-order-filter-open]').forEach((card) => {
     const openOrders = () => {
@@ -5392,14 +5443,11 @@ function setupMarketplaceSupplierPortal() {
     setSupplierFeedback(action === 'warehouse_add' ? 'Adding warehouse product…' : action === 'warehouse_edit' || action === 'edit' ? 'Saving product details…' : action === 'pending_edit' ? 'Updating pending product request…' : 'Submitting product for Furgo approval…');
     try {
       const submissionId = crypto.randomUUID();
-      const existingProduct = supplierCatalog.find((entry) => entry.id === editingProductId);
+      const existingProduct = editingProductId ? supplierProductBaseline : null;
       const pendingSubmission = supplierSubmissions.find((entry) => entry.id === pendingSubmissionId);
       const pendingProduct = pendingSubmission?.product_data || {};
-      const { data: warehouseExistingResult, error: warehouseExistingError } = warehouseProductId
-        ? await supabase.from('warehouse_products').select('id,name,product_data,marketplace_product_id').eq('id', warehouseProductId).maybeSingle()
-        : { data: null, error: null };
-      if (warehouseExistingError) throw warehouseExistingError;
-      const existingVariants = existingProduct?.variants || pendingProduct.variants || warehouseExistingResult?.product_data?.variants || [];
+      const priorWarehouseProduct = warehouseProductId ? supplierProductBaseline : null;
+      const existingVariants = (existingProduct || priorWarehouseProduct || pendingProduct).variants || [];
       const variantRows = [...supplierForm.querySelectorAll('[data-supplier-variant-row]')].map((row) => ({
         id: row.querySelector('[name="variantRowId"]')?.value || '',
         option: row.querySelector('[name="variantOption"]')?.value.trim() || '',
@@ -5437,8 +5485,8 @@ function setupMarketplaceSupplierPortal() {
           ? fields.warehouseProductCode.value.trim()
           : existingProduct?.productCode || pendingProduct.productCode || '',
         variants: variantRows.map((row, index) => {
-          const previous = existingVariants.find((entry) => String(entry.id || '') === row.id) || {};
-          return { ...previous, id: row.id || `variant-${submissionId}-${index + 1}`, option: row.option, variant: row.variant, label: row.label, price: row.price, stock: row.stock, imageUrl: images[Number(row.imageIndex)] || images[0] || '', supplierId: supplierProfile.supplierName, supplier: supplierProfile.supplierName, cost: previous.cost ?? 0, frozen: Boolean(previous.frozen) };
+          const previous = existingVariants.find((entry) => row.id ? String(entry.id) === row.id : !entry.id && entry.label === row.label) || {};
+          return { ...previous, id: row.id || (previous.label ? undefined : 'variant-' + submissionId + '-' + (index + 1)), option: row.option, variant: row.variant, label: row.label, price: row.price, stock: row.stock, imageUrl: images[Number(row.imageIndex)] || images[0] || '', supplierId: supplierProfile.supplierName, supplier: supplierProfile.supplierName, cost: previous.cost ?? 0, frozen: Boolean(previous.frozen) };
         }),
       };
       let feedbackMessage;
@@ -5464,22 +5512,23 @@ function setupMarketplaceSupplierPortal() {
         };
         const { data: authData, error: authError } = await supabase.auth.getUser();
         if (authError) throw authError;
-        const { data: warehouseRow, error } = await supabase.from('warehouse_products').insert({
-          name: fields.name.value.trim(),
-          product_data: warehouseData,
-          created_by: warehouseInsertOwnerId() || authData?.user?.id || null,
-        }).select('id').single();
+        supplierForm.dataset.createRequestId ||= crypto.randomUUID();
+        const { data: warehouseRow, error } = await supabase.rpc('create_warehouse_product', {
+          p_name: fields.name.value.trim(), p_product_data: warehouseData,
+          p_owner: warehouseInsertOwnerId() || authData?.user?.id,
+          p_product_id: supplierForm.dataset.createRequestId,
+        });
         if (error) throw error;
         fields.warehouseProductCreate.value = '';
         fields.warehouseProductId.value = warehouseRow.id;
         feedbackMessage = 'Warehouse product added. Use Live in Warehouse Stock when it is ready to publish.';
       } else if (action === 'warehouse_edit') {
-        const priorData = warehouseExistingResult?.product_data || {};
+        const priorData = priorWarehouseProduct || {};
         const warehouseVariants = variantRows.map((row) => {
-          const previous = existingVariants.find((entry) => String(entry.id || '') === row.id) || {};
+          const previous = existingVariants.find((entry) => row.id ? String(entry.id) === row.id : !entry.id && entry.label === row.label) || {};
           return {
             ...previous,
-            id: row.id || `warehouse-option-${submissionId}`,
+            id: row.id || (previous.label ? undefined : 'warehouse-option-' + submissionId + '-' + (variantRows.indexOf(row) + 1)),
             option: row.option,
             variant: row.variant,
             label: row.label,
@@ -5500,9 +5549,10 @@ function setupMarketplaceSupplierPortal() {
           productCode: fields.warehouseProductCode.value.trim(),
           variants: warehouseVariants,
         };
-        const { error } = await supabase.from('warehouse_products')
-          .update({ name: fields.name.value.trim(), product_data: warehouseData, updated_by: supplierProfile.id })
-          .eq('id', warehouseProductId);
+        const { error } = await supabase.rpc('update_warehouse_product', {
+          p_product_id: warehouseProductId, p_expected: priorWarehouseProduct,
+          p_desired: { ...warehouseData, name: fields.name.value.trim() },
+        });
         if (error) throw error;
         feedbackMessage = 'Warehouse product details saved.';
       } else if (action === 'pending_edit') {
@@ -5512,7 +5562,9 @@ function setupMarketplaceSupplierPortal() {
           ? 'Product published and is now live in the Marketplace.'
           : 'Product request updated and resubmitted. It is waiting for Furgo approval.';
       } else if (action === 'edit') {
-        const { data, error } = await supabase.rpc('edit_marketplace_supplier_product', { p_product_id: editingProductId, p_product_data: product });
+        const { data, error } = await supabase.rpc('patch_marketplace_supplier_product', {
+          p_product_id: editingProductId, p_expected: existingProduct, p_desired: product,
+        });
         if (error) throw error;
         feedbackMessage = data?.variant_change_pending
           ? 'Product details saved. Price or variant changes are pending Furgo approval.'

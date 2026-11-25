@@ -1031,7 +1031,14 @@ export async function setupSellerPortal() {
     if (editRequest) {
       const request = requests.find((entry) => entry.id === editRequest.dataset.editProductRequest && entry.status === 'Rejected');
       if (!request) return;
-      const product = request.product_data || {};
+      let product = request.product_data || {};
+      if (request.warehouse_product_id) {
+        const { data, error } = await supabase.rpc('seller_portal_product_request_product', {
+          p_warehouse_product_id: request.warehouse_product_id,
+        });
+        if (error) { window.alert(error.message || 'Product details could not be loaded.'); return; }
+        product = { ...data.product_data, name: data.name };
+      }
       const form = host.querySelector('[data-seller-product-request]');
       if (!form) return;
       clearSellerRequestPreviewUrls();
@@ -1062,7 +1069,7 @@ export async function setupSellerPortal() {
       if (error) { window.alert(error.message || 'Product details could not be loaded.'); return; }
       const form = host.querySelector('[data-seller-product-request]');
       if (!form) return;
-      const product = { name: data?.name, ...data?.product_data };
+      const product = { ...data?.product_data, name: data?.name };
       form.reset();
       clearSellerRequestPreviewUrls();
       sellerRequestProduct = product;
@@ -1263,7 +1270,7 @@ export async function setupSellerPortal() {
           variants: variants.map((row, index) => {
             const previous = originalVariants.find((variant) => row.id ? String(variant.id) === row.id : !variant.id && variant.label === row.label);
             const imageUrl = imageUrls[row.imageIndex] || imageUrls[0] || '';
-            const variant = { ...previous, ...row, id: row.id || `seller-request-${requestId}-${index + 1}`, stock: previous?.stock ?? row.stock, imageUrl };
+            const variant = { ...previous, ...row, id: row.id || (previous?.label ? undefined : 'seller-request-' + requestId + '-' + (index + 1)), stock: previous?.stock ?? row.stock, imageUrl };
             if (Array.isArray(previous?.images)) {
               const otherPhotos = previous.images.slice(1).filter((url) => url !== imageUrl && (!originalImageUrls.has(url) || retainedImageUrls.has(url)));
               variant.images = [imageUrl, ...otherPhotos].filter(Boolean);
@@ -1271,9 +1278,10 @@ export async function setupSellerPortal() {
             return variant;
           }),
         };
-        const { error: submitError } = await supabase.rpc('seller_submit_product_request', {
+        const { error: submitError } = await supabase.rpc('submit_seller_product_request_with_baseline', {
           p_request_id: formData.get('sellerRequestId') || null, p_product_data: productData, p_seller_details: sellerDetails,
           p_warehouse_product_id: formData.get('sellerWarehouseProductId') || null,
+          p_expected: originalProduct || null,
         });
         if (submitError) throw submitError;
         const [nextSnapshot, nextRequests, nextProfile] = await Promise.all([supabase.rpc('seller_portal_snapshot'), supabase.rpc('seller_portal_product_requests'), supabase.rpc('seller_portal_request_profile')]);

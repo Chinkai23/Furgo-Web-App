@@ -157,7 +157,7 @@ function readLocal(key) {
 
 async function writeRemote(key, value) {
   // The Marketplace order cache is read-only outside the order RPCs.
-  if (key === marketplaceOrdersKey) return;
+  if (key === marketplaceOrdersKey || key === 'furgo-demo-marketplace-products') return;
   value = compactReceiptRecords(key, value);
   const scope = getScope(key);
   if (!scope || !activeUserId) return;
@@ -631,7 +631,7 @@ function installStorageMirror(userId, role) {
       void writeMarketplaceSupplierContacts([]).catch((error) => console.warn('Could not clear marketplace store contacts in Supabase:', error));
       return;
     }
-    if (this !== localStorage || key === marketplaceOrdersKey || !allSyncedKeys.has(key) || !activeUserId || applyingRemoteData) return;
+    if (this !== localStorage || key === marketplaceOrdersKey || key === 'furgo-demo-marketplace-products' || !allSyncedKeys.has(key) || !activeUserId || applyingRemoteData) return;
     if (dedicatedTablesReady && dedicatedOperationKeys.has(key)) return;
     const scope = getScope(key);
     if (scope === 'shared' && !canManageSharedKey(activeRole, key)) return;
