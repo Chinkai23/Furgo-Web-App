@@ -1,7 +1,7 @@
 import { escapeHTML } from '../shared.js';
 import { supabase } from '../supabase.js';
 import { localFinderAnnouncementsManagementMarkup } from './admin-promotions.js';
-import { bindLocalFinderLocationPicker, bindLocalFinderOpeningHours, bindLocalFinderPlacePhotoPreview, findLocalFinderDuplicate, localFinderAdminFormFields, normalizeLocalFinderPetAllowed, requestLocalFinderQuota, saveLocalFinderPlaceData, showLocalFinderDuplicateNotice } from './local-finder.js';
+import { bindLocalFinderLocationPicker, bindLocalFinderOpeningHours, bindLocalFinderPlacePhotoPreview, startLocalFinderCoordinateExpiry, findLocalFinderDuplicate, localFinderAdminFormFields, normalizeLocalFinderPetAllowed, requestLocalFinderQuota, saveLocalFinderPlaceData, showLocalFinderDuplicateNotice } from './local-finder.js';
 
 const categoryNames = { cafe: 'Cafe & Dining', park: 'Park or Mall', clinic: 'Pet Clinic', event: 'Pet Event' };
 const categoryKeys = new Map([
@@ -267,6 +267,7 @@ export function adminLocalFinderPage(params = new URLSearchParams()) {
 export function setupAdminLocalFinder(supabase) {
   const page = document.querySelector('.admin-local-finder-page');
   if (!page) return;
+  startLocalFinderCoordinateExpiry(supabase);
   const view = page.dataset.localFinderView || 'home';
   const entryLimitDialog = page.querySelector('[data-admin-local-finder-limit-dialog]');
   const entryLimitTitle = entryLimitDialog?.querySelector('#admin-local-finder-limit-title');
@@ -478,7 +479,6 @@ export function setupAdminLocalFinder(supabase) {
   });
 
   const load = async () => {
-    try { await supabase.rpc('expire_local_finder_google_coordinates'); } catch { /* Expiry can also be handled by the database's optional daily job. */ }
     const [placesResult, editsResult, recommendationsResult, quotaResult] = await Promise.all([
       supabase.from('local_finder_places').select('*').order('created_at', { ascending: false }),
       edits || editCount

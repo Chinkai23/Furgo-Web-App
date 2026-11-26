@@ -16,6 +16,128 @@ let googlePlacesLibraryPromise;
 let googleMapsLibraryPromise;
 const googleRequestTimeoutMs = 15000;
 
+// One session-bound maintenance loop is shared by all Local Finder views.
+const coordinateExpiryRoutes = new Set(['local-finder', 'local-finder-search', 'local-finder-list', 'local-finder-place', 'local-finder-favourites', 'admin-local-finder']);
+const coordinateExpirySuccessMs = 600000;
+const coordinateExpiryRetryMs = 30000;
+const coordinateExpiryTimeoutMs = 15000;
+let expiryClient, expiryOwner, expiryActive = false, expiryTimer, expiryAttempt, expiryGeneration = 0;
+let expiryNextAt = 0;
+let expiryAuthRevision = 0;
+let expiryLookup, expiryLookupTimer, expirySignedOut = false;
+
+function localFinderRouteActive() {
+  return coordinateExpiryRoutes.has(window.location.hash.slice(1).split('?')[0]);
+}
+
+function invalidateCoordinateExpiry() {
+  expiryGeneration += 1;
+  clearTimeout(expiryTimer);
+  expiryTimer = undefined;
+  clearTimeout(expiryLookupTimer);
+  expiryLookupTimer = undefined;
+  if (expiryAttempt) {
+    clearTimeout(expiryAttempt.timeout);
+    expiryAttempt.controller.abort();
+    expiryAttempt = undefined;
+  }
+}
+
+function lookupCoordinateExpirySession(delay = 0) {
+  if (!expiryActive || !localFinderRouteActive() || expiryOwner || expirySignedOut || expiryLookup || expiryLookupTimer) return;
+  const run = () => {
+    expiryLookupTimer = undefined;
+    if (!expiryActive || !localFinderRouteActive() || expiryOwner || expirySignedOut || expiryLookup) return;
+    const revision = expiryAuthRevision;
+    const generation = expiryGeneration;
+    const lookup = {};
+    expiryLookup = lookup;
+    const finish = (result) => {
+      if (expiryLookup !== lookup) return;
+      expiryLookup = undefined;
+      if (revision !== expiryAuthRevision || generation !== expiryGeneration) {
+        lookupCoordinateExpirySession();
+        return;
+      }
+      if (!expiryActive || !localFinderRouteActive()) return;
+      if (!result || result.error) {
+        lookupCoordinateExpirySession(coordinateExpiryRetryMs);
+        return;
+      }
+      const owner = result.data?.session?.user?.id || '';
+      expirySignedOut = !owner;
+      setCoordinateExpiryOwner(owner);
+      scheduleCoordinateExpiry();
+    };
+    // getSession has no per-call cancellation. Keep the slot until the actual
+    // call settles, even after route/session invalidation.
+    Promise.resolve().then(() => {
+      if (revision !== expiryAuthRevision || generation !== expiryGeneration) return null;
+      return expiryClient.auth.getSession();
+    }).then(finish, () => finish(null));
+  };
+  if (delay) expiryLookupTimer = setTimeout(run, delay);
+  else run();
+}
+
+function setCoordinateExpiryOwner(owner) {
+  if (owner === expiryOwner) return;
+  invalidateCoordinateExpiry();
+  expiryOwner = owner;
+  expiryNextAt = 0;
+}
+
+function scheduleCoordinateExpiry() {
+  if (!expiryActive || !expiryOwner || !localFinderRouteActive() || expiryAttempt || expiryTimer) return;
+  const delay = Math.max(0, expiryNextAt - Date.now());
+  expiryTimer = setTimeout(() => {
+    expiryTimer = undefined;
+    if (!expiryActive || !expiryOwner || !localFinderRouteActive()) return;
+    const generation = expiryGeneration;
+    const controller = new AbortController();
+    const attempt = { controller };
+    expiryAttempt = attempt;
+    const finish = (success) => {
+      if (generation !== expiryGeneration || expiryAttempt !== attempt) return;
+      clearTimeout(attempt.timeout);
+      expiryAttempt = undefined;
+      expiryNextAt = Date.now() + (success ? coordinateExpirySuccessMs : coordinateExpiryRetryMs);
+      scheduleCoordinateExpiry();
+    };
+    attempt.timeout = setTimeout(() => { controller.abort(); finish(false); }, coordinateExpiryTimeoutMs);
+    Promise.resolve().then(() => {
+      if (generation !== expiryGeneration) return { error: true };
+      const request = expiryClient.rpc('expire_local_finder_google_coordinates');
+      return typeof request?.abortSignal === 'function' ? request.abortSignal(controller.signal) : request;
+    }).then((result) => finish(!result?.error), () => finish(false));
+  }, delay);
+}
+
+export function startLocalFinderCoordinateExpiry(supabase) {
+  if (!localFinderRouteActive() || !supabase?.rpc || !supabase.auth?.getSession || !supabase.auth?.onAuthStateChange) return;
+  if (!expiryClient) {
+    expiryClient = supabase;
+    window.addEventListener('hashchange', () => {
+      if (!localFinderRouteActive()) {
+        expiryActive = false;
+        invalidateCoordinateExpiry();
+      }
+    });
+    supabase.auth.onAuthStateChange((_event, session) => {
+      expiryAuthRevision += 1;
+      clearTimeout(expiryLookupTimer);
+      expiryLookupTimer = undefined;
+      expirySignedOut = !session?.user?.id;
+      setCoordinateExpiryOwner(session?.user?.id || '');
+      scheduleCoordinateExpiry();
+    });
+  }
+  if (expiryClient !== supabase) return;
+  expiryActive = true;
+  if (!expiryOwner) lookupCoordinateExpirySession();
+  else scheduleCoordinateExpiry();
+}
+
 function withGoogleTimeout(promise, message) {
   return new Promise((resolve, reject) => {
     const timeout = setTimeout(() => reject(new Error(message)), googleRequestTimeoutMs);
@@ -773,8 +895,10 @@ export function localFinderPlacePage(params = new URLSearchParams()) {
 }
 
 export function setupLocalFinder(supabase) {
-  if (supabase) Promise.resolve(supabase.rpc('expire_local_finder_google_coordinates')).catch(() => {});
   const route = window.location.hash.slice(1).split('?')[0];
+  if (['local-finder', 'local-finder-search', 'local-finder-list', 'local-finder-place', 'local-finder-favourites'].includes(route)) {
+    startLocalFinderCoordinateExpiry(supabase);
+  }
   const routeParams = new URLSearchParams(window.location.hash.split('?')[1] || '');
   if (route === 'local-finder-search') {
     setupLocalFinderSearch(supabase, routeParams);
