@@ -1,3 +1,4 @@
+import { readSharedAppData } from './app-data-sync.js';
 // Shared Furgo UI pieces used by more than one screen.
 export const paw = `<svg viewBox="0 0 48 48" fill="none" aria-hidden="true"><path d="M17.1 20.2c3.2-.4 6.7 1.4 8.9 4.3 2.3-2.9 5.8-4.7 9-4.3 4.5.5 6.7 4.4 4.9 8.1-1.1 2.2-3.5 3.7-6.4 4.1-2.8.4-4.7 2.3-7.5 2.3s-4.7-1.9-7.5-2.3c-2.9-.4-5.3-1.9-6.4-4.1-1.8-3.7.4-7.6 5-8.1Z" fill="currentColor"/><ellipse cx="12.4" cy="16.2" rx="4.1" ry="5.2" transform="rotate(-24 12.4 16.2)" fill="currentColor"/><ellipse cx="22.2" cy="11.7" rx="4.1" ry="5.2" transform="rotate(-8 22.2 11.7)" fill="currentColor"/><ellipse cx="32.3" cy="12.4" rx="4.1" ry="5.2" transform="rotate(12 32.3 12.4)" fill="currentColor"/><ellipse cx="40.3" cy="18.2" rx="4.1" ry="5.2" transform="rotate(28 40.3 18.2)" fill="currentColor"/></svg>`;
 
@@ -9,7 +10,7 @@ export function escapeHTML(value) {
 // Reads admin-managed About Us and customer service details for the Help Center.
 export function loadHelpCenterDetails() {
   try {
-    const details = JSON.parse(localStorage.getItem('furgo-demo-help-center-details') || '{}');
+    const details = JSON.parse(readSharedAppData('furgo-demo-help-center-details') || '{}');
     return {
       aboutUs: typeof details.aboutUs === 'string' ? details.aboutUs : '',
       phone: typeof details.phone === 'string' ? details.phone : '',

@@ -1,21 +1,24 @@
 // Section: Supabase application data sync
 // Function: Keep prototype customer state and Admin-managed catalogs in shared Supabase storage.
+import { createRecoveryQueue, stopPortalRecovery, syncFailureMessage } from './sync-recovery.js';
+import { marketplaceOrderChangeId, mergeMarketplaceOrderSnapshot, readMarketplaceOrderSnapshot } from './marketplace-order-reconciliation.js';
 import { supabase } from './supabase.js';
 import { uploadMarketplaceLegacySnapshots } from './marketplace-legacy-recovery.js';
 
 const marketplaceOrdersKey = 'furgo-demo-marketplace-orders';
 
-const sharedKeys = new Set([
+const marketplaceProductsKey = 'furgo-demo-marketplace-products';
+const versionedSharedKeys = new Set([
   'furgo-demo-hotel-settings',
   'furgo-demo-daycare-settings',
   'furgo-demo-pet-taxi-settings',
   'furgo-demo-service-banners',
-  'furgo-demo-marketplace-products',
   'furgo-demo-marketplace-offers',
   'furgo-demo-promotions',
   'furgo-demo-help-center-details',
   'furgo-demo-home-service-shortcuts',
 ]);
+const sharedKeys = new Set([...versionedSharedKeys, marketplaceProductsKey]);
 
 const customerKeys = new Set([
   'furgo-demo-addresses',
@@ -58,18 +61,7 @@ const dedicatedOperationKeys = new Set([
 ]);
 const elevatedOrderRoles = new Set(['admin', 'staff', 'executive', 'manager', 'director']);
 const fullAdminRoles = new Set(['admin', 'director']);
-const managerSharedSettingsKeys = new Set([
-  'furgo-demo-hotel-settings',
-  'furgo-demo-daycare-settings',
-  'furgo-demo-pet-taxi-settings',
-  'furgo-demo-service-banners',
-  'furgo-demo-marketplace-products',
-  'furgo-demo-marketplace-offers',
-  'furgo-demo-promotions',
-]);
-const executiveMarketplaceKeys = new Set(['furgo-demo-marketplace-products']);
 const updateOnlyOrderRoles = new Set(['staff', 'executive', 'manager']);
-const staffLegacyOrderKeys = new Set([marketplaceOrdersKey, 'furgo-demo-hotel-bookings', 'furgo-demo-daycare-bookings', 'furgo-demo-daycare-orders']);
 
 const allSyncedKeys = new Set([...sharedKeys, ...customerKeys, ...operationKeys]);
 const marketplaceSupplierContactsKey = 'furgo-demo-marketplace-suppliers';
@@ -81,13 +73,114 @@ const personalCustomerKeys = new Set([
   'furgo-demo-marketplace-subscription-cart',
   'furgo-demo-marketplace-active-subscriptions',
 ]);
+let originalGetItem;
 let originalSetItem;
+let stopMainRecovery;
+let legacyReady = false;
+let legacyWriteRevision = 0;
+const tabBusinessKeys = new Set([...customerKeys, ...operationKeys, ...receiptOrderKeys,
+  marketplaceSupplierContactsKey, 'furgo-demo-customer-records', 'furgo-demo-admin-customer-pet-profiles',
+  'furgo-demo-pet-profiles']);
+const tabBusinessData = new Map();
+const guestShoppingKeys = new Set(['furgo-demo-marketplace-cart', 'furgo-demo-marketplace-favorites']);
+const guestShoppingData = new Map();
+
+function setCacheItem(key, value) {
+  if (tabBusinessKeys.has(key)) {
+    if (activeUserId) tabBusinessData.set(key, String(value));
+  }
+  else originalSetItem.call(localStorage, key, value);
+}
+
+export function captureCloudSession() {
+  const session = sharedSession;
+  return () => session === sharedSession;
+}
+
+export function reportSyncIssue(message) {
+  window.dispatchEvent(new CustomEvent('furgo-sync-status', { detail: message }));
+}
 let originalRemoveItem;
 let activeUserId = '';
 let activeRole = 'customer';
 let applyingRemoteData = false;
 let realtimeChannel;
 let dedicatedTablesReady = false;
+let catalogRefreshSequence = 0;
+let sharedSession = 0;
+let sharedWrites = 0;
+let sharedRefreshTimer;
+let sharedRefreshPending = false;
+let sharedRefreshAgain = false;
+const sharedSettings = new Map();
+const sharedRecordIds = [...versionedSharedKeys].map((key) => rowId('shared', key, null));
+const uuidPattern = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i;
+
+export function readSharedAppData(key) {
+  return sharedSettings.get(key)?.serialized ?? null;
+}
+
+function loadSharedSettings(rows, { notify = false } = {}) {
+  const byId = new Map(rows.map((row) => [row.record_id, row]));
+  const changed = [];
+  for (const key of versionedSharedKeys) {
+    const row = byId.get(rowId('shared', key, null));
+    const valid = row?.scope === 'shared' && row.storage_key === key && row.owner_id === null;
+    let version = row ? undefined : null;
+    if (valid && uuidPattern.test(row.sync_version)) version = row.sync_version;
+    const serialized = valid ? JSON.stringify(row.payload) : null;
+    if (sharedSettings.get(key)?.serialized !== serialized) changed.push(key);
+    sharedSettings.set(key, { version, serialized });
+  }
+  if (notify && !fullAdminRoles.has(activeRole)) {
+    for (const key of changed) window.dispatchEvent(new StorageEvent('storage', { key }));
+  }
+}
+
+function selectSharedSettings() {
+  // The targeted read cannot lose a canonical setting to the general row limit.
+  return supabase.from('app_data').select('*').in('record_id', sharedRecordIds);
+}
+
+function scheduleSharedSettingsRefresh(session) {
+  if (session !== sharedSession) return;
+  if (sharedRefreshPending) {
+    sharedRefreshAgain = true;
+    return;
+  }
+  if (sharedRefreshTimer) return;
+  sharedRefreshTimer = setTimeout(async () => {
+    sharedRefreshTimer = undefined;
+    sharedRefreshPending = true;
+    const writes = sharedWrites;
+    try {
+      const { data, error } = await selectSharedSettings();
+      if (session !== sharedSession) return;
+      if (error) throw error;
+      if (writes !== sharedWrites) sharedRefreshAgain = true;
+      else loadSharedSettings(data || [], { notify: true });
+    } catch {
+      if (session === sharedSession) console.warn('Shared settings could not be refreshed. Reload when connected to retry.');
+    } finally {
+      if (session === sharedSession) {
+        sharedRefreshPending = false;
+        if (sharedRefreshAgain) {
+          sharedRefreshAgain = false;
+          scheduleSharedSettingsRefresh(session);
+        }
+      }
+    }
+  }, 120);
+}
+
+function resetSharedSettings() {
+  sharedSession += 1;
+  clearTimeout(sharedRefreshTimer);
+  sharedRefreshTimer = undefined;
+  sharedRefreshPending = false;
+  sharedRefreshAgain = false;
+  sharedSettings.clear();
+}
 
 // Generated receipts are reconstructed from receipt.document at download time.
 // Keep their PDF out of Supabase JSON and the browser order cache.
@@ -109,28 +202,6 @@ function compactReceiptRecords(key, records) {
     : records;
 }
 
-function compactStoredOrderCache() {
-  const setItem = originalSetItem || globalThis.Storage?.prototype?.setItem;
-  if (!setItem) return;
-  for (const key of receiptOrderKeys) {
-    if (key === marketplaceOrdersKey) continue;
-    try {
-      const storage = globalThis.localStorage;
-      const current = storage.getItem(key);
-      if (!current) continue;
-      const records = JSON.parse(current);
-      const compacted = compactReceiptRecords(key, records);
-      if (compacted !== records && JSON.stringify(compacted) !== current) {
-        setItem.call(storage, key, JSON.stringify(compacted));
-      }
-    } catch { /* Leave invalid or non-JSON app data untouched. */ }
-  }
-}
-
-// Clear legacy generated-PDF payloads as soon as the app module loads, including
-// before sign-in. Order history and receipt fields remain in the local cache.
-compactStoredOrderCache();
-
 function rowId(scope, key, ownerId) {
   return `${scope}:${key}:${ownerId || 'shared'}`;
 }
@@ -142,12 +213,6 @@ function getScope(key) {
   return '';
 }
 
-function canManageSharedKey(role, key) {
-  return fullAdminRoles.has(role)
-    || (role === 'manager' && managerSharedSettingsKeys.has(key))
-    || (role === 'executive' && executiveMarketplaceKeys.has(key));
-}
-
 function readLocal(key) {
   if (key === marketplaceOrdersKey) return readMarketplaceOrderCache();
   const raw = localStorage.getItem(key);
@@ -156,24 +221,27 @@ function readLocal(key) {
 }
 
 async function writeRemote(key, value) {
+  const current = captureCloudSession();
   // The Marketplace order cache is read-only outside the order RPCs.
-  if (key === marketplaceOrdersKey || key === 'furgo-demo-marketplace-products') return;
+  if (key === marketplaceOrdersKey || sharedKeys.has(key)) return;
   value = compactReceiptRecords(key, value);
   const scope = getScope(key);
   if (!scope || !activeUserId) return;
-  if (scope === 'shared' && !canManageSharedKey(activeRole, key)) return;
+  if (!dedicatedOperationKeys.has(key) && !legacyReady) throw new Error('Cloud data has not been confirmed. Reload before saving.');
   if (scope === 'customer' && fullAdminRoles.has(activeRole) && !personalCustomerKeys.has(key)) return;
 
-  if (dedicatedTablesReady && dedicatedOperationKeys.has(key)) {
+  if (dedicatedOperationKeys.has(key)) {
+    if (!dedicatedTablesReady) throw new Error('Booking data is unavailable. Reload before saving.');
     await writeDedicatedOperations(key, value);
     return;
   }
 
+  legacyWriteRevision += 1;
   const records = scope === 'operation' && elevatedOrderRoles.has(activeRole) && Array.isArray(value)
     ? groupOperationsByOwner(value)
     : scope === 'operation' && elevatedOrderRoles.has(activeRole) && operationObjectKeys.has(key) && value && typeof value === 'object'
       ? groupOperationObjectByOwner(value)
-      : [{ ownerId: scope === 'shared' ? null : activeUserId, value }];
+      : [{ ownerId: activeUserId, value }];
   for (const record of records) {
     const payload = record.value;
     const ownerId = record.ownerId;
@@ -186,6 +254,7 @@ async function writeRemote(key, value) {
       updated_at: new Date().toISOString(),
     }, { onConflict: 'record_id' });
     if (error) throw error;
+    if (!current()) return;
   }
 }
 
@@ -201,12 +270,33 @@ function safeDate(value) {
 // Marketplace order snapshots live only for the current authenticated tab.
 let marketplaceCacheOwner = '';
 let marketplaceOrderCache = [];
+let marketplaceCacheRevision = 0;
 let marketplaceLegacyHistory = [];
 
 export function clearMarketplaceOrderCache() {
   marketplaceCacheOwner = '';
   marketplaceOrderCache = [];
+  marketplaceCacheRevision += 1;
   marketplaceLegacyHistory = [];
+}
+
+// Stop the old session before another identity can use its storage mirror.
+export function stopCloudAppData() {
+  resetSharedSettings();
+  stopPortalRecovery();
+  stopMainRecovery?.();
+  stopMainRecovery = undefined;
+  tabBusinessData.clear();
+  guestShoppingData.clear();
+  catalogRefreshSequence += 1;
+  activeUserId = '';
+  activeRole = 'customer';
+  dedicatedTablesReady = false;
+  legacyReady = false;
+  clearMarketplaceOrderCache();
+  const channel = realtimeChannel;
+  realtimeChannel = undefined;
+  if (channel) void supabase.removeChannel(channel).catch(() => console.warn('The previous data subscription could not be removed.'));
 }
 
 export function readMarketplaceOrderCache(archiveOwner) {
@@ -251,10 +341,12 @@ async function writeDedicatedRecord(key, record, ownerId) {
       created_at: createdAt,
       updated_at: new Date().toISOString(),
     };
-    const { error } = updateOnlyOrderRoles.has(activeRole)
-      ? await supabase.from('pet_hotel_bookings').update(payload).eq('id', id)
-      : await supabase.from('pet_hotel_bookings').upsert(payload, { onConflict: 'id' });
+    const query = updateOnlyOrderRoles.has(activeRole)
+      ? supabase.from('pet_hotel_bookings').update(payload).eq('id', id)
+      : supabase.from('pet_hotel_bookings').upsert(payload, { onConflict: 'id' });
+    const { data, error } = await query.select('id').maybeSingle();
     if (error) throw error;
+    if (!data?.id) throw new Error('The booking save could not be confirmed. Reload and check your access.');
     return;
   }
 
@@ -271,32 +363,38 @@ async function writeDedicatedRecord(key, record, ownerId) {
     created_at: createdAt,
     updated_at: new Date().toISOString(),
   };
-  const { error } = updateOnlyOrderRoles.has(activeRole)
-    ? await supabase.from('pet_daycare_bookings').update(payload).eq('id', id)
-    : await supabase.from('pet_daycare_bookings').upsert(payload, { onConflict: 'id' });
+  const query = updateOnlyOrderRoles.has(activeRole)
+    ? supabase.from('pet_daycare_bookings').update(payload).eq('id', id)
+    : supabase.from('pet_daycare_bookings').upsert(payload, { onConflict: 'id' });
+  const { data, error } = await query.select('id').maybeSingle();
   if (error) throw error;
+  if (!data?.id) throw new Error('The booking save could not be confirmed. Reload and check your access.');
 }
 
 async function writeDedicatedOperations(key, value) {
+  const current = captureCloudSession();
   const records = elevatedOrderRoles.has(activeRole) && Array.isArray(value)
     ? groupOperationsByOwner(value)
     : [{ ownerId: activeUserId, value: Array.isArray(value) ? value : [] }];
   for (const group of records) {
-    for (const record of group.value) await writeDedicatedRecord(key, record, group.ownerId);
+    for (const record of group.value) {
+      if (!current()) return;
+      await writeDedicatedRecord(key, record, group.ownerId);
+    }
   }
 }
 
 // Saves a service booking to Supabase before updating the browser cache, matching Grooming's submit flow.
 export async function saveDedicatedBooking(key, booking, records) {
-  if (key === marketplaceOrdersKey || !dedicatedOperationKeys.has(key) || !Array.isArray(records)) throw new Error('This booking type cannot be synchronized.');
-  if (activeUserId) {
-    if (dedicatedTablesReady) await writeDedicatedRecord(key, booking, booking.userId || activeUserId);
-    else await writeRemote(key, records);
-  }
+  if (key === marketplaceOrdersKey || !dedicatedOperationKeys.has(key) || !booking?.id || !Array.isArray(records)) throw new Error('This booking type cannot be synchronized.');
+  const current = captureCloudSession();
+  if (!activeUserId || !dedicatedTablesReady) throw new Error('Booking data is unavailable. Reload before saving.');
+  await writeDedicatedRecord(key, booking, booking.userId || activeUserId);
+  if (!current()) throw new Error('The sign-in session changed. Reload to verify the save.');
   const serialized = JSON.stringify(records);
   applyingRemoteData = true;
   try {
-    if (originalSetItem) originalSetItem.call(localStorage, key, serialized);
+    if (originalSetItem) setCacheItem(key, serialized);
     else localStorage.setItem(key, serialized);
   } finally {
     applyingRemoteData = false;
@@ -348,13 +446,14 @@ export async function syncConfirmedMarketplaceCart(owner, cart) {
 }
 
 export async function refreshMarketplaceDemoCredit(owner) {
+  const current = captureCloudSession();
   const keys = ['furgo-demo-credit-balance', 'furgo-demo-credit-transactions'];
   const { data, error } = await supabase.from('app_data').select('storage_key,payload')
     .eq('owner_id', owner).eq('scope', 'customer').in('record_id', keys.map((key) => rowId('customer', key, owner)));
   if (error) throw error;
-  if (owner !== marketplaceCacheOwner) return;
+  if (!current() || owner !== marketplaceCacheOwner) return;
   for (const row of data || []) {
-    originalSetItem.call(localStorage, row.storage_key, JSON.stringify(row.payload));
+    setCacheItem(row.storage_key, JSON.stringify(row.payload));
   }
 }
 
@@ -364,6 +463,7 @@ export async function updateMarketplaceOrder(orderId, expectedVersion, action, p
   if (expectedVersion == null || expectedVersion === '' || !Number.isSafeInteger(version) || version < 0) {
     throw new Error('Refresh the order before making changes.');
   }
+  const current = captureCloudSession();
   const owner = marketplaceCacheOwner;
   const { data, error } = await supabase.rpc('update_admin_marketplace_order', {
     p_order_id: orderId,
@@ -376,7 +476,7 @@ export async function updateMarketplaceOrder(orderId, expectedVersion, action, p
   if (data?.id !== orderId || data?.order_version == null || !Number.isSafeInteger(confirmedVersion) || confirmedVersion < version) {
     throw new Error('The order update could not be confirmed. Refresh the order before trying again.');
   }
-  if (owner !== marketplaceCacheOwner) return;
+  if (!current() || owner !== marketplaceCacheOwner) return;
   try { applyDedicatedRow(marketplaceOrdersKey, data); }
   catch (cacheError) { console.warn('The Marketplace order was saved, but its local cache could not be updated:', cacheError); }
 }
@@ -384,20 +484,29 @@ export async function updateMarketplaceOrder(orderId, expectedVersion, action, p
 // Writes service order status/receipt changes before refreshing this browser's cache.
 export async function saveOrderRecords(key, order, records) {
   if (!key || key === marketplaceOrdersKey || !order?.id || !Array.isArray(records)) throw new Error('This order update cannot be synchronized.');
+  if (!activeUserId) throw new Error('Sign in and reload before saving this order.');
+  const current = captureCloudSession();
   order = compactReceiptOrder(order);
   records = compactReceiptRecords(key, records);
   if (activeUserId) {
     if (key === 'furgo-demo-grooming-bookings') {
-      const { error } = await supabase.from('grooming_bookings').update({ status: order.status, details: order }).eq('id', order.id);
+      const { data, error } = await supabase.from('grooming_bookings').update({ status: order.status, details: order }).eq('id', order.id).select('id').maybeSingle();
       if (error) throw error;
+      if (!data?.id) throw new Error('This order update could not be confirmed. Reload and check your access.');
+    } else if (dedicatedOperationKeys.has(key)) {
+      const ownerId = order._cloudOwnerId || order.userId || activeUserId;
+      if (!dedicatedTablesReady) throw new Error('Booking data is unavailable. Reload before saving.');
+      await writeDedicatedRecord(key, order, ownerId);
     } else {
+      if (!operationKeys.has(key)) throw new Error('This order type cannot be saved online.');
       await writeRemote(key, records);
     }
   }
+  if (!current()) throw new Error('The sign-in session changed. Reload to verify the save.');
   const serialized = JSON.stringify(records);
   applyingRemoteData = true;
   try {
-    if (originalSetItem) originalSetItem.call(localStorage, key, serialized);
+    if (originalSetItem) setCacheItem(key, serialized);
     else localStorage.setItem(key, serialized);
   } finally {
     applyingRemoteData = false;
@@ -412,24 +521,31 @@ export function cacheSyncedRecords(key, records, { notify = true } = {}) {
   if (key === marketplaceOrdersKey) {
     if (!marketplaceCacheOwner) return;
     marketplaceOrderCache = structuredClone(records);
+    marketplaceCacheRevision += 1;
   } else {
     if (!originalSetItem) originalSetItem = Storage.prototype.setItem;
     applyingRemoteData = true;
-    try { originalSetItem.call(localStorage, key, JSON.stringify(records)); }
+    try { setCacheItem(key, JSON.stringify(records)); }
     finally { applyingRemoteData = false; }
   }
   if (notify) window.dispatchEvent(new StorageEvent('storage', { key }));
 }
 
 // Refresh Marketplace quantities after database-side warehouse batch changes.
-export async function refreshMarketplaceCatalogFromDatabase({ notify = true } = {}) {
+export async function refreshMarketplaceCatalogFromDatabase({ notify = true, expectedOwner = '' } = {}) {
+  const sequence = ++catalogRefreshSequence;
   const { data, error } = await supabase.from('app_data')
     .select('payload')
     .eq('record_id', 'shared:furgo-demo-marketplace-products:shared')
     .eq('scope', 'shared').eq('storage_key', 'furgo-demo-marketplace-products').is('owner_id', null)
     .maybeSingle();
   if (error) throw error;
-  if (!Array.isArray(data?.payload)) return null;
+  if (sequence !== catalogRefreshSequence || (expectedOwner && expectedOwner !== marketplaceCacheOwner)) return null;
+  if (!data) {
+    cacheSyncedRecords(marketplaceProductsKey, [], { notify });
+    return [];
+  }
+  if (!Array.isArray(data.payload)) throw new Error('Invalid Marketplace catalog response.');
   cacheSyncedRecords('furgo-demo-marketplace-products', data.payload, { notify });
   return data.payload;
 }
@@ -459,34 +575,21 @@ function dedicatedRecordFromRow(key, row, items = []) {
   return compactReceiptOrder(record);
 }
 
-async function loadDedicatedOperations(userId, role) {
-  const localValues = new Map([...dedicatedOperationKeys].map((key) => [key, readLocal(key)]));
-  // Driver SELECT policies expose only Pet Taxi bookings; let Postgres apply that filter.
-  const ownQuery = (query) => elevatedOrderRoles.has(role) || role === 'driver' ? query : query.eq('user_id', userId);
-  const [marketResult, hotelResult, daycareResult] = await Promise.all([
-    ownQuery(supabase.from('marketplace_orders').select('*').order('created_at', { ascending: false })),
-    ownQuery(supabase.from('pet_hotel_bookings').select('*').order('created_at', { ascending: false })),
-    ownQuery(supabase.from('pet_daycare_bookings').select('*').order('created_at', { ascending: false })),
-  ]);
-  for (const result of [marketResult, hotelResult, daycareResult]) if (result.error) throw result.error;
-  const orderIds = (marketResult.data || []).map((order) => order.id);
-  let itemRows = [];
-  if (orderIds.length) {
-    const { data, error } = await supabase.from('marketplace_order_items').select('order_id,line_number,item').in('order_id', orderIds).order('line_number');
-    if (error) throw error;
-    itemRows = data || [];
-  }
+async function reconcileMarketplaceOrders(userId, role, ids = null) {
+  const current = captureCloudSession();
+  const revision = marketplaceCacheRevision;
+  const snapshot = await readMarketplaceOrderSnapshot(supabase, {
+    ids,
+    ownerId: elevatedOrderRoles.has(role) || role === 'driver' ? null : userId,
+    current: () => current() && revision === marketplaceCacheRevision,
+  });
+  if (!current() || marketplaceCacheOwner !== userId) return true;
+  if (!snapshot || revision !== marketplaceCacheRevision) return false;
+  const { orders, items: itemRows, returns: returnRows } = snapshot;
   const itemsByOrder = new Map();
   for (const row of itemRows) {
     if (!itemsByOrder.has(row.order_id)) itemsByOrder.set(row.order_id, []);
     itemsByOrder.get(row.order_id).push({ ...row.item, lineNumber: Number(row.line_number) });
-  }
-  let returnRows = [];
-  if (orderIds.length) {
-    const { data, error } = await supabase.from('marketplace_item_returns').select('*').in('order_id', orderIds);
-    // Keep existing portal data usable until the return-workflow migration is applied.
-    if (!error) returnRows = data || [];
-    else if (!['42P01', 'PGRST205'].includes(error.code)) throw error;
   }
   const returnsByLine = new Map(returnRows.map((itemReturn) => [`${itemReturn.order_id}:${itemReturn.line_number}`, {
     id: itemReturn.id,
@@ -504,36 +607,25 @@ async function loadDedicatedOperations(userId, role) {
   for (const [orderId, items] of itemsByOrder) {
     items.forEach((item) => { item.returnRequest = returnsByLine.get(`${orderId}:${item.lineNumber}`) || null; });
   }
-  const values = new Map([
-    [marketplaceOrdersKey, (marketResult.data || []).map((row) => dedicatedRecordFromRow(marketplaceOrdersKey, row, itemsByOrder.get(row.id) || []))],
-    ['furgo-demo-hotel-bookings', (hotelResult.data || []).map((row) => dedicatedRecordFromRow('furgo-demo-hotel-bookings', row))],
-    ['furgo-demo-daycare-bookings', (daycareResult.data || []).map((row) => dedicatedRecordFromRow('furgo-demo-daycare-bookings', row))],
+  const normalized = orders.map((row) => dedicatedRecordFromRow(marketplaceOrdersKey, row, itemsByOrder.get(row.id) || []));
+  const records = mergeMarketplaceOrderSnapshot(marketplaceOrderCache, normalized, ids);
+  if (!records) throw new Error('A newer Marketplace order is already displayed. Retry to confirm the latest orders.');
+  cacheSyncedRecords(marketplaceOrdersKey, records, { notify: false });
+  return true;
+}
+
+async function loadDedicatedBookings(userId, role) {
+  const current = captureCloudSession();
+  const ownQuery = (query) => elevatedOrderRoles.has(role) || role === 'driver' ? query : query.eq('user_id', userId);
+  const bookings = await Promise.all([
+    ownQuery(supabase.from('pet_hotel_bookings').select('*').order('created_at', { ascending: false })),
+    ownQuery(supabase.from('pet_daycare_bookings').select('*').order('created_at', { ascending: false })),
   ]);
-  if (role === 'customer') {
-    let profile = {};
-    try { profile = JSON.parse(sessionStorage.getItem('furgo-demo-user-profile') || '{}'); } catch { profile = {}; }
-    const email = String(profile.email || '').trim().toLowerCase();
-    const phone = String(profile.phone || '').replace(/\D/g, '');
-    const belongsToCustomer = (record) => {
-      const recordEmail = String(record.customerEmail || '').trim().toLowerCase();
-      const recordPhone = String(record.customerPhone || '').replace(/\D/g, '');
-      return Boolean((email && recordEmail === email) || (phone && recordPhone === phone));
-    };
-    for (const [key, records] of values) {
-      if (key === marketplaceOrdersKey || records.length) continue;
-      const localRecords = Array.isArray(localValues.get(key)) ? localValues.get(key).filter(belongsToCustomer) : [];
-      for (const record of localRecords) {
-        await writeDedicatedRecord(key, record, userId);
-      }
-      if (localRecords.length) values.set(key, localRecords.map((record) => ({ ...record, userId })));
-    }
+  for (const result of bookings) if (result.error) throw result.error;
+  if (!current() || marketplaceCacheOwner !== userId) return;
+  for (const [index, key] of ['furgo-demo-hotel-bookings', 'furgo-demo-daycare-bookings'].entries()) {
+    cacheSyncedRecords(key, (bookings[index].data || []).map((row) => dedicatedRecordFromRow(key, row)), { notify: false });
   }
-  if (marketplaceCacheOwner !== userId) return values;
-  for (const [key, records] of values) cacheSyncedRecords(key, records);
-  for (const key of ['furgo-demo-pet-daycare-bookings', 'furgo-demo-daycare-orders']) {
-    originalSetItem.call(localStorage, key, '[]');
-  }
-  return values;
 }
 
 function applyDedicatedRow(key, row, items, removed = false) {
@@ -552,29 +644,6 @@ function applyDedicatedRow(key, row, items, removed = false) {
     else records[index] = record;
   }
   cacheSyncedRecords(key, records);
-}
-
-async function refreshDedicatedMarketplaceOrder(owner, orderId, removed = false) {
-  if (owner !== marketplaceCacheOwner) return;
-  const { data: order, error } = await supabase.from('marketplace_orders').select('*').eq('id', orderId).maybeSingle();
-  if (error) throw error;
-  if (owner !== marketplaceCacheOwner) return;
-  if (!order) {
-    applyDedicatedRow(marketplaceOrdersKey, { id: orderId }, [], true);
-    return;
-  }
-  const { data: items, error: itemsError } = await supabase.from('marketplace_order_items').select('line_number,item').eq('order_id', orderId).order('line_number');
-  if (itemsError) throw itemsError;
-  const { data: returns, error: returnsError } = await supabase.from('marketplace_item_returns').select('*').eq('order_id', orderId);
-  if (returnsError && !['42P01', 'PGRST205'].includes(returnsError.code)) throw returnsError;
-  const returnByLine = new Map((returns || []).map((itemReturn) => [Number(itemReturn.line_number), {
-    id: itemReturn.id, status: itemReturn.status, reason: itemReturn.reason, photoPath: itemReturn.photo_path,
-    paidAmount: Number(itemReturn.paid_amount) || 0, shippingRefund: Number(itemReturn.shipping_refund) || 0,
-    refundAmount: Number(itemReturn.refund_amount) || 0, supplierResponse: itemReturn.supplier_response || '',
-    decisionReason: itemReturn.decision_reason || '', requestedAt: itemReturn.requested_at, refundedAt: itemReturn.refunded_at,
-  }]));
-  if (owner !== marketplaceCacheOwner) return;
-  applyDedicatedRow(marketplaceOrdersKey, order, (items || []).map((row) => ({ ...row.item, lineNumber: Number(row.line_number), returnRequest: returnByLine.get(Number(row.line_number)) || null })), removed);
 }
 
 function groupOperationsByOwner(items) {
@@ -605,13 +674,23 @@ function installStorageMirror(userId, role) {
   activeRole = role;
   if (!originalSetItem) originalSetItem = Storage.prototype.setItem;
   if (!originalRemoveItem) originalRemoveItem = Storage.prototype.removeItem;
-  compactStoredOrderCache();
+  if (!originalGetItem) originalGetItem = Storage.prototype.getItem;
+  Storage.prototype.getItem = function(key) {
+    if (this === localStorage && tabBusinessKeys.has(key)) {
+      const cache = !activeUserId && guestShoppingKeys.has(key) ? guestShoppingData : tabBusinessData;
+      return cache.get(key) ?? null;
+    }
+    return originalGetItem.call(this, key);
+  };
   Storage.prototype.setItem = function(key, value) {
-    if (this === localStorage && key === marketplaceOrdersKey) return;
+    if (this === localStorage && (key === marketplaceOrdersKey || versionedSharedKeys.has(key))) return;
     if (this === localStorage && receiptOrderKeys.has(key)) {
       try { value = JSON.stringify(compactReceiptRecords(key, JSON.parse(value))); } catch { /* Keep invalid JSON for the existing error path. */ }
     }
-    originalSetItem.call(this, key, value);
+    if (this === localStorage && tabBusinessKeys.has(key)) {
+      if (activeUserId) tabBusinessData.set(key, String(value));
+      else if (guestShoppingKeys.has(key)) guestShoppingData.set(key, String(value));
+    } else originalSetItem.call(this, key, value);
     if (this === localStorage && key === marketplaceSupplierContactsKey) {
       if (['manager', 'director', 'admin'].includes(activeRole)) {
         let contacts = value;
@@ -623,21 +702,32 @@ function installStorageMirror(userId, role) {
     if (this !== localStorage || key === marketplaceOrdersKey || !allSyncedKeys.has(key)) return;
     let parsed = value;
     try { parsed = JSON.parse(value); } catch { /* Keep ordinary string values as strings. */ }
-    void writeRemote(key, parsed).catch((error) => console.warn(`Could not sync ${key} to Supabase:`, error));
+    const current = captureCloudSession();
+    void writeRemote(key, parsed).catch((error) => {
+      if (current()) reportSyncIssue('A save could not be confirmed. ' + syncFailureMessage(error));
+    });
   };
   Storage.prototype.removeItem = function(key) {
-    originalRemoveItem.call(this, key);
+    if (this === localStorage && versionedSharedKeys.has(key)) return;
+    if (this === localStorage && tabBusinessKeys.has(key)) {
+      const cache = !activeUserId && guestShoppingKeys.has(key) ? guestShoppingData : tabBusinessData;
+      cache.delete(key);
+    }
+    else originalRemoveItem.call(this, key);
     if (this === localStorage && key === marketplaceSupplierContactsKey && ['manager', 'director', 'admin'].includes(activeRole) && activeUserId) {
       void writeMarketplaceSupplierContacts([]).catch((error) => console.warn('Could not clear marketplace store contacts in Supabase:', error));
       return;
     }
     if (this !== localStorage || key === marketplaceOrdersKey || key === 'furgo-demo-marketplace-products' || !allSyncedKeys.has(key) || !activeUserId || applyingRemoteData) return;
-    if (dedicatedTablesReady && dedicatedOperationKeys.has(key)) return;
+    if (dedicatedOperationKeys.has(key)) return;
+    if (!legacyReady) { reportSyncIssue('Cloud data has not been confirmed. Reload before removing records.'); return; }
     const scope = getScope(key);
-    if (scope === 'shared' && !canManageSharedKey(activeRole, key)) return;
-    const ownerId = scope === 'shared' ? null : activeUserId;
-    void supabase.from('app_data').delete().eq('record_id', rowId(scope, key, ownerId))
-      .then(({ error }) => { if (error) console.warn(`Could not remove ${key} from Supabase:`, error); });
+    const ownerId = activeUserId;
+    const current = captureCloudSession();
+    void supabase.from('app_data').delete().eq('record_id', rowId(scope, key, ownerId)).select('record_id')
+      .then(({ data, error }) => {
+        if (current() && (error || !data?.length)) reportSyncIssue('The removal could not be confirmed. ' + syncFailureMessage(error));
+      }).catch((error) => { if (current()) reportSyncIssue(syncFailureMessage(error)); });
   };
 }
 
@@ -655,226 +745,194 @@ async function writeMarketplaceSupplierContacts(contacts) {
 
 async function loadMarketplaceSupplierContacts(role) {
   if (!['executive', 'manager', 'director', 'admin'].includes(role)) return;
+  const current = captureCloudSession();
   const { data, error } = await supabase.from('marketplace_supplier_contacts').select('contacts').eq('id', true).maybeSingle();
   if (error) throw error;
-  if (Array.isArray(data?.contacts)) {
-    originalSetItem.call(localStorage, marketplaceSupplierContactsKey, JSON.stringify(data.contacts));
-    return;
-  }
-  if (['manager', 'director', 'admin'].includes(role)) {
-    const existing = readLocal(marketplaceSupplierContactsKey);
-    if (Array.isArray(existing) && existing.length) await writeMarketplaceSupplierContacts(existing);
-  }
+  if (current()) setCacheItem(marketplaceSupplierContactsKey, JSON.stringify(data?.contacts || []));
 }
 
-function applyRealtimeRow(row, removed = false) {
-  const key = row?.storage_key;
-  if (key === marketplaceOrdersKey || !allSyncedKeys.has(key) || dedicatedTablesReady && (dedicatedOperationKeys.has(key) || key === 'furgo-demo-daycare-orders')) return;
-  const scope = row.scope || getScope(key);
-  if (['furgo-demo-marketplace-products', 'furgo-demo-marketplace-offers'].includes(key)
-    && (scope !== 'shared' || row.record_id !== rowId('shared', key, null) || row.owner_id != null)) return;
-  // Shared catalogs (including Marketplace products) must stay fresh in
-  // director/admin sessions too. Previously full admin roles skipped this
-  // branch and then fell through to the owner/operation checks, so realtime
-  // catalog updates from Store submissions never reached their local cache.
-  if (scope === 'shared') {
-    applyingRemoteData = true;
-    if (removed) originalRemoveItem.call(localStorage, key);
-    else originalSetItem.call(localStorage, key, JSON.stringify(compactReceiptRecords(key, row.payload)));
-    applyingRemoteData = false;
-    window.dispatchEvent(new StorageEvent('storage', { key }));
-    return;
-  }
-  if (row.owner_id === activeUserId && (!fullAdminRoles.has(activeRole) || personalCustomerKeys.has(key))) {
-    applyingRemoteData = true;
-    if (removed) originalRemoveItem.call(localStorage, key);
-    else originalSetItem.call(localStorage, key, JSON.stringify(row.payload));
-    applyingRemoteData = false;
-    window.dispatchEvent(new StorageEvent('storage', { key }));
-    return;
-  }
-  if (!elevatedOrderRoles.has(activeRole) || scope !== 'operation') return;
-
-  if (operationObjectKeys.has(key)) {
-    const current = readLocal(key) || {};
-    for (const [entryKey, item] of Object.entries(current)) if (item?._cloudOwnerId === row.owner_id) delete current[entryKey];
-    if (!removed) for (const [entryKey, item] of Object.entries(row.payload || {})) current[entryKey] = { ...item, _cloudOwnerId: row.owner_id };
-    applyingRemoteData = true;
-    originalSetItem.call(localStorage, key, JSON.stringify(current));
-    applyingRemoteData = false;
-  } else {
-    const current = (readLocal(key) || []).filter((item) => item?._cloudOwnerId !== row.owner_id);
-    if (!removed && Array.isArray(row.payload)) current.push(...compactReceiptRecords(key, row.payload).map((item) => ({ ...item, userId: row.owner_id, _cloudOwnerId: row.owner_id })));
-    applyingRemoteData = true;
-    originalSetItem.call(localStorage, key, JSON.stringify(current));
-    applyingRemoteData = false;
-  }
-  window.dispatchEvent(new StorageEvent('storage', { key }));
-}
-
-function applyGroomingRealtimeRow(row, removed = false) {
-  if (!row?.id) return;
-  let bookings = readLocal('furgo-demo-grooming-bookings');
-  if (!Array.isArray(bookings)) bookings = [];
-  bookings = bookings.filter((item) => String(item.id) !== String(row.id));
-  if (!removed) bookings.push(compactReceiptOrder({
+export async function refreshGroomingBookings(userId, role) {
+  if (activeUserId !== userId) return;
+  const current = captureCloudSession();
+  let query = supabase.from('grooming_bookings').select('*').order('created_at', { ascending: false });
+  if (!elevatedOrderRoles.has(role) && role !== 'driver') query = query.eq('user_id', userId);
+  const { data, error } = await query;
+  if (error) throw error;
+  if (!current()) return;
+  cacheSyncedRecords('furgo-demo-grooming-bookings', (data || []).map((row) => compactReceiptOrder({
     ...(row.details || {}), id: row.id, userId: row.user_id, reference: row.reference,
     outlet: row.outlet, date: row.appointment_date, time: row.appointment_time,
     status: row.status, createdAt: row.created_at,
-  }));
-  applyingRemoteData = true;
-  originalSetItem.call(localStorage, 'furgo-demo-grooming-bookings', JSON.stringify(bookings));
-  applyingRemoteData = false;
-  window.dispatchEvent(new StorageEvent('storage', { key: 'furgo-demo-grooming-bookings' }));
+  })), { notify: false });
 }
 
-// Loads cloud-owned values before the portal renders and seeds missing rows from this browser's saved prototype data.
+function readLegacyRows() {
+  return supabase.from('app_data').select('record_id,scope,storage_key,owner_id,payload')
+    .not('record_id', 'in', '(' + [...sharedRecordIds, rowId('shared', marketplaceProductsKey, null)].join(',') + ')');
+}
+
+function applyLegacyRows(rows, userId, role) {
+  for (const key of allSyncedKeys) {
+    if (sharedKeys.has(key) || dedicatedOperationKeys.has(key) || key === 'furgo-demo-daycare-orders') continue;
+    const scope = getScope(key);
+    const owned = rows.filter((row) => row.scope === scope && row.storage_key === key
+      && row.owner_id && row.record_id === rowId(scope, key, row.owner_id));
+    if (scope === 'operation' && elevatedOrderRoles.has(role)) {
+      const merged = operationObjectKeys.has(key)
+        ? Object.assign({}, ...owned.map((row) => Object.fromEntries(Object.entries(row.payload || {}).map(([id, value]) => [id, { ...value, _cloudOwnerId: row.owner_id }]))))
+        : owned.flatMap((row) => Array.isArray(row.payload)
+          ? compactReceiptRecords(key, row.payload).map((value) => ({ ...value, userId: row.owner_id, _cloudOwnerId: row.owner_id })) : []);
+      setCacheItem(key, JSON.stringify(merged));
+    } else if (!fullAdminRoles.has(role) || personalCustomerKeys.has(key)) {
+      const own = owned.find((row) => row.owner_id === userId);
+      if (own) setCacheItem(key, JSON.stringify(own.payload));
+      else tabBusinessData.delete(key);
+    }
+  }
+}
+
+// Load cloud-owned values before rendering and reconcile with reads only.
 export async function loadCloudAppData(userId, role) {
-  clearMarketplaceOrderCache();
+  stopCloudAppData();
+  const session = sharedSession;
   marketplaceCacheOwner = userId;
   if (!originalSetItem) originalSetItem = Storage.prototype.setItem;
   if (!originalRemoveItem) originalRemoveItem = Storage.prototype.removeItem;
   activeUserId = userId;
   activeRole = role;
   dedicatedTablesReady = false;
-  const cacheOwnerKey = 'furgo-demo-app-data-cache-owner';
-  const previousCacheOwner = localStorage.getItem(cacheOwnerKey);
-  if (previousCacheOwner && previousCacheOwner !== userId) {
-    // Customer-scope keys share browser storage; clear the prior account's
-    // cache before loading this account so it cannot be seeded into the wrong row.
-    for (const key of customerKeys) originalRemoveItem.call(localStorage, key);
-  }
-  if (!['executive', 'manager', 'director', 'admin'].includes(role)) {
-    originalRemoveItem.call(localStorage, marketplaceSupplierContactsKey);
-  }
-  const { data, error } = await supabase.from('app_data').select('record_id,scope,storage_key,owner_id,payload');
-  if (error) throw error;
-  if (marketplaceCacheOwner !== userId) return { recordsLoaded: 0 };
-  const rows = data || [];
-  const byRecordId = new Map(rows.map((row) => [row.record_id, row]));
-  let dedicatedDataReady = false;
-  applyingRemoteData = true;
-  try {
-    try {
-      await loadDedicatedOperations(userId, role);
-      if (marketplaceCacheOwner !== userId) return { recordsLoaded: 0 };
-      dedicatedDataReady = true;
-      dedicatedTablesReady = true;
-    } catch (dedicatedError) {
-      console.warn('Dedicated order tables are not ready yet; loading legacy order data:', dedicatedError);
-    }
-    for (const key of allSyncedKeys) {
-      if (role === 'executive' && !staffLegacyOrderKeys.has(key) && key !== 'furgo-demo-check-in-tokens' && !executiveMarketplaceKeys.has(key)) continue;
-      if (key === marketplaceOrdersKey) continue;
-      if (dedicatedDataReady && (dedicatedOperationKeys.has(key) || key === 'furgo-demo-daycare-orders')) continue;
-      const scope = getScope(key);
-      if (scope === 'shared') {
-        if (role === 'manager' && !managerSharedSettingsKeys.has(key)) continue;
-        const shared = byRecordId.get(rowId('shared', key, null));
-        if (shared?.scope === 'shared' && shared.storage_key === key && shared.owner_id == null) {
-          originalSetItem.call(localStorage, key, JSON.stringify(compactReceiptRecords(key, shared.payload)));
-        } else if (['furgo-demo-marketplace-products', 'furgo-demo-marketplace-offers'].includes(key)) {
-          originalRemoveItem.call(localStorage, key);
-        } else if (canManageSharedKey(role, key)) await writeRemote(key, readLocal(key));
-        continue;
-      }
-
-      const ownedRows = rows.filter((row) => row.storage_key === key && row.scope === scope && row.owner_id);
-      if (elevatedOrderRoles.has(role) && scope === 'operation') {
-        const merged = operationObjectKeys.has(key)
-          ? Object.assign({}, ...ownedRows.map((row) => Object.fromEntries(Object.entries(row.payload || {}).map(([entryKey, entryValue]) => [entryKey, { ...entryValue, _cloudOwnerId: row.owner_id }]))))
-          : ownedRows.flatMap((row) => Array.isArray(row.payload)
-            ? compactReceiptRecords(key, row.payload).map((item) => ({ ...item, userId: row.owner_id, _cloudOwnerId: row.owner_id }))
-            : []);
-        originalSetItem.call(localStorage, key, JSON.stringify(merged));
-      } else if (!fullAdminRoles.has(role) || personalCustomerKeys.has(key)) {
-        const own = byRecordId.get(rowId(scope, key, userId));
-        if (own) originalSetItem.call(localStorage, key, JSON.stringify(compactReceiptRecords(key, own.payload)));
-        else {
-          const localValue = readLocal(key);
-          if (localValue != null) await writeRemote(key, localValue);
-        }
-      }
-    }
-  } finally {
-    applyingRemoteData = false;
-  }
-  if (marketplaceCacheOwner !== userId) return { recordsLoaded: 0 };
-  await preserveBrowserMarketplaceHistory();
-  if (role === 'customer' && marketplaceCacheOwner === userId) {
-    const { data: history, error: historyError } = await supabase.rpc('get_marketplace_legacy_history');
-    if (!historyError && marketplaceCacheOwner === userId && Array.isArray(history)) {
-      marketplaceLegacyHistory = history;
-    }
-  }
-  if (marketplaceCacheOwner !== userId) return { recordsLoaded: 0 };
-  try { await loadMarketplaceSupplierContacts(role); }
-  catch (error) { console.warn('Supabase marketplace store contacts are not ready yet:', error); }
-  originalSetItem.call(localStorage, cacheOwnerKey, userId);
+  const current = captureCloudSession();
   installStorageMirror(userId, role);
-  if (realtimeChannel) await supabase.removeChannel(realtimeChannel);
-  realtimeChannel = supabase.channel(`app-data:${userId}:${role}`)
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'app_data' }, (change) => {
-      const row = change.new?.record_id ? change.new : change.old;
-      if (row) applyRealtimeRow(row, change.eventType === 'DELETE');
-    })
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'grooming_bookings' }, (change) => {
-      const row = change.new?.id ? change.new : change.old;
-      if (row) applyGroomingRealtimeRow(row, change.eventType === 'DELETE');
-    });
-  if (['executive', 'manager', 'director', 'admin'].includes(role)) {
-    realtimeChannel.on('postgres_changes', { event: '*', schema: 'public', table: 'marketplace_supplier_contacts' }, (change) => {
-      const row = change.new?.id ? change.new : change.old;
-      if (!row) return;
-      applyingRemoteData = true;
-      originalSetItem.call(localStorage, marketplaceSupplierContactsKey, JSON.stringify(row.contacts || []));
-      applyingRemoteData = false;
-      window.dispatchEvent(new StorageEvent('storage', { key: marketplaceSupplierContactsKey }));
+  const refresh = async (groups, valid) => {
+    const all = groups.includes('all');
+    const jobs = [];
+    if (all || groups.includes('legacy')) jobs.push((async () => {
+      const revision = legacyWriteRevision;
+      const result = await readLegacyRows();
+      if (!valid()) return;
+      legacyReady = !result.error;
+      if (result.error) throw Object.assign(new Error(result.error.message), result.error, { status: result.status });
+      if (revision === legacyWriteRevision) applyLegacyRows(result.data || [], userId, role);
+    })());
+    if (all || groups.includes('catalog')) jobs.push(refreshMarketplaceCatalogFromDatabase({ notify: false, expectedOwner: userId }));
+    const orderIds = groups.filter((group) => group.startsWith('marketplace:')).map((group) => group.slice(12));
+    const fullOrders = all || groups.includes('marketplace');
+    if (fullOrders || orderIds.length) jobs.push(reconcileMarketplaceOrders(userId, role, fullOrders ? null : orderIds).then((applied) => {
+      if (valid() && !applied) queue.invalidate(...(fullOrders ? ['marketplace'] : orderIds.map((id) => `marketplace:${id}`)));
+    }));
+    if (all || groups.includes('bookings')) jobs.push(loadDedicatedBookings(userId, role).then(() => {
+      if (valid()) dedicatedTablesReady = true;
+    }));
+    if (all || groups.includes('grooming')) jobs.push(refreshGroomingBookings(userId, role));
+    if (all || groups.includes('contacts')) jobs.push(loadMarketplaceSupplierContacts(role));
+    const results = await Promise.allSettled(jobs);
+    if (!valid()) return;
+    if (!groups.includes('initial')) window.dispatchEvent(new Event('furgo-cloud-reconciled'));
+    const failed = results.find((result) => result.status === 'rejected');
+    if (failed) throw failed.reason;
+    reportSyncIssue('');
+  };
+  const onError = (error) => reportSyncIssue(syncFailureMessage(error));
+  const queue = createRecoveryQueue({ isCurrent: current, refresh, onError });
+  const wake = () => queue.invalidate('all');
+  window.addEventListener('online', wake);
+  stopMainRecovery = () => { queue.stop(); window.removeEventListener('online', wake); };
+  const [initial, settings] = await Promise.allSettled([refresh(['all', 'initial'], current), selectSharedSettings()]);
+  if (!current()) return;
+  if (initial.status === 'rejected') onError(initial.reason);
+  if (settings.status === 'fulfilled' && !settings.value.error) loadSharedSettings(settings.value.data || []);
+  else onError(settings.reason || settings.value?.error);
+
+  const tables = {
+    app_data: 'legacy', grooming_bookings: 'grooming', marketplace_orders: 'marketplace',
+    marketplace_order_items: 'marketplace', marketplace_item_returns: 'marketplace',
+    pet_hotel_bookings: 'bookings', pet_daycare_bookings: 'bookings', marketplace_supplier_contacts: 'contacts',
+  };
+  realtimeChannel = supabase.channel(`app-data:${session}`);
+  for (const [table, group] of Object.entries(tables)) {
+    if (group === 'contacts' && !elevatedOrderRoles.has(role)) continue;
+    realtimeChannel.on('postgres_changes', { event: '*', schema: 'public', table }, (change) => {
+      if (!current()) return;
+      if (group === 'marketplace') {
+        const id = marketplaceOrderChangeId(table, change);
+        queue.invalidate(id ? `marketplace:${id}` : 'marketplace');
+        return;
+      }
+      if (table !== 'app_data') { queue.invalidate(group); return; }
+      const recordId = change.new?.record_id || change.old?.record_id;
+      if (sharedRecordIds.includes(recordId)) scheduleSharedSettingsRefresh(session);
+      else if (recordId === rowId('shared', marketplaceProductsKey, null)) queue.invalidate('catalog');
+      else queue.invalidate('legacy');
     });
   }
-  if (dedicatedDataReady) {
-    realtimeChannel
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'marketplace_orders' }, (change) => {
-        const row = change.new?.id ? change.new : change.old;
-        if (row) void refreshDedicatedMarketplaceOrder(userId, row.id, change.eventType === 'DELETE').catch((syncError) => console.warn('Could not refresh Marketplace order:', syncError));
-      })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'marketplace_order_items' }, (change) => {
-        const row = change.new?.order_id ? change.new : change.old;
-        if (row?.order_id) void refreshDedicatedMarketplaceOrder(userId, row.order_id).catch((syncError) => console.warn('Could not refresh Marketplace order items:', syncError));
-      })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'marketplace_item_returns' }, (change) => {
-        const row = change.new?.order_id ? change.new : change.old;
-        if (row?.order_id) void refreshDedicatedMarketplaceOrder(userId, row.order_id).then(() => {
-          document.querySelector('[data-marketplace-return-cases]')?.dispatchEvent(new Event('marketplace-return-change'));
-          document.querySelector('[data-marketplace-return-notification]')?.dispatchEvent(new Event('marketplace-return-change'));
-        }).catch((syncError) => console.warn('Could not refresh Marketplace return status:', syncError));
-      })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'pet_hotel_bookings' }, (change) => {
-        const row = change.new?.id ? change.new : change.old;
-        if (row) applyDedicatedRow('furgo-demo-hotel-bookings', row, [], change.eventType === 'DELETE');
-      })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'pet_daycare_bookings' }, (change) => {
-        const row = change.new?.id ? change.new : change.old;
-        if (row) applyDedicatedRow('furgo-demo-daycare-bookings', row, [], change.eventType === 'DELETE');
-      });
+  realtimeChannel.subscribe((status) => {
+    queue.status(status, () => reportSyncIssue('Live updates are disconnected. Reconnect or reload to refresh.'));
+    if (current() && status === 'SUBSCRIBED') scheduleSharedSettingsRefresh(session);
+  });
+  void preserveBrowserMarketplaceHistory();
+  if (role === 'customer') {
+    const { data, error } = await supabase.rpc('get_marketplace_legacy_history');
+    if (current() && !error && Array.isArray(data)) marketplaceLegacyHistory = data;
   }
-  realtimeChannel.subscribe();
-  return { recordsLoaded: rows.length };
+  return { recordsLoaded: tabBusinessData.size };
 }
 
-// Explicit Save actions need to await the shared Supabase write. The generic
-// localStorage mirror is intentionally fire-and-forget for prototype settings.
-export async function saveSharedAppData(key, value, { notify = true } = {}) {
-  if (!sharedKeys.has(key)) throw new Error('This is not a shared setting.');
-  if (!activeUserId) throw new Error('Please sign in again before saving.');
-  if (!canManageSharedKey(activeRole, key)) throw new Error('Manager or Director access is required to save these settings.');
-  await writeRemote(key, value);
-  if (!originalSetItem) originalSetItem = Storage.prototype.setItem;
-  applyingRemoteData = true;
-  try {
-    originalSetItem.call(localStorage, key, JSON.stringify(value));
-  } finally {
-    applyingRemoteData = false;
-  }
-  if (notify) window.dispatchEvent(new StorageEvent('storage', { key }));
+// Bind the version to the rendered editor. Reading the latest version at
+// submit time would let a stale form overwrite another Director's changes.
+export function createSharedAppDataSaver(key) {
+  const session = sharedSession;
+  const owner = activeUserId;
+  let expectedVersion = sharedSettings.get(key)?.version;
+  let saving = false;
+  const assertReady = () => {
+    if (key === marketplaceProductsKey) throw new Error('Marketplace products must be saved using the catalog controls.');
+    if (!versionedSharedKeys.has(key)) throw new Error('This is not a shared setting.');
+    if (!owner || session !== sharedSession || activeUserId !== owner) throw new Error('The sign-in session changed. Reload before saving.');
+    if (!fullAdminRoles.has(activeRole)) throw new Error('Director access is required to save global settings.');
+    if (saving) throw new Error('A save is already in progress. Wait for its result.');
+    if (expectedVersion === undefined) throw new Error('Online settings are unavailable. Reload when connected before saving.');
+
+    if (sharedSettings.get(key)?.version !== expectedVersion) {
+      throw new Error('These settings changed while you were editing. Reload to review the latest version, then reapply your changes.');
+    }
+  };
+  const save = async (value, { notify = false } = {}) => {
+    assertReady();
+    const submittedVersion = expectedVersion;
+    let result;
+    saving = true;
+    try {
+      result = await supabase.rpc('save_versioned_shared_app_data', {
+        p_actor: owner,
+        p_key: key,
+        p_expected_version: submittedVersion,
+        p_payload: value,
+      });
+    } catch {
+      // The server may have committed before the connection was lost.
+    } finally {
+      saving = false;
+    }
+    if (session !== sharedSession || activeUserId !== owner) throw new Error('The sign-in session changed. Reload to verify the save.');
+    if (result?.error?.code === 'PT409') throw new Error('These settings changed while you were editing. Reload to review the latest version, then reapply your changes.');
+    if (result?.error?.code === '42501') throw new Error('Director access is required to save global settings.');
+    if (result?.error && ['22023', 'PGRST202'].includes(result.error.code)) {
+      throw new Error('The settings could not be saved. Check the settings and reload before trying again.');
+    }
+    if (!uuidPattern.test(result?.data)) {
+      expectedVersion = undefined;
+      throw new Error('The save could not be confirmed. Reload when connected and check the saved settings before trying again.');
+    }
+
+    expectedVersion = result.data;
+    sharedWrites += 1;
+    const currentVersion = sharedSettings.get(key)?.version;
+    if (currentVersion === submittedVersion || currentVersion === result.data) {
+      sharedSettings.set(key, { version: result.data, serialized: JSON.stringify(value) });
+      if (notify) window.dispatchEvent(new StorageEvent('storage', { key }));
+    }
+  };
+  return Object.assign(save, { assertReady });
 }
+
+if (globalThis.Storage) installStorageMirror('', 'customer');

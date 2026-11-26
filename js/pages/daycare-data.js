@@ -1,3 +1,4 @@
+import { readSharedAppData } from '../app-data-sync.js';
 // Keeps daycare catalog, capacity, pass, and booking records in the local prototype store.
 import { getSharedOutletNames } from './outlet-directory.js';
 export const daycareSettingsKey = 'furgo-demo-daycare-settings';
@@ -37,7 +38,7 @@ const defaultDaycareSettings = {
 // Reads settings with safe defaults so an incomplete localStorage record does not break the page.
 export function loadDaycareSettings() {
   try {
-    const saved = JSON.parse(localStorage.getItem(daycareSettingsKey) || 'null');
+    const saved = JSON.parse(readSharedAppData(daycareSettingsKey) || 'null');
     if (!saved || typeof saved !== 'object') return structuredClone(defaultDaycareSettings);
     return {
       ...structuredClone(defaultDaycareSettings), ...saved,

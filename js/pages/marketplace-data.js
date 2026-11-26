@@ -1,4 +1,4 @@
-import { readMarketplaceOrderCache } from '../app-data-sync.js';
+import { readMarketplaceOrderCache, readSharedAppData } from '../app-data-sync.js';
 
 // Shared marketplace demo records used by the customer catalog and Admin Portal.
 export const marketplaceProductsKey = 'furgo-demo-marketplace-products';
@@ -30,7 +30,7 @@ export const defaultMarketplaceOfferSettings = {
 // Loads customer-facing delivery, voucher, and offer settings saved by the Admin Portal.
 export function loadMarketplaceOfferSettings() {
   try {
-    const saved = JSON.parse(localStorage.getItem(marketplaceOfferSettingsKey) || 'null');
+    const saved = JSON.parse(readSharedAppData(marketplaceOfferSettingsKey) || 'null');
     const settings = {
       ...defaultMarketplaceOfferSettings,
       ...(saved && typeof saved === 'object' ? saved : {}),

@@ -1,5 +1,5 @@
 import { escapeHTML } from '../shared.js';
-import { saveSharedAppData } from '../app-data-sync.js';
+import { createSharedAppDataSaver, readSharedAppData } from '../app-data-sync.js';
 
 export const homeShortcutSettingsKey = 'furgo-demo-home-service-shortcuts';
 
@@ -14,15 +14,10 @@ export const homeShortcutOptions = [
 
 const defaultShortcutIds = homeShortcutOptions.map(({ id }) => id);
 let liveRefreshInstalled = false;
-try {
-  if (localStorage.getItem(homeShortcutSettingsKey) === null) {
-    localStorage.setItem(homeShortcutSettingsKey, JSON.stringify(defaultShortcutIds));
-  }
-} catch { /* The default shortcuts still render if browser storage is unavailable. */ }
 
 export function loadHomeShortcutIds() {
   try {
-    const saved = JSON.parse(localStorage.getItem(homeShortcutSettingsKey) || 'null');
+    const saved = JSON.parse(readSharedAppData(homeShortcutSettingsKey) || 'null');
     if (Array.isArray(saved)) {
       const validIds = saved.filter((id, index) => homeShortcutOptions.some((option) => option.id === id) && saved.indexOf(id) === index);
       return validIds;
@@ -74,6 +69,7 @@ export function setupAdminHomeShortcutSettings() {
   const feedback = form?.querySelector('[data-home-shortcut-feedback]');
   if (!form || !list || !feedback) return;
 
+  const saveSettings = createSharedAppDataSaver(homeShortcutSettingsKey);
   let draggingRow = null;
   let pointerId = null;
   const moveRow = (row, target, after = false) => {
@@ -125,7 +121,7 @@ export function setupAdminHomeShortcutSettings() {
     feedback.textContent = 'Saving customer home functions…';
     feedback.classList.remove('is-error');
     try {
-      await saveSharedAppData(homeShortcutSettingsKey, selectedIds);
+      await saveSettings(selectedIds, { notify: true });
       feedback.textContent = 'Customer home functions saved.';
     } catch (error) {
       feedback.textContent = error.message || 'Home functions could not be saved.';

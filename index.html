@@ -21,20 +21,23 @@
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin="" defer></script>
     <!-- js/app.js routes between the screen modules in js/pages/. -->
     <script type="module">
-      import { sealMarketplaceLegacySnapshots } from './js/marketplace-legacy-recovery.js';
-
+      let stage = 'recovery module loading';
       try {
+        const { sealMarketplaceLegacySnapshots } = await import('./js/marketplace-legacy-recovery.js');
+        stage = 'legacy snapshot recovery';
         await sealMarketplaceLegacySnapshots();
+        stage = 'application module loading';
         await import('./js/app.js');
       } catch (error) {
         const root = document.querySelector('#app');
-        if (root) root.textContent = 'Furgo could not start safely. Keep this browser profile private and contact Furgo Support. Try reloading after reconnecting.';
-        console.warn('Furgo startup paused:', error?.name || 'Error');
+        if (root) root.textContent = `Furgo could not start safely (${stage}). Keep this browser profile private and contact Furgo Support. Try reloading after reconnecting.`;
+        console.warn('Furgo startup paused:', stage, error?.name || 'Error');
       }
     </script>
   </head>
   <body>
     <!-- JavaScript inserts the active page into this container. -->
+    <p id="furgo-sync-status" role="status" hidden></p>
     <div id="app"></div>
   </body>
 </html>

@@ -1,3 +1,5 @@
+import { captureCloudSession } from '../app-data-sync.js';
+import { watchPortalData } from '../sync-recovery.js';
 import { escapeHTML } from '../shared.js';
 import { supabase } from '../supabase.js';
 import { supplierProductEditorMarkup } from './marketplace-supplier.js';
@@ -772,45 +774,67 @@ export async function setupSellerPortal() {
     else content = `<section class="seller-card"><h2>Seller Business Profile</h2><dl class="seller-settings-list"><div><dt>Business name</dt><dd>${text(snapshot.profile?.business_name)}</dd></div><div><dt>Contact name</dt><dd>${text(snapshot.profile?.contact_name)}</dd></div><div><dt>Contact email</dt><dd>${text(snapshot.profile?.contact_email)}</dd></div><div><dt>Contact phone</dt><dd>${text(snapshot.profile?.contact_phone)}</dd></div></dl><h2>Notification Preferences</h2><form data-seller-notifications class="seller-preferences"><label><input type="checkbox" name="low_stock" ${snapshot.profile?.notification_preferences?.low_stock !== false ? 'checked' : ''}/> Low stock alerts</label><label><input type="checkbox" name="product_status" ${snapshot.profile?.notification_preferences?.product_status !== false ? 'checked' : ''}/> Product status updates</label><button type="submit">Save Preferences</button><span role="status" aria-live="polite"></span></form><p class="seller-muted">For seller profile, listing, stock and settlement questions, contact Furgo Support.</p></section>`;
     host.innerHTML = `${groupedNavigation()}${content}`;
   };
-  const [snapshotResult, requestResult, requestProfileResult, listingStatusesResult, liveProductsResult, stockDetailsResult, feeScheduleResult] = await Promise.all([
-    supabase.rpc('seller_portal_snapshot'),
-    supabase.rpc('seller_portal_product_requests'),
-    supabase.rpc('seller_portal_request_profile'),
-    supabase.rpc('seller_portal_store_listing_statuses'),
-    supabase.rpc('seller_portal_live_products'),
-    supabase.rpc('seller_portal_inventory_stock_details'),
-    supabase.rpc('seller_portal_fee_schedule'),
-  ]);
-  const error = snapshotResult.error || requestResult.error || requestProfileResult.error || listingStatusesResult.error;
-  if (error) { host.innerHTML = `<div class="seller-error"><strong>Seller data could not be loaded.</strong><p>${text(error.message, listingStatusesResult.error ? 'Apply the Seller Portal status sync migration and confirm this account has Seller Portal access.' : 'Check that migrations 0113 and 0114 have been applied and this account has Seller Portal access.')}</p><a href="#login">Return to sign in</a></div>`; return; }
-  sellerMarketplaceProductsError = liveProductsResult.error?.message || '';
-  sellerMarketplaceProducts = liveProductsResult.error ? [] : liveProductsResult.data || [];
-  sellerFeeScheduleError = feeScheduleResult.error?.message || '';
-  sellerFeeSchedule = feeScheduleResult.error ? null : feeScheduleResult.data || null;
-  sellerStockDetailsError = stockDetailsResult.error?.message || '';
-  sellerStockDetails = new Map((!stockDetailsResult.error && Array.isArray(stockDetailsResult.data) ? stockDetailsResult.data : []).map((record) => [String(record.seller_product_id), record]));
-  storeListingStatuses = new Map((listingStatusesResult.data || []).map((row) => [String(row.warehouse_product_id), row.status]));
-  requestProfile = requestProfileResult.data || {};
-  const sellerInventoryById = new Map((snapshotResult.data?.inventory || []).map((row) => [String(row.product_id), row]));
-  const recordedStockMovements = [...sellerStockDetails.values()].flatMap((record) => {
-    const product = sellerInventoryById.get(String(record.seller_product_id));
-    return (record.history || []).map((movement) => ({
-      ...movement,
-      product_name: product?.name || movement.product_name,
-      sku: product?.sku || movement.sku,
-      // Use the same recorded reason shown in batch history. The older snapshot
-      // RPC translates unknown deductions (including Marketplace sale) to
-      // "Stock adjusted", which mislabels the actual stock movement.
-      reason: movement.reason || '—',
-    }));
-  }).sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
-  snapshot = {
-    ...(snapshotResult.data || {}),
-    profile: { ...(snapshotResult.data?.profile || {}), ...requestProfile },
-    product_requests: requestResult.data || [],
-    movements: stockDetailsResult.error ? (snapshotResult.data?.movements || []) : recordedStockMovements,
+  const sessionCurrent = captureCloudSession();
+  const syncStatus = document.createElement('p');
+  syncStatus.setAttribute('role', 'status');
+  syncStatus.hidden = true;
+  host.before(syncStatus);
+  const report = (message) => {
+    syncStatus.hidden = !message;
+    syncStatus.textContent = message;
+    if (!snapshot && message) host.textContent = 'Seller data is unavailable. Reload to retry.';
   };
-  showSection();
+  const editing = () => host.querySelector('dialog[open]') || host.contains(document.activeElement) &&
+    document.activeElement.matches('input, select, textarea, [contenteditable="true"]');
+  watchPortalData({
+    client: supabase, root, tables: ['app_data', 'portal_notifications'],
+    isCurrent: sessionCurrent, report,
+    needsStockRefresh: () => ['products', 'inventory'].includes(currentSection),
+    refresh: async (_groups, current) => {
+      if (editing()) return;
+      const [snapshotResult, requestResult, requestProfileResult, listingStatusesResult, liveProductsResult, stockDetailsResult, feeScheduleResult] = await Promise.all([
+        supabase.rpc('seller_portal_snapshot'),
+        supabase.rpc('seller_portal_product_requests'),
+        supabase.rpc('seller_portal_request_profile'),
+        supabase.rpc('seller_portal_store_listing_statuses'),
+        supabase.rpc('seller_portal_live_products'),
+        supabase.rpc('seller_portal_inventory_stock_details'),
+        supabase.rpc('seller_portal_fee_schedule'),
+      ]);
+      if (!current() || editing()) return;
+      const error = snapshotResult.error || requestResult.error || requestProfileResult.error || listingStatusesResult.error;
+      if (error) throw error;
+      sellerMarketplaceProductsError = liveProductsResult.error?.message || '';
+      sellerMarketplaceProducts = liveProductsResult.error ? [] : liveProductsResult.data || [];
+      sellerFeeScheduleError = feeScheduleResult.error?.message || '';
+      sellerFeeSchedule = feeScheduleResult.error ? null : feeScheduleResult.data || null;
+      sellerStockDetailsError = stockDetailsResult.error?.message || '';
+      sellerStockDetails = new Map((!stockDetailsResult.error && Array.isArray(stockDetailsResult.data) ? stockDetailsResult.data : []).map((record) => [String(record.seller_product_id), record]));
+      storeListingStatuses = new Map((listingStatusesResult.data || []).map((row) => [String(row.warehouse_product_id), row.status]));
+      requestProfile = requestProfileResult.data || {};
+      const sellerInventoryById = new Map((snapshotResult.data?.inventory || []).map((row) => [String(row.product_id), row]));
+      const recordedStockMovements = [...sellerStockDetails.values()].flatMap((record) => {
+        const product = sellerInventoryById.get(String(record.seller_product_id));
+        return (record.history || []).map((movement) => ({
+          ...movement,
+          product_name: product?.name || movement.product_name,
+          sku: product?.sku || movement.sku,
+          // Use the same recorded reason shown in batch history. The older snapshot
+          // RPC translates unknown deductions (including Marketplace sale) to
+          // "Stock adjusted", which mislabels the actual stock movement.
+          reason: movement.reason || '—',
+        }));
+      }).sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
+      snapshot = {
+        ...(snapshotResult.data || {}),
+        profile: { ...(snapshotResult.data?.profile || {}), ...requestProfile },
+        product_requests: requestResult.data || [],
+        movements: stockDetailsResult.error ? (snapshotResult.data?.movements || []) : recordedStockMovements,
+      };
+      showSection();
+      report('');
+    },
+  });
   root.addEventListener('change', (event) => {
     if (event.target.matches('[data-best-selling-limit]')) {
       bestSellingLimit = Number(event.target.value) || 5;

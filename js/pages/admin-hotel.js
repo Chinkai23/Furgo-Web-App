@@ -5,7 +5,7 @@ import { adminServiceBannerSettingsPanel } from './admin-service-banners.js';
 import { serviceAddOnSection, setupServiceAddOns } from './admin-service-addons.js';
 import { customerOrderStatus } from '../order-status.js';
 import { adminOrderCardMarkup, adminOrderStage, adminOrderStageFilters, adminOrderStatusControl, adminOtherServiceOrderLinks } from '../admin-order-ui.js';
-import { saveOrderRecords } from '../app-data-sync.js';
+import { createSharedAppDataSaver, saveOrderRecords } from '../app-data-sync.js';
 
 // Admin Hotel page: manages room inventory, rates, add-ons, transport, vouchers, and boarding records.
 export function adminHotelPage({ settingsOnly = false, stage = 'new' } = {}) {
@@ -96,8 +96,10 @@ function hotelCalendarMarkup(settings, bookings, { outlet = settings.outlets[0],
 
 // Saves inventory and service settings so the customer availability search uses the new values.
 export function setupAdminHotel() {
+  const saveCalendar = createSharedAppDataSaver(hotelSettingsKey);
+  const saveRoomSettings = createSharedAppDataSaver(hotelSettingsKey);
   const calendarHost = document.querySelector('[data-hotel-calendar-host]');
-  calendarHost?.addEventListener('click', (event) => {
+  calendarHost?.addEventListener('click', async (event) => {
     const availabilityButton = event.target.closest('[data-hotel-room-availability]');
     if (availabilityButton) {
       const { roomId, roomUnit, roomDate, roomOutlet, roomReserved } = availabilityButton.dataset;
@@ -108,7 +110,10 @@ export function setupAdminHotel() {
       if (willBlock && roomReserved === 'true' && !window.confirm('This room is already reserved for this date. Marking it unavailable will not change the existing booking. Continue?')) return;
       if (willBlock) settings.roomDateAvailability.push({ roomId, unit: roomUnit, date: roomDate, outlet: roomOutlet });
       else settings.roomDateAvailability.splice(existingIndex, 1);
-      localStorage.setItem(hotelSettingsKey, JSON.stringify(settings));
+      availabilityButton.disabled = true;
+      try { await saveCalendar(settings); }
+      catch (error) { window.alert(error.message); return; }
+      finally { availabilityButton.disabled = false; }
       void recordAdminAction('hotel_room_availability_updated', 'hotel_room', `${roomId} · ${roomUnit}`, { outlet: roomOutlet, date: roomDate, available: !willBlock });
       const view = calendarHost.querySelector('[data-hotel-calendar-view].is-active')?.dataset.hotelCalendarView || 'week';
       const startDate = calendarHost.querySelector('[data-hotel-calendar-date]')?.value || localDateString(new Date());
@@ -177,11 +182,12 @@ export function setupAdminHotel() {
     if (!groomingTimeSlots.length) { feedback.textContent = 'Add at least one time for hotel grooming appointments.'; return; }
     if (groomingTimeSlots.some((time) => !/^([01]?\d|2[0-3]):[0-5]\d$/.test(time))) { feedback.textContent = 'Use 24-hour times, such as 10:00, 13:00, 15:00.'; return; }
     const updated = { ...prior, bookingHorizonDays: Number(form.elements.bookingHorizonDays.value), outlets, rooms, groomingTimeSlots, voucher: { code: form.elements.voucherCode.value.trim().toUpperCase(), type: form.elements.voucherType.value, value: Number(form.elements.voucherValue.value), minimumSpend: Number(form.elements.voucherMinimumSpend.value), enabled: form.elements.voucherEnabled.checked } };
-    localStorage.setItem(hotelSettingsKey, JSON.stringify(updated));
+    try { await saveRoomSettings(updated); }
+    catch (error) { feedback.textContent = error.message; return; }
     void recordAdminAction('hotel_settings_updated', 'service', 'pet_hotel');
     refreshAdminHotel();
   });
-  form.addEventListener('click', (event) => {
+  form.addEventListener('click', async (event) => {
     const deleteRoom = event.target.closest('[data-delete-hotel-room]');
     if (!deleteRoom) return;
     const settings = loadHotelSettings();
@@ -190,7 +196,8 @@ export function setupAdminHotel() {
       if (!window.confirm('Delete this room type? Existing reservations keep their saved room details.')) return;
       settings.rooms = settings.rooms.filter((item) => item.id !== deleteRoom.dataset.deleteHotelRoom);
     }
-    localStorage.setItem(hotelSettingsKey, JSON.stringify(settings));
+    try { await saveRoomSettings(settings); }
+    catch (error) { window.alert(error.message); return; }
     void recordAdminAction('hotel_room_removed', 'hotel_room', deleteRoom.dataset.deleteHotelRoom);
     refreshAdminHotel();
   });

@@ -1,3 +1,4 @@
+import { createSharedAppDataSaver } from '../app-data-sync.js';
 // Central Manager/Director setup for Pet Taxi, shared by all three booking services.
 import { escapeHTML } from '../shared.js';
 import { recordAdminAction } from '../admin-audit.js';
@@ -28,6 +29,7 @@ export function adminPetTaxiPage() {
 export function setupAdminPetTaxi() {
   const form = document.querySelector('[data-admin-pet-taxi-settings]');
   if (!form) return;
+  const saveSettings = createSharedAppDataSaver(petTaxiSettingsKey);
   const scheduleList = form.querySelector('[data-taxi-schedule-list]');
   const routeList = form.querySelector('[data-taxi-route-list]');
   const availableOutlets = loadGroomingSettings().outlets;
@@ -54,7 +56,7 @@ export function setupAdminPetTaxi() {
     if (removeRoute && routeList.children.length > 1) removeRoute.closest('.admin-pet-taxi-route-row').remove();
     updateRemoveButtons();
   });
-  form.addEventListener('submit', (event) => {
+  form.addEventListener('submit', async (event) => {
     event.preventDefault();
     if (!form.reportValidity()) return;
     const slots = [...new Set([...form.querySelectorAll('[data-taxi-time]')].map((input) => input.value.trim()).filter(Boolean))];
@@ -69,7 +71,8 @@ export function setupAdminPetTaxi() {
       return;
     }
     const updated = { ...settings(), scheduleSlots: slots, routes };
-    localStorage.setItem(petTaxiSettingsKey, JSON.stringify(updated));
+    try { await saveSettings(updated); }
+    catch (error) { feedback.textContent = error.message; return; }
     void recordAdminAction('pet_taxi_settings_updated', 'service', 'pet_taxi', { routeCount: routes.length });
     feedback.textContent = 'Pet Taxi settings saved for Grooming, Pet Hotel, and Pet Daycare.';
   });

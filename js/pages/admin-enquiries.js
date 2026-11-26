@@ -1,3 +1,4 @@
+import { createSharedAppDataSaver, readSharedAppData } from '../app-data-sync.js';
 import { escapeHTML, loadHelpCenterDetails } from '../shared.js';
 import { supabase } from '../supabase.js';
 
@@ -12,8 +13,8 @@ function enquiryCard(enquiry, index) {
 export function adminEnquiriesPage() {
   const details = loadHelpCenterDetails();
   const profile = JSON.parse(sessionStorage.getItem('furgo-demo-user-profile') || '{}');
-  const canEditHelp = ['manager', 'director', 'admin'].includes(profile.role);
-  const helpDetailsForm = canEditHelp ? `<section class="admin-market-panel admin-help-content-panel"><div class="admin-market-panel-heading"><div><span>Help Center Content</span><h2>About Us &amp; Contact Details</h2></div><p>These details appear on the customer Help Center.</p></div><dl class="admin-help-details-view"><div><dt>About Us</dt><dd data-help-about>${escapeHTML(details.aboutUs || 'Not set')}</dd></div><div><dt>Customer Service Number</dt><dd data-help-phone>${escapeHTML(details.phone || 'Not set')}</dd></div><div><dt>Address</dt><dd data-help-address>${escapeHTML(details.address || 'Not set')}</dd></div></dl><div class="admin-market-form-actions"><button class="button button-primary" type="button" data-edit-help-details>EDIT DETAILS</button><span data-admin-help-details-feedback role="status" aria-live="polite"></span></div><dialog class="admin-help-details-dialog" data-help-details-dialog aria-labelledby="admin-help-details-title"><header><div><span>Help Center Content</span><h2 id="admin-help-details-title">Edit Details</h2></div><button class="admin-help-details-close" type="button" data-close-help-details aria-label="Close edit form">×</button></header><form class="admin-help-details-form" data-admin-help-details><label>About Us<textarea name="aboutUs" rows="4" maxlength="1200">${escapeHTML(details.aboutUs)}</textarea></label><label>Customer Service Number<input name="phone" type="tel" maxlength="40" value="${escapeHTML(details.phone)}" /></label><label>Address<textarea name="address" rows="3" maxlength="500">${escapeHTML(details.address)}</textarea></label><div class="admin-market-form-actions"><button class="button button-light" type="button" data-cancel-help-details>CANCEL</button><button class="button button-primary" type="submit">SAVE DETAILS</button></div></form></dialog></section>` : '';
+  const canEditHelp = ['director', 'admin'].includes(profile.role);
+  const helpDetailsForm = canEditHelp ? `<section class="admin-market-panel admin-help-content-panel"><div class="admin-market-panel-heading"><div><span>Help Center Content</span><h2>About Us &amp; Contact Details</h2></div><p>These details appear on the customer Help Center.</p></div><dl class="admin-help-details-view"><div><dt>About Us</dt><dd data-help-about>${escapeHTML(details.aboutUs || 'Not set')}</dd></div><div><dt>Customer Service Number</dt><dd data-help-phone>${escapeHTML(details.phone || 'Not set')}</dd></div><div><dt>Address</dt><dd data-help-address>${escapeHTML(details.address || 'Not set')}</dd></div></dl><div class="admin-market-form-actions"><button class="button button-primary" type="button" data-edit-help-details>EDIT DETAILS</button><span data-admin-help-details-feedback role="status" aria-live="polite"></span></div><dialog class="admin-help-details-dialog" data-help-details-dialog aria-labelledby="admin-help-details-title"><header><div><span>Help Center Content</span><h2 id="admin-help-details-title">Edit Details</h2></div><button class="admin-help-details-close" type="button" data-close-help-details aria-label="Close edit form">×</button></header><form class="admin-help-details-form" data-admin-help-details><label>About Us<textarea name="aboutUs" rows="4" maxlength="1200">${escapeHTML(details.aboutUs)}</textarea></label><label>Customer Service Number<input name="phone" type="tel" maxlength="40" value="${escapeHTML(details.phone)}" /></label><label>Address<textarea name="address" rows="3" maxlength="500">${escapeHTML(details.address)}</textarea></label><div class="admin-market-form-actions"><button class="button button-light" type="button" data-cancel-help-details>CANCEL</button><button class="button button-primary" type="submit">SAVE DETAILS</button></div><p data-help-save-error role="status"></p></form></dialog></section>` : '';
 
   return `<main class="admin-portal-page admin-enquiries-page"><header class="admin-portal-header"><a class="admin-portal-brand" href="#admin"><img src="Image/Icon/Logo.png" alt="Furgo" /><span>Admin Portal</span></a><div class="admin-portal-account"><a href="#admin">Home</a><a class="admin-customer-portal-link" href="#home?portal=customer">Open Customer Portal</a></div></header><header class="admin-market-heading"><a href="#admin" aria-label="Back to Admin Home">‹</a><div><span>Customer Support</span><h1>Help &amp; Enquiries</h1></div></header><section class="admin-market-stats"><article><span>Enquiries Received</span><strong data-enquiry-total>—</strong></article><article><span>Awaiting Reply</span><strong data-enquiry-pending>—</strong></article><article><span>Replied</span><strong data-enquiry-replied>—</strong></article></section><section class="admin-market-panel"><div class="admin-market-panel-heading"><div><span>Customer Support</span><h2>Enquiry Inbox</h2></div></div><div class="admin-enquiry-list" data-enquiry-list role="status" aria-live="polite">Loading Enquiries…</div></section>${helpDetailsForm}</main>`;
 }
@@ -22,6 +23,8 @@ export function setupAdminEnquiries() {
   const list = document.querySelector('[data-enquiry-list]');
   if (!list) return;
   const helpForm = document.querySelector('[data-admin-help-details]');
+  const detailsKey = 'furgo-demo-help-center-details';
+  const saveDetails = createSharedAppDataSaver(detailsKey);
   const helpDialog = document.querySelector('[data-help-details-dialog]');
   const editHelpButton = document.querySelector('[data-edit-help-details]');
   const closeHelpDialog = () => helpDialog?.close();
@@ -35,14 +38,18 @@ export function setupAdminEnquiries() {
   helpDialog?.addEventListener('click', (event) => {
     if (event.target === helpDialog) closeHelpDialog();
   });
-  helpForm?.addEventListener('submit', (event) => {
+  helpForm?.addEventListener('submit', async (event) => {
     event.preventDefault();
     const details = {
+      ...JSON.parse(readSharedAppData(detailsKey) || '{}'),
       aboutUs: helpForm.elements.aboutUs.value.trim(),
       phone: helpForm.elements.phone.value.trim(),
       address: helpForm.elements.address.value.trim(),
     };
-    localStorage.setItem('furgo-demo-help-center-details', JSON.stringify(details));
+    const feedback = helpForm.querySelector('[data-help-save-error]');
+    feedback.textContent = '';
+    try { await saveDetails(details); }
+    catch (error) { feedback.textContent = error.message; return; }
     document.querySelector('[data-help-about]').textContent = details.aboutUs || 'Not set';
     document.querySelector('[data-help-phone]').textContent = details.phone || 'Not set';
     document.querySelector('[data-help-address]').textContent = details.address || 'Not set';

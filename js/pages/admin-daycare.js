@@ -5,7 +5,7 @@ import { adminServiceBannerSettingsPanel } from './admin-service-banners.js';
 import { serviceAddOnSection, setupServiceAddOns } from './admin-service-addons.js';
 import { customerOrderStatus } from '../order-status.js';
 import { adminOrderCardMarkup, adminOrderStage, adminOrderStageFilters, adminOrderStatusControl, adminOtherServiceOrderLinks } from '../admin-order-ui.js';
-import { saveOrderRecords } from '../app-data-sync.js';
+import { createSharedAppDataSaver, saveOrderRecords } from '../app-data-sync.js';
 
 const money = (value) => `MYR ${Number(value || 0).toFixed(2)}`;
 
@@ -38,20 +38,23 @@ export function adminDaycarePage({ settingsOnly = false, stage = 'new' } = {}) {
 
 // Admin Pet Daycare interactions: edit public details and service settings, manage catalog items, and update the daily roster.
 export function setupAdminDaycare() {
+  const saveDetails = createSharedAppDataSaver(daycareSettingsKey);
+  const saveDaycareSettings = createSharedAppDataSaver(daycareSettingsKey);
   const profileForm = document.querySelector('[data-admin-daycare-profile]');
-  profileForm?.addEventListener('submit', (event) => {
+  profileForm?.addEventListener('submit', async (event) => {
     event.preventDefault();
     const settings = loadDaycareSettings();
     settings.serviceName = profileForm.elements.serviceName.value.trim();
     settings.serviceDescription = profileForm.elements.serviceDescription.value.trim();
-    localStorage.setItem(daycareSettingsKey, JSON.stringify(settings));
+    try { await saveDetails(settings); }
+    catch (error) { profileForm.querySelector('[data-admin-daycare-profile-feedback]').textContent = error.message; return; }
     void recordAdminAction('daycare_details_updated', 'service', 'pet_daycare');
     profileForm.querySelector('[data-admin-daycare-profile-feedback]').textContent = 'Daycare details saved and shown to customers.';
   });
 
   const form = document.querySelector('[data-admin-daycare-settings]');
   setupServiceAddOns({ serviceKey: 'daycare', settingsKey: daycareSettingsKey, loadSettings: loadDaycareSettings });
-  if (form) form.addEventListener('submit', (event) => {
+  if (form) form.addEventListener('submit', async (event) => {
     event.preventDefault();
     const prior = loadDaycareSettings();
     const passes = [...form.querySelectorAll('[data-daycare-pass-id]')].map((row) => {
@@ -62,14 +65,20 @@ export function setupAdminDaycare() {
     if (newPassName) passes.push({ id: `pass-${Date.now()}`, name: newPassName, sessions: Number(form.elements.newPassSessions.value), bonusSessions: Number(form.elements.newPassBonus.value), validityDays: Number(form.elements.newPassValidity.value), price: Number(form.elements.newPassPrice.value), description: form.elements.newPassDescription.value.trim(), active: true });
     if (Number(form.elements.smallMaxKg.value) >= Number(form.elements.mediumMaxKg.value)) { form.querySelector('[data-admin-daycare-feedback]').textContent = 'The medium tier maximum must be higher than the small tier maximum.'; return; }
     const settings = { ...prior, outlets: prior.outlets, openingTime: form.elements.openingTime.value, closingTime: form.elements.closingTime.value, capacity: Number(form.elements.capacity.value), bookingHorizonDays: Number(form.elements.bookingHorizonDays.value), smallMaxKg: Number(form.elements.smallMaxKg.value), mediumMaxKg: Number(form.elements.mediumMaxKg.value), closedDates: form.elements.closedDates.value.split('\n').map((value) => value.trim()).filter((value) => /^\d{4}-\d{2}-\d{2}$/.test(value)), hourlyRates: { small: Number(form.elements.hourlySmall.value), medium: Number(form.elements.hourlyMedium.value), large: Number(form.elements.hourlyLarge.value) }, dailyRates: { small: Number(form.elements.dailySmall.value), medium: Number(form.elements.dailyMedium.value), large: Number(form.elements.dailyLarge.value) }, voucher: { code: form.elements.voucherCode.value.trim().toUpperCase(), type: form.elements.voucherType.value, value: Number(form.elements.voucherValue.value), minimumSpend: Number(form.elements.voucherMinimumSpend.value), enabled: form.elements.voucherEnabled.checked }, passes };
-    localStorage.setItem(daycareSettingsKey, JSON.stringify(settings));
+    try { await saveDaycareSettings(settings); }
+    catch (error) { form.querySelector('[data-admin-daycare-feedback]').textContent = error.message; return; }
     void recordAdminAction('daycare_settings_updated', 'service', 'pet_daycare');
     form.querySelector('[data-admin-daycare-feedback]').textContent = 'Daycare settings saved for customer bookings.';
     window.setTimeout(() => { window.location.hash = '#admin-daycare'; }, 400);
   });
-  document.querySelectorAll('[data-daycare-delete-pass]').forEach((button) => button.addEventListener('click', () => {
+  document.querySelectorAll('[data-daycare-delete-pass]').forEach((button) => button.addEventListener('click', async () => {
     if (!window.confirm('Delete this daycare pass from the store? Existing passes remain in customer accounts.')) return;
-    const settings = loadDaycareSettings(); settings.passes = settings.passes.filter((item) => item.id !== button.dataset.daycareDeletePass); localStorage.setItem(daycareSettingsKey, JSON.stringify(settings)); void recordAdminAction('daycare_pass_removed', 'daycare_pass', button.dataset.daycareDeletePass); window.location.hash = '#admin-daycare';
+    const settings = loadDaycareSettings();
+    settings.passes = settings.passes.filter((item) => item.id !== button.dataset.daycareDeletePass);
+    try { await saveDaycareSettings(settings); }
+    catch (error) { window.alert(error.message); return; }
+    void recordAdminAction('daycare_pass_removed', 'daycare_pass', button.dataset.daycareDeletePass);
+    window.location.hash = '#admin-daycare';
   }));
   document.querySelectorAll('[data-delete-daycare-receipt]').forEach((button) => button.addEventListener('click', async () => {
     if (!window.confirm('Delete the uploaded receipt for this booking?')) return;

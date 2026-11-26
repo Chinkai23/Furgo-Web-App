@@ -1,3 +1,4 @@
+import { readSharedAppData } from '../app-data-sync.js';
 // Pet Hotel reservations and room inventory are shared between the customer and Admin Portal prototypes.
 import { getSharedOutletNames } from './outlet-directory.js';
 export const hotelSettingsKey = 'furgo-demo-hotel-settings';
@@ -33,7 +34,7 @@ export const defaultHotelSettings = {
 // Reads Admin-edited room, add-on, transport and voucher settings from this browser.
 export function loadHotelSettings() {
   try {
-    const saved = JSON.parse(localStorage.getItem(hotelSettingsKey) || 'null');
+    const saved = JSON.parse(readSharedAppData(hotelSettingsKey) || 'null');
     return {
       ...defaultHotelSettings,
       ...(saved && typeof saved === 'object' ? saved : {}),

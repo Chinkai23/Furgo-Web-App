@@ -1,11 +1,12 @@
+import { readSharedAppData } from '../app-data-sync.js';
 import { escapeHTML } from '../shared.js';
 
 export const promotionStorageKey = 'furgo-demo-promotions';
 export const maximumPromotions = 8;
 
-function loadBannerRecords() {
+export function loadBannerRecords() {
   try {
-    const records = JSON.parse(localStorage.getItem(promotionStorageKey) || '[]');
+    const records = JSON.parse(readSharedAppData(promotionStorageKey) || '[]');
     return Array.isArray(records) ? records : [];
   } catch { return []; }
 }

@@ -1,3 +1,4 @@
+import { readSharedAppData } from '../app-data-sync.js';
 import { escapeHTML } from '../shared.js';
 
 export const serviceBannersKey = 'furgo-demo-service-banners';
@@ -10,7 +11,7 @@ export const bannerServices = [
 
 export function loadServiceBanners() {
   try {
-    const data = JSON.parse(localStorage.getItem(serviceBannersKey) || '{}');
+    const data = JSON.parse(readSharedAppData(serviceBannersKey) || '{}');
     return data && typeof data === 'object' ? data : {};
   } catch { return {}; }
 }

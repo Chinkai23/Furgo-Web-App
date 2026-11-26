@@ -1,6 +1,6 @@
 import { escapeHTML } from '../shared.js';
 import { recordAdminAction } from '../admin-audit.js';
-import { saveSharedAppData } from '../app-data-sync.js';
+import { createSharedAppDataSaver } from '../app-data-sync.js';
 import { supabase } from '../supabase.js';
 import { bannerServices, loadServiceBanners, serviceBannerBucket, serviceBannersKey } from './service-banners.js';
 
@@ -74,6 +74,7 @@ export function setupAdminServiceBanners() {
       if (preview.src.startsWith('blob:')) URL.revokeObjectURL(preview.src);
       preview.src = URL.createObjectURL(file);
     });
+    const saveSettings = createSharedAppDataSaver(serviceBannersKey);
     form.addEventListener('submit', async (event) => {
       event.preventDefault();
       feedback.textContent = '';
@@ -82,10 +83,9 @@ export function setupAdminServiceBanners() {
       saveButton.textContent = 'Saving…';
       const serviceId = form.dataset.serviceBannerForm;
       const priorConfig = loadServiceBanners();
-      const priorBanners = priorConfig[serviceId] || [];
-      const removedPaths = [];
       const banners = [];
       const uploadedPaths = [];
+      let submitted = false;
       const rows = [...list.querySelectorAll('[data-service-banner-item]')];
       if (rows.length > 5) {
         feedback.textContent = 'A service can have up to five banners.';
@@ -94,15 +94,18 @@ export function setupAdminServiceBanners() {
         return;
       }
       try {
+        saveSettings.assertReady();
         for (const row of rows) {
           const desktopFile = row.querySelector('[name="bannerDesktop"]').files?.[0];
           const mobileFile = row.querySelector('[name="bannerMobile"]').files?.[0];
           const title = row.querySelector('[name="bannerTitle"]').value.trim();
           const caption = row.querySelector('[name="bannerCaption"]').value.trim();
           const id = row.dataset.bannerId || `banner-${crypto.randomUUID()}`;
+          saveSettings.assertReady();
           const desktop = await uploadBannerImage(serviceId, id, 'desktop', desktopFile);
-          const mobile = await uploadBannerImage(serviceId, id, 'mobile', mobileFile);
           if (desktop?.path) uploadedPaths.push(desktop.path);
+          saveSettings.assertReady();
+          const mobile = await uploadBannerImage(serviceId, id, 'mobile', mobileFile);
           if (mobile?.path) uploadedPaths.push(mobile.path);
           const desktopUrl = desktop?.url || row.dataset.desktopUrl || mobile?.url;
           const desktopPath = desktop?.path || row.dataset.desktopPath || mobile?.path;
@@ -113,24 +116,17 @@ export function setupAdminServiceBanners() {
             throw new Error('Choose a mobile-first image or website image for each banner before saving.');
           }
           banners.push({ id, title, caption, desktopUrl, desktopPath, mobileUrl: mobile?.url || row.dataset.mobileUrl || desktopUrl, mobilePath: mobile?.path || row.dataset.mobilePath || desktopPath });
-          if (desktop && row.dataset.desktopPath) removedPaths.push(row.dataset.desktopPath);
-          if (mobile && row.dataset.mobilePath) removedPaths.push(row.dataset.mobilePath);
         }
-        const retained = new Set(banners.map((banner) => banner.id));
-        for (const old of priorBanners) {
-          if (!retained.has(old.id)) { if (old.desktopPath) removedPaths.push(old.desktopPath); if (old.mobilePath) removedPaths.push(old.mobilePath); }
-        }
-        await saveSharedAppData(serviceBannersKey, { ...priorConfig, [serviceId]: banners });
-        if (removedPaths.length) {
-          const { error } = await supabase.storage.from(serviceBannerBucket).remove([...new Set(removedPaths)]);
-          if (error) console.warn('Old service banner images could not be removed:', error);
-        }
+        submitted = true;
+        await saveSettings({ ...priorConfig, [serviceId]: banners });
         void recordAdminAction('service_banners_updated', 'service', serviceId, { count: banners.length });
         feedback.textContent = `${banners.length} ${bannerServices.find((item) => item.id === serviceId)?.label || 'service'} banner${banners.length === 1 ? '' : 's'} saved.`;
         window.setTimeout(() => window.location.reload(), 500);
       } catch (error) {
-        if (uploadedPaths.length) {
+        // A lost RPC response can leave a committed document referencing these files.
+        if (!submitted && uploadedPaths.length) {
           try {
+            saveSettings.assertReady();
             const { error: cleanupError } = await supabase.storage.from(serviceBannerBucket).remove(uploadedPaths);
             if (cleanupError) console.warn('New service banner uploads could not be rolled back:', cleanupError);
           } catch (cleanupError) {

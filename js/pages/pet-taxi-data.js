@@ -1,3 +1,4 @@
+import { readSharedAppData } from '../app-data-sync.js';
 // Shared Pet Taxi pricing, pickup times, and route estimates for every customer service.
 export const petTaxiSettingsKey = 'furgo-demo-pet-taxi-settings';
 
@@ -17,7 +18,7 @@ export const defaultPetTaxiSettings = {
 // Reads the shared catalog, migrating the previous Grooming taxi setup as the initial source.
 export function loadPetTaxiSettings() {
   try {
-    const saved = JSON.parse(localStorage.getItem(petTaxiSettingsKey) || 'null');
+    const saved = JSON.parse(readSharedAppData(petTaxiSettingsKey) || 'null');
     if (saved && typeof saved === 'object') return {
       ...defaultPetTaxiSettings,
       ...saved,
@@ -25,7 +26,7 @@ export function loadPetTaxiSettings() {
       routes: (Array.isArray(saved.routes) ? saved.routes : defaultPetTaxiSettings.routes).map((route) => normalizeRoute(route, saved)),
     };
     const legacyGrooming = JSON.parse(localStorage.getItem('furgo-demo-grooming-settings') || 'null');
-    const legacyDaycare = JSON.parse(localStorage.getItem('furgo-demo-daycare-settings') || 'null');
+    const legacyDaycare = JSON.parse(readSharedAppData('furgo-demo-daycare-settings') || 'null');
     const routes = [...(legacyGrooming?.taxiRouteEstimates || defaultPetTaxiSettings.routes)].map((route) => normalizeRoute(route, {
       baseFare: legacyGrooming?.taxiBaseFare ?? defaultPetTaxiSettings.baseFare,
       farePerKm: legacyGrooming?.taxiPerKm ?? defaultPetTaxiSettings.farePerKm,

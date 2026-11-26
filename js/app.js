@@ -26,7 +26,7 @@ import { marketplaceSubscriptionsPage } from './pages/marketplace-subscriptions.
 import { petProfileEditPage } from './pages/pet-profile.js';
 import { petAvatarPage, petDataPage, petProfileAddCardPage, petProfileOverviewPage, petRecordPage, petReminderPage, petVaccinationPage, setupPetCarePages } from './pages/pet-care-pages.js';
 import { deletePetCareData, loadPetReminders, localPetDate, savePetRecord, savePetReminders } from './pages/pet-care-data.js';
-import { adminPromotionsPage, loadAnnouncements, loadPromotions, maximumPromotions, normalizePromotionDestination, promotionStorageKey } from './pages/admin-promotions.js';
+import { adminPromotionsPage, loadAnnouncements, loadBannerRecords, loadPromotions, maximumPromotions, normalizePromotionDestination, promotionStorageKey } from './pages/admin-promotions.js';
 import { adminPortalPage, setupAdminPortal } from './pages/admin.js';
 import { groomingBookingPage, groomingOrdersPage } from './pages/grooming.js';
 import { adminGroomingPage } from './pages/admin-grooming.js';
@@ -40,7 +40,7 @@ import { setupAdminServiceBanners } from './pages/admin-service-banners.js';
 import { setupServiceBannerCarousel } from './pages/service-banners.js';
 import { loadPetTaxiSettings, matchPetTaxiRoute, petTaxiRouteFare, petTaxiSettingsKey } from './pages/pet-taxi-data.js';
 import { setupPetTaxiAddressPicker } from './pages/pet-taxi-addresses.js';
-import { defaultGroomingSettings, groomingBookingsKey, groomingSettingsKey, groomingWeightTier, loadGroomingBookings, loadGroomingSettings } from './pages/grooming-data.js';
+import { groomingBookingsKey, groomingSettingsKey, groomingWeightTier, loadGroomingBookings, loadGroomingSettings } from './pages/grooming-data.js';
 import { myOrdersPage, setupMyOrders } from './pages/my-orders.js';
 import { adminOrdersPage, adminCurrentOrderPage, setupAdminOrders } from './pages/admin-orders.js';
 import { checkInPage, extractCheckInCode, formatCheckInToken, refreshCheckInTokens, setupCheckInInteractions } from './pages/check-in.js';
@@ -59,7 +59,8 @@ import { adminLocalFinderPage, setupAdminLocalFinder } from './pages/admin-local
 import { supabase, toMalaysianE164 } from './supabase.js';
 import { refreshSharedOutlets } from './pages/outlet-directory.js';
 import { recoverWarehouseStockRequest, submitWarehouseStockRequest } from './warehouse-stock.js';
-import { cacheSyncedRecords, clearMarketplaceOrderCache, loadCloudAppData, marketplaceCheckoutOwner, preserveBrowserMarketplaceHistory, refreshMarketplaceCatalogFromDatabase, saveSharedAppData, updateMarketplaceOrder } from './app-data-sync.js';
+import { createTrackingRefreshGuard, stopPortalRecovery, syncFailureMessage, watchPortalData } from './sync-recovery.js';
+import { captureCloudSession, reportSyncIssue, cacheSyncedRecords, createSharedAppDataSaver, loadCloudAppData, marketplaceCheckoutOwner, preserveBrowserMarketplaceHistory, refreshMarketplaceCatalogFromDatabase, refreshGroomingBookings, stopCloudAppData, updateMarketplaceOrder } from './app-data-sync.js';
 import { refreshFurgoCoinBalance } from './coin-wallet.js';
 import { startQRScanner } from './qr-scanner.js';
 import { adminSellerManagementPage, adminSellerPayoutFeePage, sellerPortalPage, setupAdminSellerManagement, setupAdminSellerPayoutFee, setupSellerPortal } from './pages/seller-portal.js';
@@ -70,6 +71,7 @@ import { adminFeeRulesPage, setupAdminFeeRules } from './pages/admin-fee-rules.j
 let supabaseAuthReady = false;
 let groomingQrSyncListenerInstalled = false;
 let activeSupabaseUserId = '';
+let sessionRestoreAttempt = 0;
 
 // Close any native modal popup when the user clicks outside its visible panel.
 document.addEventListener('click', (event) => {
@@ -132,8 +134,10 @@ async function listCloudPetAvatars(userId, petId) {
 }
 
 async function loadCloudPetProfiles(userId) {
+  const current = captureCloudSession();
   let { data, error } = await supabase.from('pet_profiles').select('*').eq('user_id', userId).order('created_at');
   if (error) throw error;
+  if (!current()) return;
   let cachedPets = [];
   try {
     const legacyPets = JSON.parse(localStorage.getItem(petProfilesStorageKey) || '[]');
@@ -152,6 +156,7 @@ async function loadCloudPetProfiles(userId) {
   if (ownedPets.length && !localStorage.getItem(backupKey)) localStorage.setItem(backupKey, JSON.stringify(ownedPets));
   if (!data?.length && ownedPets.length) {
     for (const pet of ownedPets) {
+      if (!current()) return [];
       const id = /^[0-9a-f]{8}-[0-9a-f-]{27}$/i.test(pet.id || '') ? pet.id : crypto.randomUUID();
       await saveCloudPet({ ...pet, id }, userId);
     }
@@ -181,6 +186,7 @@ async function loadCloudPetProfiles(userId) {
       activeAvatarIndex: avatars.length ? (cloudActiveAvatarIndex >= 0 ? cloudActiveAvatarIndex : null) : null,
     }, avatar);
   }));
+  if (!current()) return [];
   localStorage.setItem(petProfilesStorageKeyForCurrentUser(), JSON.stringify(pets));
   return pets;
 }
@@ -274,6 +280,7 @@ async function deleteCloudPet(petId, userId) {
 
 // Loads customer account records and their pet profiles for the Admin Portal only.
 async function loadCloudAdminCustomers() {
+  const current = captureCloudSession();
   const [{ data: profiles, error: profileError }, { data: controls, error: controlsError }, { data: petRows, error: petsError }, { data: roles, error: rolesError }] = await Promise.all([
     supabase.from('profiles').select('id,display_name,email,phone_e164,created_at'),
     supabase.from('account_controls').select('user_id,status,admin_note,updated_at'),
@@ -313,6 +320,7 @@ async function loadCloudAdminCustomers() {
       ownerEmail: owner.email, ownerPhone: owner.phone,
     };
   }));
+  if (!current()) return;
   localStorage.setItem('furgo-demo-customer-records', JSON.stringify(customers));
   localStorage.setItem('furgo-demo-admin-customer-pet-profiles', JSON.stringify(pets.filter(Boolean)));
 }
@@ -343,57 +351,12 @@ async function saveCloudGroomingSettings(settings, userId) {
   if (error) throw error;
 }
 
-async function loadCloudGroomingData(userId, role) {
-  const hasOperationsAccess = ['admin', 'staff', 'director', 'manager', 'executive', 'driver'].includes(role);
-  const [{ data: settingRow, error: settingsError }, bookingsResult] = await Promise.all([
-    supabase.from('service_settings').select('settings').eq('service_key', 'grooming').maybeSingle(),
-    hasOperationsAccess
-      ? supabase.from('grooming_bookings').select('*').order('created_at', { ascending: false })
-      : supabase.from('grooming_bookings').select('*').eq('user_id', userId).order('created_at', { ascending: false }),
-  ]);
-  if (settingsError) throw settingsError;
-  if (bookingsResult.error) throw bookingsResult.error;
-  const savedSettings = settingRow?.settings && Object.keys(settingRow.settings).length ? settingRow.settings : null;
-  if (savedSettings) localStorage.setItem(groomingSettingsKey, JSON.stringify(savedSettings));
-  else if (['admin', 'director', 'manager'].includes(role)) {
-    const localSettings = loadGroomingSettings();
-    await saveCloudGroomingSettings(localSettings, userId);
-  } else if (!localStorage.getItem(groomingSettingsKey)) {
-    localStorage.setItem(groomingSettingsKey, JSON.stringify(defaultGroomingSettings));
-  }
-  const localBookings = loadGroomingBookings();
-  const backupKey = `furgo-demo-grooming-bookings-backup-${userId}`;
-  if (localBookings.length && !localStorage.getItem(backupKey)) localStorage.setItem(backupKey, JSON.stringify(localBookings));
-  if (!bookingsResult.data?.length && role === 'customer' && localBookings.length) {
-    const profile = JSON.parse(sessionStorage.getItem('furgo-demo-user-profile') || '{}');
-    const email = String(profile.email || '').toLowerCase();
-    const phone = String(profile.phone || '').replace(/[\s-]/g, '');
-    const ownedBookings = localBookings.filter((booking) =>
-      (email && String(booking.customerEmail || '').toLowerCase() === email)
-      || (phone && String(booking.customerPhone || '').replace(/[\s-]/g, '') === phone));
-    for (const booking of ownedBookings) {
-      try { await createCloudGroomingBooking(booking, userId); }
-      catch (migrationError) { console.warn('A previous grooming booking could not be migrated:', migrationError); }
-    }
-    if (ownedBookings.length) {
-      const refreshed = await supabase.from('grooming_bookings').select('*').eq('user_id', userId).order('created_at', { ascending: false });
-      if (refreshed.error) throw refreshed.error;
-      bookingsResult.data = refreshed.data;
-    }
-  }
-  const bookings = (bookingsResult.data || []).map((row) => ({
-    ...(row.details || {}),
-    id: row.id,
-    userId: row.user_id,
-    reference: row.reference,
-    outlet: row.outlet,
-    date: row.appointment_date,
-    time: row.appointment_time,
-    status: row.status,
-    createdAt: row.created_at,
-  }));
-  cacheSyncedRecords(groomingBookingsKey, bookings);
-  return bookings;
+async function loadCloudGroomingSettings() {
+  const current = captureCloudSession();
+  const { data, error } = await supabase.from('service_settings').select('settings').eq('service_key', 'grooming').maybeSingle();
+  if (error) throw error;
+  if (!current()) return;
+  if (data?.settings) localStorage.setItem(groomingSettingsKey, JSON.stringify(data.settings));
 }
 
 // Stores prototype onboarding events and attribution locally for development review.
@@ -548,8 +511,9 @@ function friendlyAuthError(error) {
 // Section: Authentication identity
 // Function: Load the signed-in user's trusted role, profile, and account status from Supabase.
 async function loadSupabaseIdentity(user) {
-  if (marketplaceCheckoutOwner() !== user.id) clearMarketplaceOrderCache();
+  if (marketplaceCheckoutOwner() !== user.id) stopCloudAppData();
   activeSupabaseUserId = user.id;
+  const identityCurrent = captureCloudSession();
   const [{ data: roleRows, error: roleError }, { data: profile, error: profileError }, { data: account, error: accountError }, portalAccessResult, supplierAccessResult, sellerAccessResult] = await Promise.all([
     supabase.from('user_roles').select('role').eq('user_id', user.id),
     supabase.from('profiles').select('display_name,email,phone_e164').eq('id', user.id).maybeSingle(),
@@ -558,6 +522,7 @@ async function loadSupabaseIdentity(user) {
     supabase.from('marketplace_supplier_access').select('supplier_name').eq('supplier_user_id', user.id).maybeSingle(),
     supabase.rpc('seller_portal_has_access'),
   ]);
+  if (!identityCurrent() || activeSupabaseUserId !== user.id) throw new Error('The sign-in session changed.');
   if (roleError) throw roleError;
   if (profileError) throw profileError;
   if (accountError) throw accountError;
@@ -598,19 +563,19 @@ async function loadSupabaseIdentity(user) {
   try {
     await loadCloudAppData(user.id, role);
   } catch (error) {
-    // Existing features stay usable if the app-data migration has not been applied yet.
-    console.warn('Supabase shared app data is not ready yet; using this browser’s saved data:', error);
+    reportSyncIssue(syncFailureMessage(error));
   }
+  if (activeSupabaseUserId !== user.id) return snapshot;
   if (role === 'director') {
     try { await loadCloudAdminCustomers(); }
     catch (error) { console.warn('Could not load customer management records from Supabase:', error); }
   }
   await loadCloudPetProfiles(user.id);
   try {
-    await loadCloudGroomingData(user.id, role);
+    await loadCloudGroomingSettings();
   } catch (error) {
     // Keep the already-working sign-in available until the user applies the grooming migration.
-    console.warn('Supabase grooming tables are not ready yet; using this browser’s saved schedule:', error);
+    reportSyncIssue(syncFailureMessage(error));
   }
   return snapshot;
 }
@@ -618,8 +583,10 @@ async function loadSupabaseIdentity(user) {
 // Section: Authentication state restoration
 // Function: Restore the Supabase session before routing to protected portal pages.
 async function initializeSupabaseSession() {
+  const attempt = ++sessionRestoreAttempt;
   try {
     const { data, error } = await supabase.auth.getSession();
+    if (attempt !== sessionRestoreAttempt) return;
     if (error) throw error;
     if (data.session?.user) await loadSupabaseIdentity(data.session.user);
     else {
@@ -630,16 +597,19 @@ async function initializeSupabaseSession() {
       sessionStorage.removeItem('furgo-demo-user-profile');
     }
   } catch (error) {
+    if (attempt !== sessionRestoreAttempt) return;
     sessionStorage.removeItem('furgo-demo-auth');
     sessionStorage.removeItem('furgo-demo-profile-complete');
     sessionStorage.removeItem('furgo-demo-user-role');
     sessionStorage.removeItem('furgo-demo-user-profile');
-    console.error('Could not restore Furgo Supabase session:', error);
+    reportSyncIssue(syncFailureMessage(error));
   } finally {
-    supabaseAuthReady = true;
-    const initialPage = window.location.hash.replace('#', '').split('?')[0];
-    if (!initialPage || initialPage === 'home') showSplash();
-    else render();
+    if (attempt === sessionRestoreAttempt) {
+      supabaseAuthReady = true;
+      const initialPage = window.location.hash.replace('#', '').split('?')[0];
+      if (!initialPage || initialPage === 'home') showSplash();
+      else render();
+    }
   }
 }
 
@@ -2698,9 +2668,10 @@ function setupAdminMarketplace() {
     });
   }
   // Shipping and Furgo Voucher settings save independently so each can be managed on its own.
+  const saveOfferSettings = createSharedAppDataSaver(marketplaceOfferSettingsKey);
   const saveMarketplaceSettings = async (settings, feedback, successMessage, actionKey) => {
     try {
-      await saveSharedAppData(marketplaceOfferSettingsKey, settings, { notify: false });
+      await saveOfferSettings(settings);
       void recordAdminAction('marketplace_offer_settings_updated', 'marketplace', actionKey);
       feedback.textContent = successMessage;
       feedback.className = 'admin-market-offer-feedback success';
@@ -2801,7 +2772,7 @@ function setupAdminMarketplace() {
       if (!voucher || !window.confirm(`Delete the ${voucher.code} Furgo voucher?`)) return;
       settings.furgoVouchers = settings.furgoVouchers.filter((entry) => String(entry.id) !== String(voucher.id));
       settings.voucher = settings.furgoVouchers[0] || { ...settings.voucher, enabled: false };
-      const feedback = offerForm.querySelector('[data-admin-offer-feedback]');
+      const feedback = offerForm.querySelector('[data-market-offer-feedback]');
       if (!await saveMarketplaceSettings(settings, feedback, 'Furgo voucher deleted.', 'furgo-voucher')) return;
       void recordAdminAction('marketplace_furgo_voucher_deleted', 'marketplace', voucher.id || voucher.code);
       if (offerForm?.elements.voucherId.value === String(voucher.id || '')) resetFurgoVoucherForm(true);
@@ -2987,6 +2958,9 @@ let recoverWarehouseStockOnReconnect;
 
 function setupMarketplaceSupplierPortal() {
   setupPortalNotifications();
+  const storeRoot = document.querySelector('.supplier-portal-page');
+  const sessionCurrent = captureCloudSession();
+  const storeCurrent = () => sessionCurrent() && Boolean(storeRoot?.isConnected);
   const supplierProfile = (() => {
     let profile = {};
     let context = null;
@@ -3048,6 +3022,7 @@ function setupMarketplaceSupplierPortal() {
     return data;
   };
   let refreshWarehouseInventory = null;
+  const trackingRefresh = createTrackingRefreshGuard();
   let renderPackagingOrders = () => {};
   const supplierProfileForm = document.querySelector('[data-supplier-profile-form]');
   if (supplierProfileForm) {
@@ -3613,13 +3588,16 @@ function setupMarketplaceSupplierPortal() {
       select.innerHTML = `<option value="">${variants.length ? 'Choose an option' : 'Choose a warehouse product first'}</option>${variants.map((variant) => `<option value="${escapeHTML(variant.id || variant.label)}"${String(variant.id || variant.label) === String(selected) ? ' selected' : ''}>${escapeHTML(variant.label || 'Standard')}</option>`).join('')}`;
       select.disabled = !variants.length;
     };
+    let warehouseProductsRead = 0;
     const refreshWarehouseProducts = async (force = false) => {
       if (productsLoaded && !force) return warehouseProducts;
+      const read = ++warehouseProductsRead;
       const owners = warehouseOwnerIds();
       let productQuery = supabase.from('warehouse_products').select('id,name,product_data,marketplace_product_id').order('name');
       if (supplierProfile.directorStoreView) productQuery = owners.length ? productQuery.in('created_by', owners) : null;
       const { data, error } = productQuery ? await productQuery : { data: [], error: null };
       if (error) throw error;
+      if (!storeCurrent() || read !== warehouseProductsRead) return warehouseProducts;
       warehouseProducts = data || [];
       productsLoaded = true;
       const categoryFilter = inventorySection.querySelector('[data-inventory-category-filter]');
@@ -3702,6 +3680,7 @@ function setupMarketplaceSupplierPortal() {
       || String(a.created_at || '').localeCompare(String(b.created_at || ''))
       || String(a.id).localeCompare(String(b.id)));
     renderPackagingOrders = () => {
+      if (trackingRefresh.active()) return;
       if (!packagingTarget) return;
       const paidOrders = supplierOrders.filter((order) => String(order.paymentStatus || '').toLowerCase() === 'paid');
       const readyOrders = paidOrders.filter((order) => matchesSupplierOrderStatus(order, 'received'))
@@ -4374,9 +4353,11 @@ function setupMarketplaceSupplierPortal() {
           ?.scrollIntoView({ behavior: 'smooth', block: 'center' }));
       }
     };
-    refreshWarehouseInventory = async () => {
-      if (!inventorySection || inventoryLoaded) return;
-      inventoryList.innerHTML = '<p class="supplier-empty">Loading warehouse inventory…</p>';
+    let inventoryRead = 0;
+    refreshWarehouseInventory = async (force = false) => {
+      if (!storeCurrent() || !inventorySection || (inventoryLoaded && !force)) return;
+      const read = ++inventoryRead;
+      if (!inventoryLoaded) inventoryList.innerHTML = '<p class="supplier-empty">Loading warehouse inventory…</p>';
       try {
         // Store Portal data is fetched once during page initialization. Re-fetching
         // the full catalog, submissions, and orders here made Inventory wait on
@@ -4406,10 +4387,13 @@ function setupMarketplaceSupplierPortal() {
         setInventoryFeedback(detail, true);
         throw error;
       }
+      if (!storeCurrent() || read !== inventoryRead) return;
       inventoryRows = data || [];
+      if (!inventoryLoaded) {
+        inventoryForm.elements.received_on.value = localPetDate();
+        syncBatchNumber(inventoryForm);
+      }
       inventoryLoaded = true;
-      inventoryForm.elements.received_on.value = localPetDate();
-      syncBatchNumber(inventoryForm);
       renderInventory();
       renderPackagingOrders();
     };
@@ -5181,7 +5165,10 @@ function setupMarketplaceSupplierPortal() {
     renderSupplierVariantRows(readSupplierVariantRows());
     setSupplierFeedback('Photo changed. Save the product to apply photo changes.');
   });
+  let supplierPortalRead = 0;
   const refreshSupplierPortal = async () => {
+    const read = ++supplierPortalRead;
+    const canApplyOrders = trackingRefresh.capture();
     const submissionsTarget = document.querySelector('[data-supplier-products]');
     const ordersTarget = document.querySelector('[data-supplier-orders]');
     const editPageTarget = document.querySelector('[data-marketplace-supplier-product]');
@@ -5207,6 +5194,7 @@ function setupMarketplaceSupplierPortal() {
             .select('variant,quantity')
             .eq('warehouse_product_id', warehouseProductId);
           if (lotError) throw lotError;
+          if (!storeCurrent()) return;
           const stockByVariant = (productLots || []).reduce((totals, lot) => {
             const key = String(lot.variant || 'Standard');
             totals[key] = (totals[key] || 0) + (Number(lot.quantity) || 0);
@@ -5229,6 +5217,7 @@ function setupMarketplaceSupplierPortal() {
         ? supabase.rpc('get_marketplace_supplier_orders')
         : Promise.resolve({ data: [], error: null }),
     ]);
+    if (!storeCurrent() || read !== supplierPortalRead) return;
     if (catalogResult.error) throw catalogResult.error;
     if (ordersResult.error) throw ordersResult.error;
     supplierSubmissions = [];
@@ -5283,6 +5272,10 @@ function setupMarketplaceSupplierPortal() {
         }, {});
         if (!openWarehouseProductEditor(warehouseProduct, { stockTotal: (productLots || []).reduce((sum, lot) => sum + (Number(lot.quantity) || 0), 0), stockByVariant })) setSupplierFeedback('This warehouse product could not be found.', true);
       }
+    }
+    if (!canApplyOrders()) {
+      if (submissionsTarget) renderSupplierProductList();
+      return;
     }
     supplierOrders = (ordersResult.data || []).map((row) => row.order_details || row);
     const paidMarketplaceOrders = supplierOrders.filter((order) => String(order.paymentStatus || '').toLowerCase() === 'paid');
@@ -5666,29 +5659,46 @@ function setupMarketplaceSupplierPortal() {
       showCopied(copied ? 'Recipient details copied.' : 'Could not copy recipient details.');
     }
   });
+  packagingTarget?.addEventListener('input', (event) => {
+    const form = event.target.closest('[data-supplier-shipping-form]');
+    if (form) trackingRefresh.open(form);
+  });
   packagingTarget?.addEventListener('submit', async (event) => {
     const form = event.target.closest('[data-supplier-shipping-form]');
     if (!form) return;
     event.preventDefault();
     if (!form.reportValidity()) return;
     const submit = form.querySelector('[type="submit"]');
+    if (submit.disabled) return;
+    trackingRefresh.open(form);
     submit.disabled = true;
     setShipmentFeedback('Saving shipment details…');
     const shipmentAction = form.dataset.shipmentAction || 'ship';
     const wasReadyToShip = shipmentAction === 'edit_tracking'
       && supplierOrders.some((order) => String(order.id) === String(form.dataset.supplierShippingForm)
         && String(order.supplierShipment?.status || '').toLowerCase() === 'ready to ship');
-    const { error } = await supabase.rpc('update_marketplace_supplier_shipment', {
-      p_order_id: form.dataset.supplierShippingForm,
-      p_action: shipmentAction,
-      p_courier: form.elements.courier.value.trim(),
-      p_tracking_number: form.elements.trackingNumber.value.trim(),
-      p_tracking_url: form.elements.trackingUrl.value.trim(),
-    });
+    let error;
+    try {
+      ({ error } = await supabase.rpc('update_marketplace_supplier_shipment', {
+        p_order_id: form.dataset.supplierShippingForm,
+        p_action: shipmentAction,
+        p_courier: form.elements.courier.value.trim(),
+        p_tracking_number: form.elements.trackingNumber.value.trim(),
+        p_tracking_url: form.elements.trackingUrl.value.trim(),
+      }));
+    } catch (failure) { error = failure; }
+    if (!storeCurrent()) return;
     if (error) {
       submit.disabled = false;
       setShipmentFeedback(error.message || 'Shipment details could not be saved.', true);
       return;
+    }
+    trackingRefresh.close(form);
+    submit.disabled = false;
+    if (shipmentAction === 'edit_tracking') {
+      form.hidden = true;
+      const editButton = form.closest('.supplier-packaging-order')?.querySelector('[data-supplier-edit-tracking]');
+      if (editButton) editButton.hidden = false;
     }
     setShipmentFeedback(shipmentAction === 'edit_tracking' ? 'Corrected tracking details saved.' : 'Tracking saved. The parcel is awaiting courier pickup.');
     try {
@@ -5949,6 +5959,7 @@ function setupMarketplaceSupplierPortal() {
       const orderCard = editTrackingButton.closest('.supplier-packaging-order');
       const form = orderCard?.querySelector('[data-shipment-action="edit_tracking"]');
       if (form) {
+        trackingRefresh.open(form);
         form.hidden = false;
         editTrackingButton.hidden = true;
         form.elements.courier.focus();
@@ -5957,36 +5968,46 @@ function setupMarketplaceSupplierPortal() {
     }
     const cancelTrackingEdit = event.target.closest('[data-supplier-cancel-tracking-edit]');
     if (cancelTrackingEdit) {
-      const form = cancelTrackingEdit.closest('[data-shipment-action="edit_tracking"]');
-      if (form) {
-        form.hidden = true;
+      const form = cancelTrackingEdit.closest('[data-supplier-shipping-form]');
+      if (form && !form.querySelector('[type="submit"]')?.disabled) {
+        form.reset();
+        if (form.dataset.shipmentAction === 'edit_tracking') form.hidden = true;
+        trackingRefresh.close(form);
         const orderCard = form.closest('.supplier-packaging-order');
         const editButton = orderCard?.querySelector('[data-supplier-edit-tracking]');
         if (editButton) editButton.hidden = false;
+        void refreshSupplierPortal().catch(() => {
+          if (storeCurrent()) setShipmentFeedback('Tracking edit cancelled. Reload to refresh the order list.', true);
+        });
       }
       return;
     }
   });
-  if (supplierForm || supplierProductListTarget || ordersTarget || packagingTarget) {
-    void refreshSupplierPortal().then(() => {
-      if (document.querySelector('[data-supplier-section="inventory"]')) return refreshWarehouseInventory?.();
-      return undefined;
-    }).catch((error) => {
-      console.error('Store portal data could not load:', error);
-      setSupplierFeedback(error.message ? `Store data could not load: ${error.message}` : 'Store data could not load. Check your connection and Store Portal access.', true);
-      document.querySelectorAll('[data-supplier-products], [data-supplier-orders], [data-packaging-orders]').forEach((node) => { node.innerHTML = '<p>Store data is temporarily unavailable.</p>'; });
+  if (storeRoot && (supplierForm || supplierProductListTarget || ordersTarget || packagingTarget)) {
+    const status = document.createElement('p');
+    status.setAttribute('role', 'status');
+    status.hidden = true;
+    storeRoot.prepend(status);
+    const report = (message) => {
+      status.textContent = message;
+      status.hidden = !message;
+    };
+    watchPortalData({
+      client: supabase,
+      root: storeRoot,
+      tables: ['app_data', 'marketplace_item_returns', 'portal_notifications'],
+      isCurrent: sessionCurrent,
+      report,
+      needsStockRefresh: () => Boolean(storeRoot.querySelector('[data-supplier-section="inventory"]:not([hidden])')),
+      refresh: async (_groups, current) => {
+        // Keep a submitted or open editor attached to its original baseline.
+        if (storeRoot.querySelector('dialog[open]')) return;
+        await refreshSupplierPortal();
+        const inventory = storeRoot.querySelector('[data-supplier-section="inventory"]');
+        if (current() && inventory && !inventory.hidden) await refreshWarehouseInventory?.(true);
+        if (current()) report('');
+      },
     });
-    if (document.documentElement.dataset.marketplaceSupplierReturnRealtime !== 'true') {
-      document.documentElement.dataset.marketplaceSupplierReturnRealtime = 'true';
-      supabase.channel('marketplace-supplier-return-updates')
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'marketplace_item_returns' }, () => {
-          void refreshSupplierPortal().catch((error) => setShipmentFeedback(error.message || 'Return updates could not be refreshed.', true));
-        })
-        .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'portal_notifications' }, () => {
-          void refreshSupplierPortal().catch((error) => setSupplierFeedback(error.message || 'Product status could not refresh.', true));
-        })
-        .subscribe();
-    }
   }
 
   const supplierOverview = document.querySelector('[data-marketplace-supplier-access-list]');
@@ -6072,6 +6093,7 @@ async function preparePromotionBanner(file, width, height) {
 function setupAdminPromotionsForm() {
   const forms = document.querySelectorAll('[data-admin-banner-form]');
   if (!forms.length) return;
+  const saveBanners = createSharedAppDataSaver(promotionStorageKey);
   const maximumImageSize = 2 * 1024 * 1024;
   const supportedImageTypes = new Set(['image/png', 'image/jpeg', 'image/webp']);
   forms.forEach((form) => {
@@ -6150,26 +6172,28 @@ function setupAdminPromotionsForm() {
         image,
         ...(mobileImage ? { mobileImage } : {}),
       };
-      const allBanners = [...loadPromotions(), ...loadAnnouncements(), banner];
-      localStorage.setItem(promotionStorageKey, JSON.stringify(allBanners));
+      const allBanners = [...loadBannerRecords(), banner];
+      await saveBanners(allBanners);
       void recordAdminAction(isAnnouncement ? 'announcement_uploaded' : 'promotion_uploaded', isAnnouncement ? 'announcement' : 'promotion', banner.id, { title: banner.title });
       previewUrls.forEach((url) => URL.revokeObjectURL(url));
       render();
-    } catch {
-      feedback.textContent = 'The banner could not be processed or saved. Try a supported image under 2 MB.';
+    } catch (error) {
+      feedback.textContent = error.message || 'The banner could not be processed or saved.';
       feedback.classList.add('visible');
     }
     });
   });
 
-  document.querySelector('.admin-promotions-page, .admin-local-finder-page')?.addEventListener('click', (event) => {
+  document.querySelector('.admin-promotions-page, .admin-local-finder-page')?.addEventListener('click', async (event) => {
     const deleteButton = event.target.closest('[data-delete-promotion], [data-delete-announcement]');
     if (!deleteButton) return;
     const isAnnouncement = deleteButton.hasAttribute('data-delete-announcement');
     const id = deleteButton.dataset.deleteAnnouncement || deleteButton.dataset.deletePromotion;
-    const removed = [...loadPromotions(), ...loadAnnouncements()].find((item) => item.id === id);
-    const remaining = [...loadPromotions(), ...loadAnnouncements()].filter((item) => item.id !== id);
-    localStorage.setItem(promotionStorageKey, JSON.stringify(remaining));
+    const records = loadBannerRecords();
+    const removed = records.find((item) => item.id === id);
+    const remaining = records.filter((item) => item.id !== id);
+    try { await saveBanners(remaining); }
+    catch (error) { window.alert(error.message); return; }
     if (removed) void recordAdminAction(isAnnouncement ? 'announcement_removed' : 'promotion_removed', isAnnouncement ? 'announcement' : 'promotion', removed.id, { title: removed.title });
     render();
   });
@@ -6663,7 +6687,7 @@ function setupGroomingBooking() {
         feedback.classList.add('visible');
         refreshSlots();
         if (error?.code === '23505' && authData.user) {
-          void loadCloudGroomingData(authData.user.id, 'customer').then(refreshSlots).catch((loadError) => console.error('Could not refresh grooming availability:', loadError));
+          void refreshGroomingBookings(authData.user.id, 'customer').then(refreshSlots).catch((loadError) => console.error('Could not refresh grooming availability:', loadError));
         }
         return;
       }
@@ -7460,7 +7484,7 @@ function wireForms() {
 
   document.querySelectorAll('[data-logout]').forEach((button) => button.addEventListener('click', (event) => {
     event.preventDefault();
-    clearMarketplaceOrderCache();
+    stopCloudAppData();
     void supabase.auth.signOut().finally(() => {
       sessionStorage.removeItem('furgo-demo-auth');
       sessionStorage.removeItem('furgo-customer-portal-view');
@@ -7878,6 +7902,7 @@ async function render({ preserveScroll = false } = {}) {
   }
   const renderPage = pageRenderers[page] || homePage;
   document.title = titles[page] || titles.home;
+  stopPortalRecovery();
   document.querySelector('#app').innerHTML = page === 'admin-marketplace-products'
     ? adminMarketplaceProductsPage(adminCatalogLoadMessage)
     : renderPage();
@@ -7984,10 +8009,29 @@ window.addEventListener('storage', (event) => {
   if (event.key === 'furgo-service-outlet-directory' || /furgo-demo-(grooming-bookings|hotel-bookings|hotel-settings|pet-hotel-bookings|daycare-bookings|daycare-settings|pet-daycare-bookings|daycare-orders|check-in-tokens|driver-locations|customer-records|help-center-details|support-requests|marketplace-orders|marketplace-products|marketplace-offers|promotions|service-banners|marketplace-cart|marketplace-subscription-cart|marketplace-favorites|local-finder-favorites|addresses|payment-methods|credit-balance|credit-transactions|daycare-passes)/.test(event.key || '')) render();
 });
 
+window.addEventListener('furgo-sync-status', (event) => {
+  const status = document.querySelector('#furgo-sync-status');
+  status.textContent = event.detail || '';
+  status.hidden = !event.detail;
+});
+window.addEventListener('furgo-cloud-reconciled', () => {
+  if (!document.querySelector('.supplier-portal-page, [data-seller-portal], dialog[open]')
+      && !document.activeElement?.matches('input, select, textarea, [contenteditable="true"]')) void render();
+});
 supabase.auth.onAuthStateChange((event, session) => {
-  if (event === 'SIGNED_OUT' || (session?.user && session.user.id !== marketplaceCheckoutOwner())) {
-    clearMarketplaceOrderCache();
-    if (event === 'SIGNED_OUT') window.setTimeout(() => { if (document.querySelector('.my-orders-page, .admin-portal-page')) render(); }, 0);
+  const switched = session?.user && activeSupabaseUserId && session.user.id !== activeSupabaseUserId;
+  if (event !== 'SIGNED_OUT' && !switched) return;
+  activeSupabaseUserId = '';
+  sessionRestoreAttempt += 1;
+  stopCloudAppData();
+  reportSyncIssue('');
+  for (const key of ['furgo-demo-auth', 'furgo-demo-user-profile', 'furgo-demo-user-role', 'furgo-demo-profile-complete', 'furgo-director-store-context', 'furgo-customer-portal-view']) {
+    sessionStorage.removeItem(key);
   }
+  document.querySelector('#app').replaceChildren();
+  window.setTimeout(() => {
+    if (switched) void initializeSupabaseSession();
+    else { window.location.hash = '#login'; void render(); }
+  }, 0);
 });
 void initializeSupabaseSession();

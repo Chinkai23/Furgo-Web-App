@@ -1,3 +1,4 @@
+import { createSharedAppDataSaver } from '../app-data-sync.js';
 import { escapeHTML } from '../shared.js';
 import { supabase } from '../supabase.js';
 import { recordAdminAction } from '../admin-audit.js';
@@ -25,6 +26,7 @@ export function setupServiceAddOns({ serviceKey, settingsKey, loadSettings, clou
   const form = document.querySelector(`[data-service-addon-form="${serviceKey}"]`);
   if (!form) return;
   const feedback = form.querySelector('[data-service-addon-feedback]');
+  const saveSettings = cloudSync ? null : createSharedAppDataSaver(settingsKey);
   form.addEventListener('click', (event) => {
     const button = event.target.closest('[data-addon-delete]');
     if (!button) return;
@@ -55,7 +57,8 @@ export function setupServiceAddOns({ serviceKey, settingsKey, loadSettings, clou
           if (error) throw error;
         }
       }
-      localStorage.setItem(settingsKey, JSON.stringify(updated));
+      if (saveSettings) await saveSettings(updated);
+      else localStorage.setItem(settingsKey, JSON.stringify(updated));
       void recordAdminAction('service_addons_updated', 'service_addons', serviceKey, { count: addOns.length });
       feedback.textContent = `${serviceTitleFor(serviceKey)} add-ons saved.`;
       window.setTimeout(() => window.dispatchEvent(new Event('hashchange')), 350);
